@@ -39,11 +39,14 @@ CMakeUserPresets.json
 # from their own distribution
 # ---------------------------------------------------------------------------
 
-# The prebuilt Windows OpenCV 4.5.1: bin/ is ~200 MB of .dll/.lib and include/
+# The prebuilt Windows OpenCV 4.5.1: bin/ is ~160 MB of .dll/.lib and include/
 # is 300+ upstream headers. Windows builds expect it unpacked at this path (see
 # the OpenCV section of CMakeLists.txt); every other platform uses
 # find_package(OpenCV) against a system install and needs none of it.
-graphics/CTD26-main/OpenCV_451/
+third_party/
+
+# Generated reference and test reports -- rebuilt from the source, not source.
+docs/
 
 # Sound files not wired to any cue -- see sounds/README.txt for the four names
 # the game actually plays. Kept locally as spares, not worth versioning.

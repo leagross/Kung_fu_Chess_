@@ -25,8 +25,6 @@ rooms and spectators.
 | `ui/` | OpenCV rendering, sprite animation, mouse input, and the networked client. | [ui/README.md](ui/README.md) |
 | `assets/` | Piece sprites, board and background images, sound effects. | [assets/README.md](assets/README.md) |
 | `config/` | `gameplay.json` — the speeds, cooldowns and piece values both sides read. | — |
-| `docs/` | Generated reference and test reports. | — |
-| `legacy/` | The original CTD26 graphics demo, kept for reference. Not built. | — |
 
 Dependencies point one way only: `ui` and `server` depend on `protocol` and
 `logic`; `server` depends on `database`; `logic` depends on nothing. That is why
@@ -45,7 +43,8 @@ automatically by CMake — nothing to install by hand.
 differs per platform:
 
 - **Windows** — unpack the prebuilt OpenCV 4.5.1 "world" build to
-  `graphics/CTD26-main/OpenCV_451/`. It is not committed (see `.gitignore`).
+  `third_party/OpenCV_451/`, so that `third_party/OpenCV_451/bin/` holds
+  `opencv_world451.dll` and its `.lib`. It is not committed (see `.gitignore`).
 - **Linux / macOS** — install it (`sudo apt install libopencv-dev`, or
   `brew install opencv`). CMake finds it with `find_package`.
 

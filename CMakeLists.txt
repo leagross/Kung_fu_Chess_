@@ -54,15 +54,15 @@ FetchContent_MakeAvailable(SQLiteCpp)
 # not, so that choice is made here and every target below just links `kfc_opencv`
 # without caring which branch produced it.
 #
-#   Windows -- the prebuilt "world" build vendored under graphics/CTD26-main/
-#              OpenCV_451. It ships no OpenCVConfig.cmake, so find_package can't
-#              see it; it is wrapped as one IMPORTED target instead of repeating
-#              raw include/lib paths on every target that needs it.
+#   Windows -- the prebuilt "world" build unpacked under third_party/OpenCV_451
+#              (not committed -- see .gitignore). It ships no OpenCVConfig.cmake,
+#              so find_package can't see it; it is wrapped as one IMPORTED target
+#              instead of repeating raw include/lib paths on every target.
 #   Anything else -- the system OpenCV (apt install libopencv-dev, brew install
 #              opencv, ...), found the ordinary way. Nothing is vendored,
 #              because those platforms have a real package for it.
 if (WIN32)
-set(OPENCV_451_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/graphics/CTD26-main/OpenCV_451)
+set(OPENCV_451_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCV_451)
 add_library(opencv_world451 SHARED IMPORTED)
 set_target_properties(opencv_world451 PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES    "${OPENCV_451_ROOT}/include"

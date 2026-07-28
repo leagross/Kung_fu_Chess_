@@ -4,6 +4,7 @@
 
 #include <SQLiteCpp/Database.h>
 #include <SQLiteCpp/Statement.h>
+#include <SQLiteCpp/Transaction.h>
 
 #include "kfc/database/elo.hpp"
 #include "kfc/database/sha256.hpp"
@@ -68,8 +69,7 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
     return AuthOutcome{true, "", kStartingRating, true};
 }
 
-std::optional<int> UserRepository::rating_of(const std::string& username) {
-    std::lock_guard<std::mutex> guard(mutex_);
+std::optional<int> UserRepository::read_rating(const std::string& username) {
     SQLite::Statement query(*db_, "SELECT rating FROM users WHERE username = ?");
     query.bind(1, username);
     if (query.executeStep()) {
@@ -78,12 +78,58 @@ std::optional<int> UserRepository::rating_of(const std::string& username) {
     return std::nullopt;
 }
 
-void UserRepository::set_rating(const std::string& username, int rating) {
-    std::lock_guard<std::mutex> guard(mutex_);
+void UserRepository::write_rating(const std::string& username, int rating) {
     SQLite::Statement update(*db_, "UPDATE users SET rating = ? WHERE username = ?");
     update.bind(1, rating);
     update.bind(2, username);
     update.exec();
+}
+
+std::optional<int> UserRepository::rating_of(const std::string& username) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return read_rating(username);
+}
+
+void UserRepository::set_rating(const std::string& username, int rating) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    write_rating(username, rating);
+}
+
+bool UserRepository::rerate_pair(const std::string& first, const std::string& second,
+                                 const std::function<std::pair<int, int>(int, int)>& compute) {
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    // The lock is what makes this atomic against our own threads. The
+    // transaction is what makes the *pair* of writes all-or-nothing against a
+    // crash, and against any other connection to the same file: half an ELO
+    // exchange on disk would be points created or destroyed, permanently.
+    SQLite::Transaction transaction(*db_);
+
+    std::optional<int> before_first = read_rating(first);
+    std::optional<int> before_second = read_rating(second);
+    if (!before_first.has_value() || !before_second.has_value()) {
+        return false;  // rolled back by ~Transaction -- nothing was written yet
+    }
+
+    auto [after_first, after_second] = compute(*before_first, *before_second);
+    write_rating(first, after_first);
+    write_rating(second, after_second);
+    transaction.commit();
+    return true;
+}
+
+bool UserRepository::rerate(const std::string& username, const std::function<int(int)>& compute) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    SQLite::Transaction transaction(*db_);
+
+    std::optional<int> before = read_rating(username);
+    if (!before.has_value()) {
+        return false;
+    }
+
+    write_rating(username, compute(*before));
+    transaction.commit();
+    return true;
 }
 
 }  // namespace kfc::database

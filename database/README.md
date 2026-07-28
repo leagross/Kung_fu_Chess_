@@ -31,6 +31,21 @@ different hashes, and the stored value cannot be read back into a password.
 holds account data. Every machine builds its own from empty — delete it to reset
 all accounts and ratings.
 
+## A result is applied in one step, not four
+
+Every rating change is a read-modify-write, and each match has its own tick
+thread, so two games can finish at the same instant and report into this one
+store. Written as "read both ratings, compute, write both back", two of those
+landing together lose one result entirely — the second write is computed from a
+rating the first already replaced, and points appear from nowhere or vanish.
+
+So the read, the arithmetic and the writes happen inside the store, in one
+transaction, with its lock held throughout: `UserRepository::rerate_pair` and
+`rerate` take the ELO calculation as a callback rather than handing the ratings
+out and trusting the caller to put them back. The lock is what makes it atomic
+against our own threads; the transaction is what makes the *pair* of writes
+all-or-nothing against a crash — half an exchange on disk would be permanent.
+
 ## Why ELO lives here
 
 A rating is a stored fact, so the maths that decides the next one belongs with

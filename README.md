@@ -10,7 +10,7 @@ layers that each build and test on their own. Play is local (one keyboard) or
 networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators.
 
-**336 tests** cover the logic, protocol, database and server.
+**338 tests** cover the logic, protocol, database and server.
 
 ---
 

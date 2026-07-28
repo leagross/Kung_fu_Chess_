@@ -61,8 +61,17 @@ FetchContent_MakeAvailable(SQLiteCpp)
 #   Anything else -- the system OpenCV (apt install libopencv-dev, brew install
 #              opencv, ...), found the ordinary way. Nothing is vendored,
 #              because those platforms have a real package for it.
+#
+# Optional on purpose. Only the GUI needs it, so a machine without it (a CI
+# runner, or anyone who just wants the server) still configures and builds the
+# whole backend and the entire test suite -- which is the point of keeping
+# kfc_core/protocol/database/server free of it. When it is missing the GUI
+# targets are simply not defined; nothing fails at configure time.
+set(KFC_HAVE_OPENCV FALSE)
 if (WIN32)
 set(OPENCV_451_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCV_451)
+if (EXISTS "${OPENCV_451_ROOT}/include/opencv2/opencv.hpp")
+set(KFC_HAVE_OPENCV TRUE)
 add_library(opencv_world451 SHARED IMPORTED)
 set_target_properties(opencv_world451 PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES    "${OPENCV_451_ROOT}/include"
@@ -77,11 +86,24 @@ set_target_properties(opencv_world451 PROPERTIES
 )
 add_library(kfc_opencv INTERFACE)
 target_link_libraries(kfc_opencv INTERFACE opencv_world451)
+endif()
 else()
-find_package(OpenCV REQUIRED)
+# QUIET, not REQUIRED: see above -- a missing OpenCV skips the GUI, it does
+# not stop the build.
+find_package(OpenCV QUIET)
+if (OpenCV_FOUND)
+set(KFC_HAVE_OPENCV TRUE)
 add_library(kfc_opencv INTERFACE)
 target_include_directories(kfc_opencv INTERFACE ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(kfc_opencv INTERFACE ${OpenCV_LIBS})
+endif()
+endif()
+
+if (KFC_HAVE_OPENCV)
+  message(STATUS "OpenCV found -- building the GUI client as well")
+else()
+  message(STATUS "OpenCV not found -- building the backend, server and tests only "
+                 "(kfc_gui_app and kfc_mouse_demo are skipped)")
 endif()
 
 # Backend: the headless, OpenCV-free business logic (model/rules/realtime/
@@ -239,96 +261,106 @@ target_compile_definitions(kfc_server PRIVATE
   KFC_SERVER_DEFAULT_BOARD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/server/apps/kfc_server/default_board.txt"
 )
 
-# Graphics/UI layer, kept in its own ui/ tree (not mixed into src/ and
-# include/, which are the headless backend) -- OpenCV/Img-based rendering
-# code only, kept out of kfc_core so the engine and its test suite never need
-# OpenCV on their include path. Still links kfc_core PUBLIC below, so it
-# transitively sees the backend's own include/ for model/rules/etc headers.
-add_library(kfc_graphics
-  ui/src/kfc/graphics/primitives/img.cpp
-  ui/src/kfc/graphics/assets/piece_code_scheme.cpp
-  ui/src/kfc/graphics/assets/piece_sprite_path.cpp
-  ui/src/kfc/graphics/geometry/board_geometry.cpp
-  ui/src/kfc/graphics/io/board_file_loader.cpp
-  ui/src/kfc/graphics/input/mouse_input_adapter.cpp
-  ui/src/kfc/graphics/input/screen_mapper.cpp
-  ui/src/kfc/graphics/animation/piece_state_name.cpp
-  ui/src/kfc/graphics/animation/piece_animation_set.cpp
-  ui/src/kfc/graphics/animation/animation_config_loader.cpp
-  ui/src/kfc/graphics/animation/piece_animator.cpp
-  ui/src/kfc/graphics/animation/piece_asset_library.cpp
-  ui/src/kfc/graphics/animation/piece_animator_registry.cpp
-  ui/src/kfc/graphics/rendering/animated_piece_renderer.cpp
-  ui/src/kfc/graphics/rendering/hud_renderer.cpp
-  ui/src/kfc/graphics/rendering/game_over_banner.cpp
-  ui/src/kfc/graphics/rendering/board_layout.cpp
-  ui/src/kfc/graphics/net/server_link.cpp
-  ui/src/kfc/graphics/app/game_session.cpp
-  ui/src/kfc/graphics/platform/screen_metrics.cpp
-)
+# ---------------------------------------------------------------------------
+# The GUI client. Everything below needs OpenCV, so it is defined only when
+# OpenCV was actually found -- see the detection block above. Without it the
+# backend, the server and the full test suite still build normally.
+# ---------------------------------------------------------------------------
+if (KFC_HAVE_OPENCV)
 
-# The two per-platform implementations. Exactly one of each is compiled, and
-# together they are the only files in the project that know which OS this is --
-# see IRoomPrompt and make_sound_player.
-if (WIN32)
-  target_sources(kfc_graphics PRIVATE
-    ui/src/kfc/graphics/dialogs/win_room_prompt.cpp
-    ui/src/kfc/graphics/audio/win_sound_player.cpp
+  # Graphics/UI layer, kept in its own ui/ tree (not mixed into src/ and
+  # include/, which are the headless backend) -- OpenCV/Img-based rendering
+  # code only, kept out of kfc_core so the engine and its test suite never need
+  # OpenCV on their include path. Still links kfc_core PUBLIC below, so it
+  # transitively sees the backend's own include/ for model/rules/etc headers.
+  add_library(kfc_graphics
+    ui/src/kfc/graphics/primitives/img.cpp
+    ui/src/kfc/graphics/assets/piece_code_scheme.cpp
+    ui/src/kfc/graphics/assets/piece_sprite_path.cpp
+    ui/src/kfc/graphics/geometry/board_geometry.cpp
+    ui/src/kfc/graphics/io/board_file_loader.cpp
+    ui/src/kfc/graphics/input/mouse_input_adapter.cpp
+    ui/src/kfc/graphics/input/screen_mapper.cpp
+    ui/src/kfc/graphics/animation/piece_state_name.cpp
+    ui/src/kfc/graphics/animation/piece_animation_set.cpp
+    ui/src/kfc/graphics/animation/animation_config_loader.cpp
+    ui/src/kfc/graphics/animation/piece_animator.cpp
+    ui/src/kfc/graphics/animation/piece_asset_library.cpp
+    ui/src/kfc/graphics/animation/piece_animator_registry.cpp
+    ui/src/kfc/graphics/rendering/animated_piece_renderer.cpp
+    ui/src/kfc/graphics/rendering/hud_renderer.cpp
+    ui/src/kfc/graphics/rendering/game_over_banner.cpp
+    ui/src/kfc/graphics/rendering/board_layout.cpp
+    ui/src/kfc/graphics/net/server_link.cpp
+    ui/src/kfc/graphics/app/game_session.cpp
+    ui/src/kfc/graphics/platform/screen_metrics.cpp
   )
-else()
-  target_sources(kfc_graphics PRIVATE
-    ui/src/kfc/graphics/dialogs/opencv_room_prompt.cpp
-    ui/src/kfc/graphics/audio/silent_sound_player.cpp
+
+  # The two per-platform implementations. Exactly one of each is compiled, and
+  # together they are the only files in the project that know which OS this is --
+  # see IRoomPrompt and make_sound_player.
+  if (WIN32)
+    target_sources(kfc_graphics PRIVATE
+      ui/src/kfc/graphics/dialogs/win_room_prompt.cpp
+      ui/src/kfc/graphics/audio/win_sound_player.cpp
+    )
+  else()
+    target_sources(kfc_graphics PRIVATE
+      ui/src/kfc/graphics/dialogs/opencv_room_prompt.cpp
+      ui/src/kfc/graphics/audio/silent_sound_player.cpp
+    )
+  endif()
+
+  target_include_directories(kfc_graphics PUBLIC ui/include)
+  target_link_libraries(kfc_graphics PUBLIC kfc_core kfc_opencv nlohmann_json::nlohmann_json kfc_protocol ixwebsocket)
+  # winmm: Windows' PlaySound, for WinSoundPlayer. Windows-only, and only that one
+  # file needs it -- every other platform's player has no such dependency.
+  if (WIN32)
+    target_link_libraries(kfc_graphics PUBLIC winmm)
+  endif()
+  # Bakes two locations into the binary as string constants, both computed
+  # here (once, by CMake, from this file's own location) instead of hardcoded
+  # in C++ -- see assets_root()/default_board_file() in constants.hpp. PUBLIC
+  # (not PRIVATE) because constants.hpp is a header: kfc_graphics's own .cpp
+  # files need these macros to compile it, and so does anything (kfc_gui_app)
+  # that links kfc_graphics and includes constants.hpp itself.
+  target_compile_definitions(kfc_graphics PUBLIC
+    KFC_GRAPHICS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    KFC_GUI_APP_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ui/apps/kfc_gui_app"
   )
-endif()
 
-target_include_directories(kfc_graphics PUBLIC ui/include)
-target_link_libraries(kfc_graphics PUBLIC kfc_core kfc_opencv nlohmann_json::nlohmann_json kfc_protocol ixwebsocket)
-# winmm: Windows' PlaySound, for WinSoundPlayer. Windows-only, and only that one
-# file needs it -- every other platform's player has no such dependency.
-if (WIN32)
-  target_link_libraries(kfc_graphics PUBLIC winmm)
-endif()
-# Bakes two locations into the binary as string constants, both computed
-# here (once, by CMake, from this file's own location) instead of hardcoded
-# in C++ -- see assets_root()/default_board_file() in constants.hpp. PUBLIC
-# (not PRIVATE) because constants.hpp is a header: kfc_graphics's own .cpp
-# files need these macros to compile it, and so does anything (kfc_gui_app)
-# that links kfc_graphics and includes constants.hpp itself.
-target_compile_definitions(kfc_graphics PUBLIC
-  KFC_GRAPHICS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
-  KFC_GUI_APP_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ui/apps/kfc_gui_app"
-)
+  # The windowed entry point (as opposed to kfc_app's console fixture runner).
+  add_executable(kfc_gui_app
+    ui/apps/kfc_gui_app/main.cpp
+  )
+  target_link_libraries(kfc_gui_app PRIVATE kfc_graphics)
 
-# The windowed entry point (as opposed to kfc_app's console fixture runner).
-add_executable(kfc_gui_app
-  ui/apps/kfc_gui_app/main.cpp
-)
-target_link_libraries(kfc_gui_app PRIVATE kfc_graphics)
+  # opencv_world451.dll must sit next to the .exe at runtime (Windows has no
+  # rpath); copy whichever config (debug/release) was actually linked. Not needed
+  # elsewhere: a system OpenCV is already on the loader's path.
+  if (WIN32)
+  add_custom_command(TARGET kfc_gui_app POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE:opencv_world451>
+      $<TARGET_FILE_DIR:kfc_gui_app>
+  )
+  endif()
 
-# opencv_world451.dll must sit next to the .exe at runtime (Windows has no
-# rpath); copy whichever config (debug/release) was actually linked. Not needed
-# elsewhere: a system OpenCV is already on the loader's path.
-if (WIN32)
-add_custom_command(TARGET kfc_gui_app POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    $<TARGET_FILE:opencv_world451>
-    $<TARGET_FILE_DIR:kfc_gui_app>
-)
-endif()
+  # Standalone mouse-coordinate verification tool -- not part of the real game,
+  # the debugging step the graphics lecture recommended before wiring pixel
+  # clicks into Controller for real.
+  add_executable(kfc_mouse_demo
+    ui/apps/kfc_mouse_demo/main.cpp
+  )
+  target_link_libraries(kfc_mouse_demo PRIVATE kfc_graphics)
 
-# Standalone mouse-coordinate verification tool -- not part of the real game,
-# the debugging step the graphics lecture recommended before wiring pixel
-# clicks into Controller for real.
-add_executable(kfc_mouse_demo
-  ui/apps/kfc_mouse_demo/main.cpp
-)
-target_link_libraries(kfc_mouse_demo PRIVATE kfc_graphics)
+  if (WIN32)
+  add_custom_command(TARGET kfc_mouse_demo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE:opencv_world451>
+      $<TARGET_FILE_DIR:kfc_mouse_demo>
+  )
+  endif()
 
-if (WIN32)
-add_custom_command(TARGET kfc_mouse_demo POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    $<TARGET_FILE:opencv_world451>
-    $<TARGET_FILE_DIR:kfc_mouse_demo>
-)
+
 endif()

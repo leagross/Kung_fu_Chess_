@@ -311,6 +311,18 @@ int main(int argc, char** argv) {
         game_view->events().subscribe<kfc::model::ArrivalEvent>(
             [&score](const kfc::model::ArrivalEvent& event) { score.on_arrival(event); });
 
+        // Everything that happened before this client existed -- a spectator
+        // walking into a game in progress, or a player returning after a
+        // disconnect. Fed straight into the two observers rather than published
+        // on the bus, because these arrivals already happened once: putting
+        // them on the bus would replay every capture sound and re-run the
+        // animations. Without this the HUD would show an empty move list and
+        // 0-0 beside a board that is plainly mid-game.
+        for (const kfc::model::ArrivalEvent& past : session.history()) {
+            move_log.on_arrival(past);
+            score.on_arrival(past);
+        }
+
         // Start/end visuals off the same bus: GameEnded carries the winner
         // (covers every ending, local or networked); GameStarted stamps the
         // intro (published at real match start); OpponentCountdown drives the

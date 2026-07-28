@@ -266,7 +266,8 @@ std::string encode(const ServerMessage& message) {
                 return envelope("Welcome", json{{"assigned_color", m.assigned_color},
                                                 {"board", m.board},
                                                 {"spectator", m.spectator},
-                                                {"room", m.room}});
+                                                {"room", m.room},
+                                                {"history", m.history}});
             } else if constexpr (std::is_same_v<T, MotionStarted>) {
                 return envelope("MotionStarted", json{{"motion", m.motion}});
             } else if constexpr (std::is_same_v<T, BoardUpdate>) {
@@ -350,6 +351,9 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
             // (or any hand-written one) simply means "a player".
             welcome.spectator = payload.value("spectator", false);
             welcome.room = payload.value("room", std::string{});
+            if (payload.contains("history")) {
+                payload.at("history").get_to(welcome.history);
+            }
             return ServerMessage{welcome};
         }
         if (type == "MotionStarted") {

@@ -113,6 +113,12 @@ public:
     /// room, which has no id. Valid after wait_for_welcome().
     [[nodiscard]] const std::string& room_name() const;
 
+    /// The arrivals this match produced before we joined (Welcome::history) --
+    /// what a spectator walking in mid-game, or a player returning after a
+    /// disconnect, needs to rebuild the move list and score it never saw. Empty
+    /// when we were there from the start. Valid after wait_for_welcome().
+    [[nodiscard]] const std::vector<kfc::model::ArrivalEvent>& history() const;
+
     /// True once the server has signalled both players are present (MatchStart).
     /// Between a successful Welcome and this, the client is "searching" -- seated
     /// in a room but waiting for a rating-compatible opponent to be matched in.
@@ -180,6 +186,10 @@ private:
     bool spectator_ = false;
     // Also from the Welcome -- the room's server-assigned id, to display.
     std::string room_name_;
+    // And the arrivals that happened before we arrived. Replayed by the caller
+    // into its own observers, not onto the bus: these already happened, so they
+    // must not fire sounds or animations a second time.
+    std::vector<kfc::model::ArrivalEvent> history_;
     std::optional<kfc::input::BoardMapper> board_mapper_;
     std::optional<kfc::input::Controller> controller_;
     // Re-derived every wait() from motion_start_times_ (an absolute anchor),

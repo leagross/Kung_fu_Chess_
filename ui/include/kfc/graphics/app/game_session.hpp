@@ -90,6 +90,14 @@ public:
         return server_link_ != nullptr ? server_link_->room_name() : std::string{};
     }
 
+    /// The arrivals that happened before this client joined -- see
+    /// ServerLink::history. Empty for local play and for anyone present from
+    /// the start. A caller replays these into its move log and score so a
+    /// mid-game joiner's HUD matches the board it was handed.
+    [[nodiscard]] std::vector<kfc::model::ArrivalEvent> history() const {
+        return server_link_ != nullptr ? server_link_->history() : std::vector<kfc::model::ArrivalEvent>{};
+    }
+
     /// True when the server seated this connection as a viewer rather than a
     /// player -- a third or later joiner of a named room. Always false for local
     /// play. Valid only after connect() returns true; a caller must not wire

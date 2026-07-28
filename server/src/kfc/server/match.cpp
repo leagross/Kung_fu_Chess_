@@ -94,9 +94,12 @@ kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spe
     // walking in mid-game must see the game as it actually is. Snapshotted
     // under board_mutex_ because this runs on a connection thread, against a
     // board the tick thread may be mid-mutation of.
-    kfc::protocol::Welcome welcome{color, {}, spectator, room_name_};
+    kfc::protocol::Welcome welcome{color, {}, spectator, room_name_, {}};
     std::lock_guard<std::mutex> board_guard(board_mutex_);
     welcome.board = kfc::protocol::snapshot_of(core_.board());
+    // Snapshotted under the same lock as the board, so the two can never
+    // disagree about how far the game has got.
+    welcome.history = history_;
     return welcome;
 }
 
@@ -156,6 +159,14 @@ void Match::tick_loop() {
         // I/O must not hold the board lock. Applied in the order the queue
         // delivered them: deterministic, and the answer to "which of two
         // near-simultaneous commands wins" is whichever arrived first.
+        // A dropped player's grace period stops the game clock as well as
+        // refusing their opponent's commands (see apply). Without this a piece
+        // already in flight would still arrive, and every cooldown would still
+        // expire, while one side sits at a disconnected client -- so the game
+        // would go on being played by one player. Freezing means a returning
+        // player finds the position exactly as they left it.
+        bool frozen = !game_over_ && disconnect_watch_.watching().has_value();
+
         kfc::model::ArrivalEvents events;
         {
             std::lock_guard<std::mutex> board_guard(board_mutex_);
@@ -165,10 +176,17 @@ void Match::tick_loop() {
 
             int elapsed_ms =
                 static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tick_at).count());
+            // Advanced every tick either way, so the time spent frozen is never
+            // banked up and dumped into the simulation the moment play resumes.
             last_tick_at = now;
             elapsed_ms = std::clamp(elapsed_ms, kMinTickAdvanceMs, kMaxTickAdvanceMs);
 
-            events = core_.engine().wait(elapsed_ms);
+            if (!frozen) {
+                events = core_.engine().wait(elapsed_ms);
+                // Kept so a client joining or returning mid-game can rebuild the
+                // move list and score it never saw -- see welcome_for.
+                history_.insert(history_.end(), events.begin(), events.end());
+            }
         }
         if (!events.empty()) {
             broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::BoardUpdate{events}});
@@ -326,6 +344,18 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
         logger_.log("Match: " + color_name(from) + " resigned; " + color_name(winner) + " wins");
         game_over_ = true;
         pending_game_over_ = kfc::protocol::GameOver{winner};
+        return;
+    }
+
+    // A dropped player's grace period freezes the game -- see tick_loop, which
+    // also stops the clock. Their opponent must not get to play on against
+    // someone who cannot answer: twenty unopposed seconds is enough to walk a
+    // piece up and take an undefended king, which would make the grace (and the
+    // reconnect it exists for) worthless. Rejected rather than dropped, so the
+    // client learns why instead of watching its click do nothing.
+    if (disconnect_watch_.watching().has_value()) {
+        send_to_and_log(from, kfc::protocol::ServerMessage{
+                                  kfc::protocol::MoveRejected{kfc::model::move_reasons::kOpponentDisconnected}});
         return;
     }
 

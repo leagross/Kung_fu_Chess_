@@ -120,6 +120,7 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
     assigned_color_ = welcome.assigned_color;
     spectator_ = welcome.spectator;
     room_name_ = welcome.room;
+    history_ = welcome.history;
 
     kfc::model::Board board(welcome.board.width, welcome.board.height);
     for (const kfc::model::Piece& piece : welcome.board.pieces) {
@@ -151,6 +152,10 @@ bool ServerLink::is_spectator() const {
 
 const std::string& ServerLink::room_name() const {
     return room_name_;
+}
+
+const std::vector<kfc::model::ArrivalEvent>& ServerLink::history() const {
+    return history_;
 }
 
 bool ServerLink::is_match_started() const {

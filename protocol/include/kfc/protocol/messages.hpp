@@ -42,6 +42,13 @@ struct Welcome {
     /// Authoritative: for Create the client couldn't know it (the server minted
     /// it), and for Join it beats echoing back whatever the player typed.
     std::string room;
+    /// Every arrival this match has already seen, oldest first. The board above
+    /// says where the pieces are; this says how they got there, which is what a
+    /// move list and a score are made of. Without it a spectator walking in
+    /// mid-game -- or a player returning after a disconnect -- would show a
+    /// correct board beside an empty move log and a score of 0-0. Empty for a
+    /// match that has not started.
+    std::vector<kfc::model::ArrivalEvent> history;
 };
 
 // --- Client -> Server ---

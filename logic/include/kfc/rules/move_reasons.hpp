@@ -14,5 +14,10 @@ inline constexpr const char* kMotionInProgress = "motion_in_progress";
 /// Not a RuleEngine concern -- RuleEngine has no notion of "which network
 /// connection asked", only GameEngine's callers do.
 inline constexpr const char* kNotYourPiece = "not_your_piece";
+/// Server-level rejection: the opponent's connection dropped and their grace
+/// period is still counting down, so the match is frozen and nobody may move
+/// until they return or the grace expires (see server::Match::apply). Like
+/// kNotYourPiece, this is about the connection rather than the rules.
+inline constexpr const char* kOpponentDisconnected = "opponent_disconnected";
 
 }  // namespace kfc::model::move_reasons

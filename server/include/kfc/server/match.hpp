@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "kfc/engine/game_core.hpp"
 #include "kfc/model/board.hpp"
@@ -198,6 +199,12 @@ private:
     kfc::protocol::GameplayCooldownPolicy standard_policy_;
     kfc::protocol::GameplayCooldownPolicy jump_policy_;
     kfc::model::GameCore core_;
+
+    // Every arrival this match has produced, oldest first -- what a joining or
+    // returning client needs to rebuild the move list and score it never saw.
+    // Written by the tick thread and read by welcome_for on a connection
+    // thread, both under board_mutex_ below, exactly like the board itself.
+    std::vector<kfc::model::ArrivalEvent> history_;
 
     // Serializes every read of / write to core_'s board across threads.
     // Nearly all board access already happens on tick_loop's own thread, but

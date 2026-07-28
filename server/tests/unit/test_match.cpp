@@ -8,6 +8,7 @@
 
 #include "kfc/io/board_parser.hpp"
 #include "kfc/protocol/json.hpp"
+#include "kfc/rules/move_reasons.hpp"
 #include "kfc/server/match.hpp"
 
 using namespace kfc::model;
@@ -220,6 +221,103 @@ TEST(MatchDisconnectTest, ShowsACountdownThenForfeitsAfterTheGrace) {
     // ...then, once the grace runs out, White wins by forfeit.
     EXPECT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
         return is_game_over_won_by(m, PieceColor::White);
+    }));
+
+    match.stop();
+}
+
+TEST(MatchDisconnectTest, TheSurvivorCannotKeepPlayingWhileTheGraceCountsDown) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_freeze_test.log");
+    // A long grace, so the whole test happens inside it.
+    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    // Black drops; the countdown is running from here on.
+    match.on_disconnect(PieceColor::Black);
+    ASSERT_TRUE(white_sink.wait_for(2000, [](const ServerMessage& m) {
+        return std::holds_alternative<OpponentDisconnected>(m);
+    }));
+
+    // White tries to play on against an opponent who cannot answer. Twenty
+    // unopposed seconds is enough to walk a piece up and take an undefended
+    // king, which would make the grace -- and the reconnect it exists for --
+    // worthless. The move is refused, with a reason.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+
+    EXPECT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
+        return is_move_rejected_with(m, move_reasons::kOpponentDisconnected);
+    }));
+    // ...and nothing moved: no arrival was ever broadcast.
+    EXPECT_FALSE(white_sink.wait_for(500, is_board_update));
+
+    match.stop();
+}
+
+TEST(MatchDisconnectTest, TheClockStopsWhileTheGraceCountsDownSoAPieceInFlightDoesNotArrive) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_freeze_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    // White starts a move, then Black drops before it lands.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    ASSERT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
+        return std::holds_alternative<MotionStarted>(m);
+    }));
+    match.on_disconnect(PieceColor::Black);
+
+    // Freezing has to stop the simulated clock too, not just refuse commands:
+    // a piece already travelling would otherwise still arrive, and every
+    // cooldown would still expire, while one side sits at a dead client.
+    EXPECT_FALSE(white_sink.wait_for(1500, is_board_update));
+
+    match.stop();
+}
+
+TEST(MatchJoinTest, AWelcomeCarriesTheArrivalsThatAlreadyHappened) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_history_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    // Play one move through to its arrival.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    ASSERT_TRUE(white_sink.wait_for(2000, is_board_update));
+
+    // Someone arriving now gets the board *and* how it got that way -- the
+    // move list and score are built from arrivals, so a Welcome without them
+    // would show a mid-game board beside an empty HUD.
+    RecordingSink latecomer;
+    match.join_spectator("carol", latecomer.as_send_fn());
+
+    EXPECT_TRUE(latecomer.wait_for(1000, [](const ServerMessage& m) {
+        return std::holds_alternative<Welcome>(m) && !std::get<Welcome>(m).history.empty();
+    }));
+}
+
+TEST(MatchJoinTest, AWelcomeBeforeAnyMoveCarriesAnEmptyHistory) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_history_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+
+    EXPECT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
+        return std::holds_alternative<Welcome>(m) && std::get<Welcome>(m).history.empty();
     }));
 
     match.stop();

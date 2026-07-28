@@ -39,14 +39,27 @@ Requires **CMake ≥ 3.20** and a **C++20** compiler (MSVC 2022+, GCC 10+,
 Clang 12+). GoogleTest, nlohmann/json, IXWebSocket and SQLiteCpp are downloaded
 automatically by CMake — nothing to install by hand.
 
-**OpenCV** is the one dependency you provide yourself, and the only thing that
-differs per platform:
+**OpenCV is the one dependency you provide yourself.** Everything else is
+downloaded for you; OpenCV is not, because building it from source would add
+the best part of an hour to every fresh checkout.
 
-- **Windows** — unpack the prebuilt OpenCV 4.5.1 "world" build to
-  `third_party/OpenCV_451/`, so that `third_party/OpenCV_451/bin/` holds
-  `opencv_world451.dll` and its `.lib`. It is not committed (see `.gitignore`).
-- **Linux / macOS** — install it (`sudo apt install libopencv-dev`, or
-  `brew install opencv`). CMake finds it with `find_package`.
+- **Windows** — download the prebuilt `OpenCV_451` folder from
+  [this Google Drive link](https://drive.google.com/drive/folders/14SeyjbNPvsgyLKM2omcVTlTX0wAQ-_Ox?usp=sharing)
+  and place it at `third_party/OpenCV_451/`, so that
+  `third_party/OpenCV_451/bin/` contains `opencv_world451.dll` and its `.lib`.
+  It is not committed — see `.gitignore`.
+- **Linux / macOS** — install it from your package manager
+  (`sudo apt install libopencv-dev`, or `brew install opencv`). CMake finds it
+  with `find_package`.
+
+**OpenCV is optional.** Without it, the backend, the server and the entire test
+suite still configure, build and run — only the GUI client is skipped. CMake
+says which it chose:
+
+```
+-- OpenCV found -- building the GUI client as well
+-- OpenCV not found -- building the backend, server and tests only ...
+```
 
 ```sh
 cmake -S . -B build

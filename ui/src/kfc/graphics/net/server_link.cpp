@@ -46,7 +46,7 @@ ServerLink::ServerLink(std::string server_url, std::string username, std::string
         } else if (msg->type == ix::WebSocketMessageType::Close) {
             logger_.log("ServerLink: connection closed");
         } else if (msg->type == ix::WebSocketMessageType::Error) {
-            logger_.log("ServerLink: connection error: " + msg->errorInfo.reason);
+            logger_.log(kfc::protocol::LogLevel::Error, "ServerLink: connection error: " + msg->errorInfo.reason);
         }
     });
     socket_->start();
@@ -61,16 +61,24 @@ ServerLink::~ServerLink() {
 
 void ServerLink::send(const kfc::protocol::ClientMessage& message) {
     std::string encoded = kfc::protocol::encode(message);
-    // Redacted: the very first thing sent is a Login, password included.
-    logger_.log("ServerLink: sending " + kfc::protocol::redact_for_log(encoded));
+    // Debug: every outbound frame. Guarded because redact_for_log rebuilds the
+    // whole message, which is not worth doing for a line that will be dropped.
+    // Redacted because the very first thing sent is a Login, password included.
+    if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
+        logger_.log(kfc::protocol::LogLevel::Debug,
+                    "ServerLink: sending " + kfc::protocol::redact_for_log(encoded));
+    }
     socket_->send(encoded);
 }
 
 void ServerLink::on_message(const std::string& text) {
-    logger_.log("ServerLink: received " + kfc::protocol::redact_for_log(text));
+    if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
+        logger_.log(kfc::protocol::LogLevel::Debug,
+                    "ServerLink: received " + kfc::protocol::redact_for_log(text));
+    }
     std::optional<kfc::protocol::ServerMessage> decoded = kfc::protocol::decode_server_message(text);
     if (!decoded.has_value()) {
-        logger_.log("ServerLink: failed to decode message");
+        logger_.log(kfc::protocol::LogLevel::Warning, "ServerLink: failed to decode message");
         return;
     }
 
@@ -274,8 +282,9 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
     // those would move a piece a second time and diverge this board from the
     // server's for good.
     if (update.revision != 0 && update.revision <= revision_) {
-        logger_.log("ServerLink: skipping update " + std::to_string(update.revision) +
-                    ", already covered by the snapshot at " + std::to_string(revision_));
+        logger_.log(kfc::protocol::LogLevel::Debug,
+                    "ServerLink: skipping update " + std::to_string(update.revision) +
+                        ", already covered by the snapshot at " + std::to_string(revision_));
         return;
     }
     revision_ = update.revision;

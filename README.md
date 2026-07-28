@@ -10,7 +10,7 @@ layers that each build and test on their own. Play is local (one keyboard) or
 networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators.
 
-**338 tests** cover the logic, protocol, database and server.
+**348 tests** cover the logic, protocol, database and server.
 
 ---
 
@@ -97,6 +97,13 @@ it):
 
 ```sh
 ./build/Debug/kfc_server
+```
+
+It logs every protocol message to `kfc_server.log`. For a long run where that
+dump is more disk than it is worth, keep the events and drop the traffic:
+
+```sh
+./build/Debug/kfc_server 8080 --log-level=info
 ```
 
 Then launch a client per player, **each with its own username**. The username and

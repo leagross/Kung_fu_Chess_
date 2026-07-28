@@ -74,12 +74,17 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
                     return;
                 }
 
-                // Redacted: a Login carries the password in clear.
-                logger_.log("Received from " + connection_id + ": " +
-                            kfc::protocol::redact_for_log(msg->str));
+                // Debug: every inbound frame, so guarded -- redact_for_log
+                // rebuilds the whole message, which is not worth doing for a
+                // line that will be dropped. Redacted because a Login carries
+                // the password in clear.
+                if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
+                    logger_.log(kfc::protocol::LogLevel::Debug,
+                                "Received from " + connection_id + ": " + kfc::protocol::redact_for_log(msg->str));
+                }
                 std::optional<kfc::protocol::ClientMessage> decoded = kfc::protocol::decode_client_message(msg->str);
                 if (!decoded.has_value()) {
-                    logger_.log("Failed to decode message from " + connection_id);
+                    logger_.log(kfc::protocol::LogLevel::Warning, "Failed to decode message from " + connection_id);
                     return;
                 }
 
@@ -98,7 +103,7 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
                     }
                 };
                 auto drop = [this, weak_socket, connection_id](const std::string& why) {
-                    logger_.log("Dropping " + connection_id + ": " + why);
+                    logger_.log(kfc::protocol::LogLevel::Warning, "Dropping " + connection_id + ": " + why);
                     if (auto socket = weak_socket.lock()) {
                         socket->close();
                     }
@@ -135,7 +140,8 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
                                   std::holds_alternative<kfc::protocol::JoinRoom>(*decoded);
                 if (is_seating) {
                     if (!pending->has_value()) {
-                        logger_.log("Ignoring seating request from " + connection_id + ": not logged in");
+                        logger_.log(kfc::protocol::LogLevel::Warning,
+                                    "Ignoring seating request from " + connection_id + ": not logged in");
                         return;
                     }
                     if (seat->has_value()) {
@@ -178,14 +184,16 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
 
                 // Everything else (Move/Jump/Resign) needs a seat.
                 if (!seat->has_value()) {
-                    logger_.log("Ignoring message from " + connection_id + ": not seated yet");
+                    logger_.log(kfc::protocol::LogLevel::Warning,
+                                "Ignoring message from " + connection_id + ": not seated yet");
                     return;
                 }
                 // A viewer owns no pieces, so it has nothing to move, jump or
                 // resign. Dropped here rather than in Match, which should never
                 // have to know non-players exist at all.
                 if ((*seat)->spectator) {
-                    logger_.log("Ignoring message from " + connection_id + ": watching, not playing");
+                    logger_.log(kfc::protocol::LogLevel::Warning,
+                                "Ignoring message from " + connection_id + ": watching, not playing");
                     return;
                 }
                 rooms_.enqueue((*seat)->room, (*seat)->color, *decoded);
@@ -203,7 +211,8 @@ WebSocketGameServer::~WebSocketGameServer() {
 bool WebSocketGameServer::listen() {
     std::pair<bool, std::string> result = server_->listen();
     if (!result.first) {
-        logger_.log("Failed to listen on port " + std::to_string(port_) + ": " + result.second);
+        logger_.log(kfc::protocol::LogLevel::Error,
+                    "Failed to listen on port " + std::to_string(port_) + ": " + result.second);
     }
     return result.first;
 }

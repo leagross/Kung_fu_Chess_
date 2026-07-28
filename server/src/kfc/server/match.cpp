@@ -481,13 +481,21 @@ void Match::report_result(GameEndReason reason, std::optional<kfc::model::PieceC
 
 void Match::broadcast_and_log(const kfc::protocol::ServerMessage& message) {
     std::string encoded = kfc::protocol::encode(message);
-    logger_.log("Match: broadcasting " + encoded);
+    // Debug: this is the message-by-message traffic, several a second per room.
+    // Guarded so that concatenating the whole encoded message onto a prefix --
+    // a second copy of it, per broadcast -- is skipped too when it is off, not
+    // just the write.
+    if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
+        logger_.log(kfc::protocol::LogLevel::Debug, "Match: broadcasting " + encoded);
+    }
     audience_.broadcast(encoded);
 }
 
 void Match::send_to_and_log(kfc::model::PieceColor color, const kfc::protocol::ServerMessage& message) {
     std::string encoded = kfc::protocol::encode(message);
-    logger_.log("Match: sending to " + color_name(color) + ": " + encoded);
+    if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
+        logger_.log(kfc::protocol::LogLevel::Debug, "Match: sending to " + color_name(color) + ": " + encoded);
+    }
     audience_.send_to(color, encoded);
 }
 

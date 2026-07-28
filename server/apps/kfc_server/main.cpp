@@ -8,6 +8,7 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "kfc/io/board_parser.hpp"
@@ -21,6 +22,23 @@
 #include "kfc/server/websocket_game_server.hpp"
 
 namespace {
+
+constexpr std::string_view kLogLevelFlag = "--log-level=";
+
+// A port number, or std::nullopt if the argument is not one. Written out rather
+// than calling std::stoi directly, which throws on anything unparsable and
+// would take the process down before the log file is even open.
+std::optional<int> parse_port(const std::string& text) {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
+        return std::nullopt;
+    }
+    try {
+        int port = std::stoi(text);
+        return (port > 0 && port <= 65535) ? std::optional<int>{port} : std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;  // out of int range
+    }
+}
 
 std::vector<std::string> read_board_lines(const std::string& path) {
     std::ifstream file(path);
@@ -41,11 +59,36 @@ std::vector<std::string> read_board_lines(const std::string& path) {
 
 int main(int argc, char** argv) {
     int port = 8080;
-    if (argc > 1) {
-        port = std::stoi(argv[1]);
+    // Everything by default, including the message-by-message traffic the spec
+    // asks to be able to read afterwards. --log-level=info turns that traffic
+    // off and leaves the events, for a long-running server where the dump is
+    // more disk than it is worth.
+    kfc::protocol::LogLevel log_level = kfc::protocol::LogLevel::Debug;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind(kLogLevelFlag, 0) == 0) {
+            std::optional<kfc::protocol::LogLevel> parsed =
+                kfc::protocol::FileLogger::level_from_name(arg.substr(kLogLevelFlag.size()));
+            if (!parsed.has_value()) {
+                std::cerr << "Unknown log level '" << arg.substr(kLogLevelFlag.size())
+                          << "'. Expected one of: debug, info, warning, error.\n";
+                return 1;
+            }
+            log_level = *parsed;
+            continue;
+        }
+        // The only positional argument. Rejected explicitly rather than left to
+        // std::stoi, which would throw out of main on a typo.
+        std::optional<int> parsed_port = parse_port(arg);
+        if (!parsed_port.has_value()) {
+            std::cerr << "Usage: kfc_server [port] [--log-level=debug|info|warning|error]\n";
+            return 1;
+        }
+        port = *parsed_port;
     }
 
-    kfc::protocol::FileLogger logger("kfc_server.log");
+    kfc::protocol::FileLogger logger("kfc_server.log", log_level);
     logger.log("kfc_server starting on port " + std::to_string(port));
 
     try {
@@ -92,7 +135,7 @@ int main(int argc, char** argv) {
         // rooms' destructor stops every live room's tick thread as the scope
         // exits (after server, declared later, has stopped accepting).
     } catch (const std::exception& e) {
-        logger.log(std::string("Fatal: ") + e.what());
+        logger.log(kfc::protocol::LogLevel::Error, std::string("Fatal: ") + e.what());
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }

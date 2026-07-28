@@ -50,9 +50,37 @@ Unknown message types decode to `std::nullopt` rather than throwing, and new
 optional fields (`spectator`, `room`) default sensibly when absent. A client
 built before a field existed still understands the message.
 
+## The log
+
+`FileLogger` lives here rather than in `server/` because both sides use it: the
+server logs every message it handles, and so does the client's `ServerLink`.
+Passwords are stripped on the way in (`redact_for_log`) — a `Login` carries one
+in clear, and a log file is exactly the wrong place for it.
+
+Four levels, written as `[debug]`, `[info]`, `[warning]`, `[error]`:
+
+| Level | What goes there | On disk |
+|-------|-----------------|---------|
+| `debug` | Every message sent and received, in full — the traffic dump the CTD SERVER lecture asks to be able to read afterwards. | Buffered |
+| `info` | Things that happened: joins, rooms opening and closing, matches ending. | Immediately |
+| `warning` | A message refused, a connection dropped. | Immediately |
+| `error` | Something failed. | Immediately |
+
+**Only `debug` is buffered, and that is the whole design.** Flushing every line
+meant a write syscall per protocol message, on the tick thread, with the log's
+mutex held — measured here at 19µs a line against 1.3µs buffered, so logging a
+broadcast cost more than the broadcast. But flushing exists for a reason: a line
+still in a buffer when the process dies cannot be read afterwards. Here
+frequency and importance run opposite ways, so the split falls out naturally —
+the frequent thing is buffered, the rare and important thing is flushed. A crash
+costs you the tail of the traffic dump, never the record of what happened.
+
+`kfc_server --log-level=info` drops the traffic and keeps the events.
+
 ## Tests
 
 `tests/unit/test_protocol_json.cpp` round-trips every message: encode, decode,
-compare. `test_gameplay_config.cpp` covers reading `config/gameplay.json`, the
-one file both sides load so a piece behaves identically in local and networked
-play.
+compare, including every enumerator of every enum that goes on the wire.
+`test_gameplay_config.cpp` covers reading `config/gameplay.json`, the one file
+both sides load so a piece behaves identically in local and networked play.
+`test_file_logger.cpp` covers the levels, the flush split and the flag parsing.

@@ -55,7 +55,7 @@ implementation:
 | Interface | Windows | Everywhere else |
 |-----------|---------|-----------------|
 | `IRoomPrompt` (dialogs) | `win_room_prompt.cpp` — real native controls via Win32 | `opencv_room_prompt.cpp` — drawn with OpenCV, which is already a dependency, so nothing new is needed |
-| `ISoundPlayer` (audio) | `win_sound_player.cpp` — `PlaySound` via winmm | `silent_sound_player.cpp` — silent for now; drop in [miniaudio](https://github.com/mackron/miniaudio) to give it sound |
+| `ISoundPlayer` (audio) | `win_sound_player.cpp` — `PlaySound` via winmm | `miniaudio_sound_player.cpp` — [miniaudio](https://github.com/mackron/miniaudio), a single public-domain header that opens ALSA/PulseAudio/CoreAudio itself at runtime |
 | screen size / DPI | `SetProcessDPIAware` + `GetSystemMetrics` | a 1080p default — the window is resizable and every layout decision reads its actual size each frame |
 
 `main.cpp` contains no `#include <windows.h>` and no `#ifdef`. It asks the

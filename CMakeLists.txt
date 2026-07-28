@@ -50,6 +50,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SQLiteCpp)
 
+# miniaudio: the audio backend for every platform except Windows, which has
+# PlaySound built into the OS (see make_sound_player). A single public-domain
+# header, so this only has to be downloaded and put on the include path -- there
+# is nothing to build. It opens ALSA/PulseAudio/CoreAudio itself at runtime via
+# dlopen, so no audio -dev package is needed to compile against it.
+#
+# SOURCE_SUBDIR names a directory that does not exist on purpose: it stops
+# FetchContent from running add_subdirectory on miniaudio's own CMakeLists,
+# which would build its tests and examples we have no use for.
+if (NOT WIN32)
+  FetchContent_Declare(
+    miniaudio
+    URL https://github.com/mackron/miniaudio/archive/refs/tags/0.11.21.tar.gz
+    SOURCE_SUBDIR do-not-configure
+  )
+  FetchContent_MakeAvailable(miniaudio)
+endif()
+
 # OpenCV. The library itself is cross-platform; only the way we obtain it is
 # not, so that choice is made here and every target below just links `kfc_opencv`
 # without caring which branch produced it.
@@ -307,16 +325,23 @@ if (KFC_HAVE_OPENCV)
   else()
     target_sources(kfc_graphics PRIVATE
       ui/src/kfc/graphics/dialogs/opencv_room_prompt.cpp
-      ui/src/kfc/graphics/audio/silent_sound_player.cpp
+      ui/src/kfc/graphics/audio/miniaudio_sound_player.cpp
     )
   endif()
 
   target_include_directories(kfc_graphics PUBLIC ui/include)
   target_link_libraries(kfc_graphics PUBLIC kfc_core kfc_opencv nlohmann_json::nlohmann_json kfc_protocol ixwebsocket)
-  # winmm: Windows' PlaySound, for WinSoundPlayer. Windows-only, and only that one
-  # file needs it -- every other platform's player has no such dependency.
+
+  # The audio backend's own dependencies, and only its.
   if (WIN32)
+    # winmm: Windows' PlaySound, used by WinSoundPlayer.
     target_link_libraries(kfc_graphics PUBLIC winmm)
+  else()
+    # miniaudio is header-only, so it is an include path rather than a library.
+    # It does need dl (it dlopens the system's audio API), pthread and libm.
+    target_include_directories(kfc_graphics PRIVATE ${miniaudio_SOURCE_DIR})
+    find_package(Threads REQUIRED)
+    target_link_libraries(kfc_graphics PUBLIC Threads::Threads ${CMAKE_DL_LIBS} m)
   endif()
   # Bakes two locations into the binary as string constants, both computed
   # here (once, by CMake, from this file's own location) instead of hardcoded

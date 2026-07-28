@@ -156,5 +156,9 @@ contain no OS-specific code at all, so the server runs anywhere.
 In `ui/`, exactly two things cannot be written once and compiled everywhere:
 native dialogs and audio playback. Both sit behind interfaces
 (`IRoomPrompt`, `ISoundPlayer`) with one implementation chosen at build time, so
-no `#ifdef` appears anywhere else in the client. See
-[ui/README.md](ui/README.md) for what each platform gets.
+no `#ifdef` appears anywhere else in the client. Every platform gets a real
+implementation of both -- sound included. See [ui/README.md](ui/README.md) for
+what each one uses.
+
+CI builds every target on Linux, so the non-Windows implementations are
+compiled on every push rather than only when someone happens to try them.

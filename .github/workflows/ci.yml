@@ -1,11 +1,12 @@
 name: CI
 
-# Builds the headless backend + runs the full test suite on every push and PR.
-# Only the kfc_tests target is built: kfc_core/kfc_protocol/server are portable
-# C++20 with no OpenCV dependency, so this runs on a clean Linux runner without
-# the vendored Windows-only OpenCV. The GUI targets (kfc_graphics/kfc_gui_app)
-# are intentionally not built here -- they need OpenCV and a display, and the
-# game logic they sit on top of is exactly what these tests already cover.
+# Builds every target and runs the full test suite on every push and PR.
+#
+# OpenCV is installed on purpose, even though no test needs it. Without it CMake
+# skips the GUI targets, and the two files that exist only for non-Windows
+# platforms -- the OpenCV room dialog and the miniaudio sound player -- would
+# never be compiled anywhere at all. Code that is never built on a platform is
+# code that is broken on it without anyone knowing, so this job builds it.
 
 on:
   push:
@@ -18,16 +19,19 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
-      - name: Install a C++20 toolchain and CMake
+      - name: Install a C++20 toolchain, CMake and OpenCV
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ libopencv-dev
 
       - name: Configure (Debug)
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
-      - name: Build the test target
-        run: cmake --build build --target kfc_tests
+      # Everything, not just kfc_tests: this is what actually compiles the
+      # Linux GUI client and its audio backend.
+      - name: Build every target
+        run: cmake --build build
 
       - name: Run the full suite (unit + integration)
         run: ctest --test-dir build --output-on-failure

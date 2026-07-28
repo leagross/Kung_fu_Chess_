@@ -1,6 +1,7 @@
 #include "kfc/protocol/json.hpp"
 
 #include <nlohmann/json.hpp>
+#include <cstddef>
 #include <stdexcept>
 
 using nlohmann::json;
@@ -334,6 +335,41 @@ std::optional<ClientMessage> decode_client_message(const std::string& text) {
         return std::nullopt;
     } catch (const std::exception&) {
         return std::nullopt;
+    }
+}
+
+std::string redact_for_log(const std::string& text) {
+    // Scanned rather than parsed: see the header for why a message we cannot
+    // decode still has to come out redacted.
+    static constexpr char kKey[] = "\"password\":\"";
+    static constexpr std::size_t kKeyLength = sizeof(kKey) - 1;
+
+    std::string out;
+    std::size_t at = 0;
+    while (true) {
+        std::size_t key = text.find(kKey, at);
+        if (key == std::string::npos) {
+            out.append(text, at, std::string::npos);
+            return out;
+        }
+
+        std::size_t value = key + kKeyLength;
+        // Walk to the closing quote, stepping over backslash escapes -- a
+        // password containing a quote is escaped on the wire, and stopping at
+        // it would leave the rest of the password in the log.
+        std::size_t end = value;
+        while (end < text.size() && text[end] != '"') {
+            end += (text[end] == '\\') ? 2 : 1;
+        }
+        if (end >= text.size()) {
+            // Truncated message: drop the remainder rather than risk emitting
+            // a partial password.
+            out.append(text, at, key - at).append(kKey).append("***");
+            return out;
+        }
+
+        out.append(text, at, value - at).append("***");
+        at = end;
     }
 }
 

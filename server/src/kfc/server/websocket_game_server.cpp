@@ -74,7 +74,9 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
                     return;
                 }
 
-                logger_.log("Received from " + connection_id + ": " + msg->str);
+                // Redacted: a Login carries the password in clear.
+                logger_.log("Received from " + connection_id + ": " +
+                            kfc::protocol::redact_for_log(msg->str));
                 std::optional<kfc::protocol::ClientMessage> decoded = kfc::protocol::decode_client_message(msg->str);
                 if (!decoded.has_value()) {
                     logger_.log("Failed to decode message from " + connection_id);

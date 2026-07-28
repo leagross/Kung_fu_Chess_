@@ -277,3 +277,38 @@ TEST(ProtocolJsonTest, DecodeServerMessageReturnsNulloptForGarbageText) {
     EXPECT_FALSE(decode_server_message("").has_value());
     EXPECT_FALSE(decode_server_message(R"({"type": "GameOver"})").has_value());  // missing payload
 }
+
+// --- Never write a password into a log file ---
+
+TEST(RedactForLogTest, StripsThePasswordFromAnEncodedLogin) {
+    std::string encoded = encode(ClientMessage{Login{"alice", "hunter2"}});
+    ASSERT_NE(encoded.find("hunter2"), std::string::npos) << "precondition: the wire form does carry it";
+
+    std::string safe = redact_for_log(encoded);
+    EXPECT_EQ(safe.find("hunter2"), std::string::npos);
+    // The username is still there -- redaction must not cost us the log's value.
+    EXPECT_NE(safe.find("alice"), std::string::npos);
+    EXPECT_NE(safe.find("***"), std::string::npos);
+}
+
+TEST(RedactForLogTest, LeavesMessagesWithoutAPasswordUntouched) {
+    std::string encoded = encode(ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    EXPECT_EQ(redact_for_log(encoded), encoded);
+}
+
+TEST(RedactForLogTest, StripsAPasswordContainingAnEscapedQuote) {
+    // The escape must be stepped over, not treated as the closing quote --
+    // otherwise the tail of the password lands in the log.
+    std::string encoded = encode(ClientMessage{Login{"alice", "a\"b\"c"}});
+    std::string safe = redact_for_log(encoded);
+    EXPECT_EQ(safe.find("b"), std::string::npos) << "leaked part of the password: " << safe;
+    EXPECT_NE(safe.find("alice"), std::string::npos);
+}
+
+TEST(RedactForLogTest, RedactsEvenWhenTheMessageCannotBeDecoded) {
+    // A malformed or newer-than-us Login must still come out safe: the whole
+    // point is that a decode failure cannot become a leak.
+    std::string malformed = R"({"type":"Login","payload":{"password":"s3cret","username":"bob",)";
+    ASSERT_FALSE(decode_client_message(malformed).has_value());
+    EXPECT_EQ(redact_for_log(malformed).find("s3cret"), std::string::npos);
+}

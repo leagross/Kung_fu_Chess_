@@ -61,12 +61,13 @@ ServerLink::~ServerLink() {
 
 void ServerLink::send(const kfc::protocol::ClientMessage& message) {
     std::string encoded = kfc::protocol::encode(message);
-    logger_.log("ServerLink: sending " + encoded);
+    // Redacted: the very first thing sent is a Login, password included.
+    logger_.log("ServerLink: sending " + kfc::protocol::redact_for_log(encoded));
     socket_->send(encoded);
 }
 
 void ServerLink::on_message(const std::string& text) {
-    logger_.log("ServerLink: received " + text);
+    logger_.log("ServerLink: received " + kfc::protocol::redact_for_log(text));
     std::optional<kfc::protocol::ServerMessage> decoded = kfc::protocol::decode_server_message(text);
     if (!decoded.has_value()) {
         logger_.log("ServerLink: failed to decode message");

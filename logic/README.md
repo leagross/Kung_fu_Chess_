@@ -8,17 +8,17 @@ This is the layer everything else is built on, and it depends on nothing.
 
 ## What is in here
 
-| Folder | Responsibility |
-|--------|----------------|
-| `model/` | `Board`, `Piece`, `Position`, `PieceColor`. A piece keeps a stable identity for its whole life, so animation and logs can follow it. |
-| `rules/` | One rule class per piece kind — King, Queen, Rook, Bishop, Knight, Pawn, Drone — behind `IPieceRule`, plus the `RuleEngine` that asks the right one. Illegal moves come back with a stable machine-readable reason. |
-| `realtime/` | What makes this *Kung Fu* chess: `Motion` (a piece in transit), `RealTimeArbiter` (advancing every motion by elapsed time), `CollisionResolver` (two pieces arriving at once), cooldown policies, and the observers for score, move log and game over. |
-| `engine/` | `GameEngine` — accept or reject a move request, then advance time. `GameCore` assembles the whole stack in one place so local play and the server build it identically. |
-| `events/` | A small type-based publish/subscribe bus. Subscribe to a type, publish a value of it. Used for arrivals, game start/end and the disconnect countdown. |
-| `input/` | `Controller` (click a piece, click a destination) and `BoardMapper` (pixel → cell). Knows nothing about a window; it is handed coordinates. |
-| `io/` | Reading a board from a text layout, and printing one back. |
-| `audio/` | `SoundBoard` — maps game events to sound *cues*. Which file a cue plays, or whether it makes any noise, belongs to the UI layer. |
-| `texttests/` | `Game`, the headless local game, plus a command processor that drives it from text scripts. |
+| Folder | Responsibility | Guide |
+|--------|----------------|-------|
+| `model/` | `Board`, `Piece`, `Position`. A piece keeps a stable identity for its whole life, so animation and logs can follow it. | [README](include/kfc/model/README.md) |
+| `rules/` | One rule class per piece kind behind `IPieceRule`, plus the `RuleEngine` that asks the right one. Illegal moves come back with a stable machine-readable reason. | [README](include/kfc/rules/README.md) |
+| `realtime/` | What makes this *Kung Fu* chess: motion in transit, the arbiter that advances it, collisions, cooldowns, and the score/move-log/game-over observers. | [README](include/kfc/realtime/README.md) |
+| `engine/` | `GameEngine` (accept or reject, then advance time) and `GameCore`, which assembles the whole stack in one place. | [README](include/kfc/engine/README.md) |
+| `events/` | The type-based publish/subscribe bus and the whole-game signals. | [README](include/kfc/events/README.md) |
+| `input/` | `Controller` (click a piece, click a destination) and `BoardMapper` (pixel → cell). Knows nothing about a window. | [README](include/kfc/input/README.md) |
+| `io/` | Reading a board from a text layout, and printing one back. | [README](include/kfc/io/README.md) |
+| `audio/` | `SoundBoard` — maps game events to sound *cues*. Which file a cue plays belongs to the UI layer. | [README](include/kfc/audio/README.md) |
+| `texttests/` | `Game`, the headless local game, plus `IGameView` and the text-script driver. (The name is historic — this is production code.) | [README](include/kfc/texttests/README.md) |
 
 ## Two ideas worth knowing
 

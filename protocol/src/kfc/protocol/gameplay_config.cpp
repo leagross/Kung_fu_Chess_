@@ -1,5 +1,7 @@
 #include "kfc/protocol/gameplay_config.hpp"
 
+#include "kfc/model/piece_kind_names.hpp"
+
 #include <fstream>
 #include <optional>
 #include <stdexcept>
@@ -11,17 +13,6 @@ namespace kfc::protocol {
 namespace {
 
 using kfc::model::PieceKind;
-
-std::optional<PieceKind> piece_kind_from_string(const std::string& text) {
-    if (text == "King") return PieceKind::King;
-    if (text == "Queen") return PieceKind::Queen;
-    if (text == "Rook") return PieceKind::Rook;
-    if (text == "Bishop") return PieceKind::Bishop;
-    if (text == "Knight") return PieceKind::Knight;
-    if (text == "Pawn") return PieceKind::Pawn;
-    if (text == "Drone") return PieceKind::Drone;
-    return std::nullopt;
-}
 
 }  // namespace
 
@@ -65,7 +56,7 @@ GameplayConfig load_gameplay_config(const std::string& path) {
             if (it.key() == "default") {
                 continue;
             }
-            std::optional<PieceKind> kind = piece_kind_from_string(it.key());
+            std::optional<PieceKind> kind = kfc::model::piece_kind_from_name(it.key());
             if (!kind.has_value()) {
                 throw std::runtime_error("Unknown piece kind '" + it.key() + "' in gameplay config " + path);
             }
@@ -86,7 +77,7 @@ GameplayConfig load_gameplay_config(const std::string& path) {
     if (json.contains("piece_value")) {
         const nlohmann::json& values = json.at("piece_value");
         for (auto it = values.begin(); it != values.end(); ++it) {
-            std::optional<PieceKind> kind = piece_kind_from_string(it.key());
+            std::optional<PieceKind> kind = kfc::model::piece_kind_from_name(it.key());
             if (!kind.has_value()) {
                 throw std::runtime_error("Unknown piece kind '" + it.key() + "' in gameplay config " + path);
             }

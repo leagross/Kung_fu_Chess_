@@ -1,5 +1,7 @@
 #include "kfc/protocol/json.hpp"
 
+#include "kfc/model/piece_kind_names.hpp"
+
 #include <nlohmann/json.hpp>
 #include <cstddef>
 #include <stdexcept>
@@ -42,27 +44,17 @@ PieceColor color_from_string(const std::string& text) {
 }
 
 std::string kind_to_string(PieceKind kind) {
-    switch (kind) {
-        case PieceKind::King: return "King";
-        case PieceKind::Queen: return "Queen";
-        case PieceKind::Rook: return "Rook";
-        case PieceKind::Bishop: return "Bishop";
-        case PieceKind::Knight: return "Knight";
-        case PieceKind::Pawn: return "Pawn";
-        case PieceKind::Drone: return "Drone";
-    }
-    throw std::runtime_error("Unknown PieceKind");
+    return std::string(name_of(kind));
 }
 
 PieceKind kind_from_string(const std::string& text) {
-    if (text == "King") return PieceKind::King;
-    if (text == "Queen") return PieceKind::Queen;
-    if (text == "Rook") return PieceKind::Rook;
-    if (text == "Bishop") return PieceKind::Bishop;
-    if (text == "Knight") return PieceKind::Knight;
-    if (text == "Pawn") return PieceKind::Pawn;
-    if (text == "Drone") return PieceKind::Drone;
-    throw std::runtime_error("Unknown PieceKind '" + text + "'");
+    // Throws rather than returning nullopt: a kind we cannot read makes the
+    // whole message unusable, and decode_* turns the exception into nullopt.
+    std::optional<PieceKind> kind = piece_kind_from_name(text);
+    if (!kind.has_value()) {
+        throw std::runtime_error("Unknown PieceKind '" + text + "'");
+    }
+    return *kind;
 }
 
 std::string state_to_string(PieceState state) {

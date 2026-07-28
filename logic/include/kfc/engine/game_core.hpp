@@ -40,6 +40,25 @@ public:
              const IPieceSpeedProvider& speed_provider = kDefaultPieceSpeedProvider,
              double meters_per_cell = kDefaultMetersPerCell);
 
+    /// Neither copyable nor movable, and that is not a restriction to work
+    /// around -- it is what makes this type safe to hold.
+    ///
+    /// The members below refer to each other: RuleEngine holds a reference to
+    /// registry_, RealTimeArbiter to board_, GameEngine to board_, rule_engine_
+    /// and arbiter_. A compiler-generated move would copy those references
+    /// verbatim, so the moved-to GameCore's engine would still be driving the
+    /// moved-*from* object's board. That compiles, and then reads freed memory
+    /// the moment the source goes out of scope.
+    ///
+    /// Deleting both turns what would be a silent use-after-move into a
+    /// compile error at the call site, which is where the mistake actually is.
+    /// Hold one by value in the object that owns it, or via unique_ptr -- never
+    /// return one by value or put one in a container that reallocates.
+    GameCore(const GameCore&) = delete;
+    GameCore& operator=(const GameCore&) = delete;
+    GameCore(GameCore&&) = delete;
+    GameCore& operator=(GameCore&&) = delete;
+
     /// The live board. Non-const overload exists for symmetry with the
     /// arbiter's own mutable access; read-only callers should take the
     /// const one.

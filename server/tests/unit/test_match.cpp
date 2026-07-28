@@ -322,11 +322,20 @@ TEST(MatchDisconnectTest, ForfeitReportsTheDisconnectReasonToTheResultHook) {
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
     bool ok = false;
     while (std::chrono::steady_clock::now() < deadline) {
-        std::lock_guard<std::mutex> guard(result_mutex);
-        if (fired) {
-            ok = true;
-            break;
+        {
+            std::lock_guard<std::mutex> guard(result_mutex);
+            if (fired) {
+                ok = true;
+                break;
+            }
         }
+        // Slept with the lock *released* -- note the inner scope above. on_result
+        // runs on the match's own tick thread and needs this very mutex to
+        // record the result; holding it across the sleep leaves it taken
+        // essentially all the time, and on a platform whose mutexes let a
+        // re-locking thread barge ahead of a waiting one (glibc does; Windows
+        // SRW locks happen not to) the tick thread never gets in and the result
+        // never lands, however long the timeout is.
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 

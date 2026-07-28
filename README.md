@@ -10,7 +10,7 @@ layers that each build and test on their own. Play is local (one keyboard) or
 networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators.
 
-**319 tests** cover the logic, protocol, database and server.
+**322 tests** cover the logic, protocol, database and server.
 
 ---
 
@@ -169,25 +169,23 @@ compiled on every push rather than only when someone happens to try them.
 
 ```mermaid
 flowchart TD
-    subgraph app["Applications"]
-        GUI["kfc_gui_app<br/><i>windowed client</i>"]
-        SRV["kfc_server<br/><i>headless</i>"]
-        CLI["kfc_app<br/><i>text-script runner</i>"]
+    GUI["kfc_gui_app<br/><small>windowed client</small>"]
+    SRV["kfc_server<br/><small>headless</small>"]
+    CLI["kfc_app<br/><small>text-script runner</small>"]
+
+    subgraph plat["ui/ — the only platform-specific layer"]
+        UI["rendering · animation · input · ServerLink"]
     end
 
-    subgraph plat["Platform-dependent (ui/ only)"]
-        UI["ui/<br/>rendering · animation · input · ServerLink"]
+    subgraph portable["portable C++20 — no OS, no graphics"]
+        SERVER["server/<br/><small>rooms · matches · WebSocket</small>"]
+        DB["database/<br/><small>accounts · passwords · ELO</small>"]
+        PROTO["protocol/<br/><small>shared JSON messages</small>"]
+        LOGIC["logic/<br/><small>board · rules · real-time · engine</small>"]
     end
 
-    subgraph portable["Portable C++20 — no OS, no graphics"]
-        SERVER["server/<br/>rooms · matches · WebSocket"]
-        DB["database/<br/>accounts · passwords · ELO"]
-        PROTO["protocol/<br/>shared JSON messages"]
-        LOGIC["logic/<br/>board · rules · real-time · engine"]
-    end
-
-    ASSETS["assets/<br/>sprites · sounds"]
-    CONFIG["config/gameplay.json<br/><i>speeds · cooldowns · values</i>"]
+    ASSETS["assets/<br/><small>sprites · sounds</small>"]
+    CONFIG["config/gameplay.json<br/><small>speeds · cooldowns · values</small>"]
 
     GUI --> UI
     CLI --> LOGIC
@@ -195,21 +193,17 @@ flowchart TD
 
     UI --> PROTO
     UI --> LOGIC
-    UI -.reads.-> ASSETS
+    UI -.-> ASSETS
 
     SERVER --> DB
     SERVER --> PROTO
     SERVER --> LOGIC
 
     PROTO --> LOGIC
+    PROTO -.-> CONFIG
 
-    PROTO -.reads.-> CONFIG
-    LOGIC -.- nothing["depends on nothing"]
-
-    style LOGIC fill:#2d6a4f,color:#fff
-    style portable fill:#f0f7f4,stroke:#2d6a4f
-    style plat fill:#fff4e6,stroke:#d97706
-    style nothing fill:none,stroke:none,color:#888
+    classDef core stroke-width:3px
+    class LOGIC core
 ```
 
 **Arrows point from a layer to what it depends on, and never the other way.**
@@ -217,38 +211,6 @@ flowchart TD
 suite runs with no OpenCV, no socket and no database. `ui/` is the only layer
 with platform-specific code, and even there it is confined to two interfaces
 (`IRoomPrompt`, `ISoundPlayer`) and one screen-metrics file.
-
-### On disk
-
-```
-Kung_Fu_Chess/
-├── logic/                    the game itself — depends on nothing
-│   ├── include/kfc/
-│   │   ├── model/            Board, Piece, Position          → README
-│   │   ├── rules/            one rule per piece + RuleEngine → README
-│   │   ├── realtime/         motion, arbiter, collisions     → README
-│   │   ├── engine/           GameEngine, GameCore            → README
-│   │   ├── events/           the publish/subscribe bus       → README
-│   │   ├── input/            Controller, BoardMapper         → README
-│   │   ├── io/               board ⇄ text                    → README
-│   │   ├── audio/            events → sound cues             → README
-│   │   └── texttests/        local Game + IGameView          → README
-│   ├── src/                  implementations, mirroring include/
-│   ├── apps/kfc_app/         the text-script runner
-│   └── tests/                unit + integration
-│
-├── protocol/                 the JSON messages both sides share
-├── database/                 SQLite accounts, salted hashes, ELO
-├── server/                   RoomManager · Match · MatchAudience
-│                             DisconnectWatch · WebSocketGameServer
-├── ui/                       OpenCV rendering, animation, input,
-│                             ServerLink, dialogs, audio, platform
-│
-├── assets/                   pieces/ and sounds/
-├── config/gameplay.json      speeds, cooldowns, piece values
-├── third_party/OpenCV_451/   Windows OpenCV (not committed)
-└── .github/workflows/ci.yml  builds every target on Linux
-```
 
 Every directory in the table at the top of this file has its own README, and
 inside `logic/` each sub-directory has one too — linked from

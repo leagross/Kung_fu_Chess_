@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -186,6 +187,10 @@ private:
     bool spectator_ = false;
     // Also from the Welcome -- the room's server-assigned id, to display.
     std::string room_name_;
+    // How far the game had got when our Welcome's board was snapshotted, and
+    // then how far we have applied. Any BoardUpdate at or below this is already
+    // reflected in the board we were handed -- see apply_board_update.
+    std::uint64_t revision_ = 0;
     // And the arrivals that happened before we arrived. Replayed by the caller
     // into its own observers, not onto the bus: these already happened, so they
     // must not fire sounds or animations a second time.

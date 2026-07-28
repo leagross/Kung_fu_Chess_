@@ -122,6 +122,7 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
     spectator_ = welcome.spectator;
     room_name_ = welcome.room;
     history_ = welcome.history;
+    revision_ = welcome.revision;
 
     kfc::model::Board board(welcome.board.width, welcome.board.height);
     for (const kfc::model::Piece& piece : welcome.board.pieces) {
@@ -265,6 +266,19 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
     if (!board_.has_value()) {
         return;
     }
+
+    // Already in the board we were handed. The server registers a joining or
+    // returning client for broadcasts *before* snapshotting its board, so that
+    // nothing can be missed in between -- which means the first update or two
+    // may describe arrivals the snapshot already contains. Replaying one of
+    // those would move a piece a second time and diverge this board from the
+    // server's for good.
+    if (update.revision != 0 && update.revision <= revision_) {
+        logger_.log("ServerLink: skipping update " + std::to_string(update.revision) +
+                    ", already covered by the snapshot at " + std::to_string(revision_));
+        return;
+    }
+    revision_ = update.revision;
 
     for (const kfc::model::ArrivalEvent& event : update.arrival_events) {
         // Mirrors RealTimeArbiter::resolve_arrival's own net effect on Board

@@ -71,15 +71,17 @@ std::optional<kfc::model::PieceColor> Match::join(const std::string& username, S
 void Match::join_spectator(const std::string& username, SendFn send, CloseFn close) {
     logger_.log("Match: '" + username + "' is watching");
 
-    // Snapshotted before registering, so this viewer's Welcome can never
-    // contain a board *newer* than a broadcast it also receives.
-    kfc::protocol::Welcome welcome = welcome_for(kfc::model::PieceColor::White, /*spectator=*/true);
-
-    // Registered before the Welcome goes out, so no broadcast in between is
-    // missed. Both seats being taken is exactly "the match has started" -- a
-    // viewer can only ever exist once they are.
+    // Registered *first*, snapshotted second. The other order loses updates:
+    // a BoardUpdate broadcast between the snapshot and the registration reaches
+    // nobody, and the viewer's board stays wrong for the rest of the game.
+    //
+    // This way nothing can be missed. The cost is the opposite risk -- an
+    // update the snapshot already contains -- and that is what the revision is
+    // for: the client discards any BoardUpdate at or below Welcome::revision.
     bool already_started = audience_.both_seats_taken();
     audience_.watch(send, std::move(close));
+
+    kfc::protocol::Welcome welcome = welcome_for(kfc::model::PieceColor::White, /*spectator=*/true);
 
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{welcome}));
     // Sent to this one connection only: everyone else was told when it actually
@@ -94,12 +96,14 @@ kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spe
     // walking in mid-game must see the game as it actually is. Snapshotted
     // under board_mutex_ because this runs on a connection thread, against a
     // board the tick thread may be mid-mutation of.
-    kfc::protocol::Welcome welcome{color, {}, spectator, room_name_, {}};
+    kfc::protocol::Welcome welcome{color, {}, spectator, room_name_, {}, 0};
     std::lock_guard<std::mutex> board_guard(board_mutex_);
     welcome.board = kfc::protocol::snapshot_of(core_.board());
-    // Snapshotted under the same lock as the board, so the two can never
-    // disagree about how far the game has got.
+    // All three read under the one lock the tick thread also holds while it
+    // changes them, so the board, the history and the revision always describe
+    // the same instant.
     welcome.history = history_;
+    welcome.revision = revision_;
     return welcome;
 }
 
@@ -168,6 +172,7 @@ void Match::tick_loop() {
         bool frozen = state() == MatchState::Frozen;
 
         kfc::model::ArrivalEvents events;
+        std::uint64_t at_revision = 0;
         {
             std::lock_guard<std::mutex> board_guard(board_mutex_);
             for (auto& [from, message] : pending) {
@@ -186,10 +191,17 @@ void Match::tick_loop() {
                 // Kept so a client joining or returning mid-game can rebuild the
                 // move list and score it never saw -- see welcome_for.
                 history_.insert(history_.end(), events.begin(), events.end());
+                if (!events.empty()) {
+                    // Bumped here, under the same lock as the board change, so
+                    // a snapshot taken concurrently can never report a revision
+                    // that disagrees with the position it contains.
+                    ++revision_;
+                }
             }
+            at_revision = revision_;
         }
         if (!events.empty()) {
-            broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::BoardUpdate{events}});
+            broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::BoardUpdate{events, at_revision}});
 
             kfc::model::GameOverObserver game_over;
             for (const auto& event : events) {
@@ -322,10 +334,17 @@ void Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) 
 
     logger_.log("Match: " + color_name(color) + " reconnected");
 
-    // Swap the dead connection out for the live one *before* any broadcast, so
-    // the OpponentReconnected below reaches the returning player too.
-    kfc::protocol::Welcome welcome = welcome_for(color, /*spectator=*/false);
+    // Reseated *before* the snapshot, for the same reason join_spectator is --
+    // an update broadcast in between would otherwise reach neither the dead
+    // connection nor the new one, and the returning player would resume from a
+    // position that never existed. Welcome::revision lets them discard the
+    // updates the snapshot already covers.
+    //
+    // It also has to happen before any broadcast, so the OpponentReconnected
+    // below reaches the returning player too.
     audience_.reseat(color, send, std::move(close));
+
+    kfc::protocol::Welcome welcome = welcome_for(color, /*spectator=*/false);
 
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{welcome}));
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{}}));

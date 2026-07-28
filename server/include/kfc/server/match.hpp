@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -231,6 +232,12 @@ private:
     kfc::protocol::GameplayCooldownPolicy standard_policy_;
     kfc::protocol::GameplayCooldownPolicy jump_policy_;
     kfc::model::GameCore core_;
+
+    // How far the game has got: bumped once per tick that produces arrivals,
+    // under board_mutex_ together with the board change itself, so a snapshot
+    // and a revision taken under that lock always agree. Sent with every
+    // BoardUpdate and every Welcome -- see BoardUpdate::revision.
+    std::uint64_t revision_ = 0;
 
     // Every arrival this match has produced, oldest first -- what a joining or
     // returning client needs to rebuild the move list and score it never saw.

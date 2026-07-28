@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 
 using nlohmann::json;
@@ -260,11 +261,12 @@ std::string encode(const ServerMessage& message) {
                                                 {"board", m.board},
                                                 {"spectator", m.spectator},
                                                 {"room", m.room},
-                                                {"history", m.history}});
+                                                {"history", m.history},
+                                                {"revision", m.revision}});
             } else if constexpr (std::is_same_v<T, MotionStarted>) {
                 return envelope("MotionStarted", json{{"motion", m.motion}});
             } else if constexpr (std::is_same_v<T, BoardUpdate>) {
-                return envelope("BoardUpdate", json{{"arrival_events", m.arrival_events}});
+                return envelope("BoardUpdate", json{{"arrival_events", m.arrival_events}, {"revision", m.revision}});
             } else if constexpr (std::is_same_v<T, MoveRejected>) {
                 return envelope("MoveRejected", json{{"reason", m.reason}});
             } else if constexpr (std::is_same_v<T, GameOver>) {
@@ -382,6 +384,7 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
             if (payload.contains("history")) {
                 payload.at("history").get_to(welcome.history);
             }
+            welcome.revision = payload.value("revision", std::uint64_t{0});
             return ServerMessage{welcome};
         }
         if (type == "MotionStarted") {
@@ -392,6 +395,7 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
         if (type == "BoardUpdate") {
             BoardUpdate update;
             payload.at("arrival_events").get_to(update.arrival_events);
+            update.revision = payload.value("revision", std::uint64_t{0});
             return ServerMessage{update};
         }
         if (type == "MoveRejected") {

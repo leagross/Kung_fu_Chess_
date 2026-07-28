@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <variant>
@@ -49,6 +50,15 @@ struct Welcome {
     /// correct board beside an empty move log and a score of 0-0. Empty for a
     /// match that has not started.
     std::vector<kfc::model::ArrivalEvent> history;
+    /// How far the game had got when `board` was snapshotted -- see
+    /// BoardUpdate::revision. The client remembers this and ignores any update
+    /// at or below it, because the snapshot already reflects those arrivals.
+    ///
+    /// This is what makes joining a game in progress safe. A joiner is
+    /// registered for broadcasts *before* its snapshot is taken, so it can
+    /// never miss an update; the cost is that it may receive one the snapshot
+    /// already contains, and the revision is how it tells.
+    std::uint64_t revision = 0;
 };
 
 // --- Client -> Server ---
@@ -131,6 +141,11 @@ struct MotionStarted {
 /// (Board/Motion/CollisionResolver) that alias happens to live in.
 struct BoardUpdate {
     std::vector<kfc::model::ArrivalEvent> arrival_events;
+    /// How far the game has got *after* applying these arrivals: a counter the
+    /// server bumps once per update that produces any. Monotonic within a
+    /// match, so a client can tell an update it has already accounted for from
+    /// one it has not -- see Welcome::revision.
+    std::uint64_t revision = 0;
 };
 
 /// Mirrors MoveResult::reason verbatim when a Move/JumpRequest was rejected

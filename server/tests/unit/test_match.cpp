@@ -421,6 +421,109 @@ TEST(MatchJoinTest, AWelcomeBeforeAnyMoveCarriesAnEmptyHistory) {
     match.stop();
 }
 
+// --- Revisions: joining mid-game without losing or double-applying updates ---
+
+TEST(MatchRevisionTest, EachUpdateCarriesAHigherRevisionThanTheLast) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_revision_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    ASSERT_TRUE(white_sink.wait_for(2000, is_board_update));
+
+    // A revision only means anything if it moves: it is what lets a client tell
+    // an update it has accounted for from one it has not.
+    std::uint64_t highest = 0;
+    for (const std::string& text : white_sink.snapshot()) {
+        std::optional<ServerMessage> decoded = decode_server_message(text);
+        if (decoded.has_value() && std::holds_alternative<BoardUpdate>(*decoded)) {
+            std::uint64_t revision = std::get<BoardUpdate>(*decoded).revision;
+            EXPECT_GT(revision, highest) << "revisions must strictly increase";
+            highest = revision;
+        }
+    }
+    EXPECT_GT(highest, 0u) << "at least one update should have been broadcast";
+
+    match.stop();
+}
+
+TEST(MatchRevisionTest, AWelcomesRevisionMatchesTheBoardItCarries) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_revision_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    // Before anything has happened, a Welcome is at revision 0.
+    bool fresh_welcome_at_zero = false;
+    for (const std::string& text : white_sink.snapshot()) {
+        std::optional<ServerMessage> decoded = decode_server_message(text);
+        if (decoded.has_value() && std::holds_alternative<Welcome>(*decoded)) {
+            fresh_welcome_at_zero = std::get<Welcome>(*decoded).revision == 0;
+        }
+    }
+    EXPECT_TRUE(fresh_welcome_at_zero);
+
+    // Play a move through, then let someone in.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    ASSERT_TRUE(white_sink.wait_for(2000, is_board_update));
+
+    RecordingSink latecomer;
+    match.join_spectator("carol", latecomer.as_send_fn());
+
+    // Their Welcome must say how far the board it contains has got, or they
+    // cannot tell which updates they still need.
+    EXPECT_TRUE(latecomer.wait_for(1000, [](const ServerMessage& m) {
+        return std::holds_alternative<Welcome>(m) && std::get<Welcome>(m).revision > 0;
+    }));
+
+    match.stop();
+}
+
+TEST(MatchRevisionTest, AJoinerIsRegisteredBeforeItsSnapshotIsTaken) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_revision_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    // Join while a move is in flight, so the tick thread is broadcasting around
+    // the same moment the viewer is being let in. Registering after the
+    // snapshot would let that update fall between the two and reach nobody.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    RecordingSink latecomer;
+    match.join_spectator("carol", latecomer.as_send_fn());
+
+    // Whichever way the race went, the viewer ends up consistent: it either
+    // received the update, or its snapshot already contained it (revision > 0).
+    ASSERT_TRUE(latecomer.wait_for(2000, [](const ServerMessage& m) {
+        return std::holds_alternative<Welcome>(m);
+    }));
+    bool saw_update = latecomer.wait_for(2000, is_board_update);
+    bool snapshot_included_it = false;
+    for (const std::string& text : latecomer.snapshot()) {
+        std::optional<ServerMessage> decoded = decode_server_message(text);
+        if (decoded.has_value() && std::holds_alternative<Welcome>(*decoded)) {
+            snapshot_included_it = std::get<Welcome>(*decoded).revision > 0;
+        }
+    }
+    EXPECT_TRUE(saw_update || snapshot_included_it)
+        << "the arrival reached the viewer through neither the snapshot nor a broadcast";
+
+    match.stop();
+}
+
 TEST(MatchReleaseTest, ForfeitAfterTheCountdownReleasesBothPlayers) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_release_test.log");
     // Short grace and short release delay so the whole sequence resolves fast.

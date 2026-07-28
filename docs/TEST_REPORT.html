@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kung Fu Chess — דוח טסטים</title>
+<style>
+  :root {
+    --ink: #1B2119;
+    --ink-soft: rgba(27,33,25,0.68);
+    --ink-faint: rgba(27,33,25,0.40);
+    --paper: #EFF1EC;
+    --paper-raised: #E4E7DF;
+    --paper-card: #F6F7F3;
+    --brass: #8C6224;
+    --brass-strong: #6E4C1B;
+    --brass-soft: rgba(140,98,36,0.12);
+    --jade: #2F5646;
+    --jade-soft: rgba(47,86,70,0.12);
+    --pass: #2F7D4F;
+    --pass-soft: rgba(47,125,79,0.13);
+    --rule: rgba(27,33,25,0.14);
+    --code-bg: rgba(27,33,25,0.045);
+    --code-border: rgba(27,33,25,0.12);
+    --shadow: rgba(27,33,25,0.10);
+    --font-display: "Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+    --font-body: -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+    --font-mono: "SF Mono","Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #E7E9E1;
+      --ink-soft: rgba(231,233,225,0.72);
+      --ink-faint: rgba(231,233,225,0.44);
+      --paper: #14180F;
+      --paper-raised: #1B2115;
+      --paper-card: #1A1F14;
+      --brass: #D3A55C;
+      --brass-strong: #E6BC79;
+      --brass-soft: rgba(211,165,92,0.14);
+      --jade: #6FA98E;
+      --jade-soft: rgba(111,169,142,0.14);
+      --pass: #7FCB9C;
+      --pass-soft: rgba(127,203,156,0.16);
+      --rule: rgba(231,233,225,0.16);
+      --code-bg: rgba(231,233,225,0.055);
+      --code-border: rgba(231,233,225,0.14);
+      --shadow: rgba(0,0,0,0.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); }
+  .doc {
+    direction: rtl; text-align: right; font-family: var(--font-body); color: var(--ink);
+    background: var(--paper); max-width: 900px; margin: 0 auto; padding: 3rem 1.5rem 6rem; line-height: 1.6; font-size: 16px;
+  }
+  code { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; font-size: 0.86em; }
+  header.masthead { max-width: 640px; margin: 0 auto 2.2rem; text-align: center; }
+  .eyebrow { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--jade); margin: 0 0 0.9rem; }
+  h1.title { font-family: var(--font-display); font-size: clamp(1.7rem, 5vw, 2.3rem); font-weight: 600; margin: 0 0 0.5rem; text-wrap: balance; }
+  .subtitle { font-size: 0.95rem; color: var(--ink-soft); margin: 0; }
+
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin: 0 0 2rem; }
+  .stat-tile { background: var(--paper-card); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem 1.1rem; text-align: center; }
+  .stat-tile .n { font-family: var(--font-display); font-size: 1.8rem; font-weight: 600; color: var(--pass); font-variant-numeric: tabular-nums; }
+  .stat-tile.brass .n { color: var(--brass-strong); }
+  .stat-tile .l { font-size: 0.72rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 0.2rem; }
+  @media (max-width: 560px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+
+  .search-box { width: 100%; box-sizing: border-box; font-family: var(--font-body); font-size: 0.96rem; padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid var(--rule); background: var(--paper-card); color: var(--ink); direction: rtl; margin: 0 0 1.6rem; }
+  .search-box:focus { outline: none; border-color: var(--brass); }
+
+  .suite { background: var(--paper-card); border: 1px solid var(--rule); border-radius: 10px; margin: 0 0 0.7rem; overflow: hidden; }
+  .suite-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.75rem 1rem; cursor: pointer; user-select: none; }
+  .suite-head:hover { background: var(--paper-raised); }
+  .suite-name { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; font-weight: 700; font-size: 0.92rem; }
+  .suite-file { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; font-size: 0.76rem; color: var(--ink-faint); margin-inline-start: 0.6rem; }
+  .suite-meta { display: flex; align-items: center; gap: 0.5rem; }
+  .pill { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; font-size: 0.72rem; font-weight: 700; padding: 0.2em 0.65em; border-radius: 999px; background: var(--pass-soft); color: var(--pass); }
+  .caret { color: var(--ink-faint); font-size: 0.75rem; transition: transform 0.15s ease; }
+  .suite.open .caret { transform: rotate(90deg); }
+  .suite-body { display: none; border-top: 1px solid var(--rule); padding: 0.3rem 0; }
+  .suite.open .suite-body { display: block; }
+  .test-row { display: flex; align-items: baseline; justify-content: space-between; gap: 0.8rem; padding: 0.45rem 1.1rem; font-size: 0.85rem; }
+  .test-row:hover { background: var(--paper-raised); }
+  .test-row .status { color: var(--pass); font-weight: 700; flex-shrink: 0; }
+  .test-row .tname { flex: 1; }
+  .test-row .loc { font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; color: var(--ink-faint); font-size: 0.76rem; flex-shrink: 0; }
+  .hidden-row { display: none !important; }
+
+  .toolbar { display: flex; gap: 0.6rem; margin: 0 0 1rem; }
+  .toolbar button {
+    font-family: var(--font-body); font-size: 0.82rem; padding: 0.4rem 0.9rem; border-radius: 8px;
+    border: 1px solid var(--rule); background: var(--paper-card); color: var(--ink-soft); cursor: pointer;
+  }
+  .toolbar button:hover { border-color: var(--brass); color: var(--brass-strong); }
+
+  footer.colophon { text-align: center; color: var(--ink-faint); font-size: 0.8rem; margin-top: 2.5rem; }
+</style>
+</head>
+<body>
+<div class="doc">
+  <header class="masthead">
+    <p class="eyebrow">kfc_tests.exe · gtest_output=xml</p>
+    <h1 class="title">דוח טסטים</h1>
+    <p class="subtitle">תוצאת ריצה אמיתית של כל 139 הטסטים — נוצר מ-<code>test_results.xml</code> שהריצה עצמה ייצרה.</p>
+  </header>
+
+  <div class="stat-row">
+    <div class="stat-tile"><div class="n" id="statTotal">—</div><div class="l">סה״כ טסטים</div></div>
+    <div class="stat-tile"><div class="n" id="statSuites">—</div><div class="l">חבורות (suites)</div></div>
+    <div class="stat-tile"><div class="n" id="statPass">—</div><div class="l">עברו</div></div>
+    <div class="stat-tile brass"><div class="n" id="statTime">—</div><div class="l">זמן ריצה כולל</div></div>
+  </div>
+
+  <input id="searchBox" class="search-box" type="text" placeholder="חיפוש — שם טסט, שם חבורה, שם קובץ…" autocomplete="off">
+  <div class="toolbar">
+    <button id="expandAll">פתח הכל</button>
+    <button id="collapseAll">סגור הכל</button>
+  </div>
+
+  <div id="suiteList"></div>
+
+  <footer class="colophon">Kung Fu Chess TDD · kfc_core — נוצר מריצת <code>kfc_tests.exe --gtest_output=xml</code></footer>
+</div>
+
+<script>
+var SUITES = [
+  {"name":"PositionTest","file":"test_position.cpp","tests":[
+    {"n":"EqualPositionsWithSameRowAndCol","l":6},
+    {"n":"DifferentRowMakesPositionsUnequal","l":12},
+    {"n":"DifferentColMakesPositionsUnequal","l":18},
+    {"n":"ReadableRepresentationIncludesRowAndCol","l":24}]},
+  {"name":"PieceTest","file":"test_piece.cpp","tests":[
+    {"n":"StoresIdColorKindAndInitialCell","l":6},
+    {"n":"StateCanTransitionToMoving","l":17},
+    {"n":"StateCanTransitionToCaptured","l":26}]},
+  {"name":"PieceIdTest","file":"test_piece.cpp","tests":[
+    {"n":"DifferentValuesAreNotEqual","l":35}]},
+  {"name":"BoardTest","file":"test_board.cpp","tests":[
+    {"n":"DimensionsAreDerivedFromConstructor","l":16},
+    {"n":"PositionInsideBoardIsInBounds","l":23},
+    {"n":"PositionOutsideBoardIsNotInBounds","l":30},
+    {"n":"EmptyCellReturnsNoPiece","l":37},
+    {"n":"OccupiedCellReturnsTheCorrectPiece","l":44},
+    {"n":"AddingTwoPiecesToTheSameCellFails","l":56},
+    {"n":"MovingAPieceUpdatesSourceAndDestination","l":64},
+    {"n":"RemovingACapturedPieceClearsItsCell","l":78},
+    {"n":"SetPieceStateUpdatesStateWithoutTouchingAnythingElse","l":88}]},
+  {"name":"RookRuleTest","file":"test_piece_rules.cpp","tests":[
+    {"n":"MovesFreelyAlongEmptyRowAndColumn","l":27},
+    {"n":"CannotMoveDiagonally","l":42},
+    {"n":"StopsBeforeAFriendlyBlocker","l":54},
+    {"n":"CapturesAnEnemyBlockerButDoesNotPassIt","l":70}]},
+  {"name":"PieceRuleRegistryTest","file":"test_piece_rules.cpp","tests":[
+    {"n":"ReturnsTheRuleRegisteredForAKind","l":85},
+    {"n":"ThrowsWhenNoRuleIsRegisteredForAKind","l":99}]},
+  {"name":"SlidingDestinationsTest","file":"test_movement_geometry.cpp","tests":[
+    {"n":"WalksToTheBoardEdgeInEachGivenDirection","l":27},
+    {"n":"CombinesDestinationsFromEveryDirectionGiven","l":42},
+    {"n":"StopsBeforeAFriendlyPieceExcludingIt","l":56},
+    {"n":"IncludesAnEnemyPieceThenStopsPastIt","l":72},
+    {"n":"NeverWalksPastTheBoardEdge","l":87},
+    {"n":"ReturnsNothingWhenNoDirectionsAreGiven","l":99}]},
+  {"name":"SteppingDestinationsTest","file":"test_movement_geometry.cpp","tests":[
+    {"n":"IncludesEveryInBoundsOffset","l":112},
+    {"n":"SkipsOffsetsThatFallOutsideTheBoard","l":128},
+    {"n":"ExcludesAnOffsetOccupiedByAFriendlyPiece","l":141},
+    {"n":"IncludesAnOffsetOccupiedByAnEnemyPiece","l":155},
+    {"n":"ReturnsNothingWhenNoOffsetsAreGiven","l":169}]},
+  {"name":"RuleEngineTest","file":"test_rule_engine.cpp","tests":[
+    {"n":"AcceptsALegalRookMove","l":25},
+    {"n":"RejectsAMoveFromAnEmptySource","l":39},
+    {"n":"RejectsADestinationOutsideTheBoard","l":52},
+    {"n":"RejectsAMoveOntoAFriendlyPiece","l":66},
+    {"n":"RejectsAMoveTheRuleDoesNotAllow","l":81},
+    {"n":"AcceptsAMoveThatCapturesAnEnemyPiece","l":95}]},
+  {"name":"GameEngineTest","file":"test_game_engine.cpp","tests":[
+    {"n":"AcceptsALegalMoveAndDelegatesToRuleEngine","l":55},
+    {"n":"RejectsAnIllegalMoveWithTheRuleEnginesReason","l":67},
+    {"n":"LeavesTheBoardUnchangedImmediatelyAfterARequestBeforeAnyWait","l":79},
+    {"n":"MovesThePieceOnceWaitCoversTheFullDuration","l":91},
+    {"n":"RejectsASecondMoveOfTheSamePieceWhileItIsStillInProgress","l":104},
+    {"n":"AcceptsAnUnrelatedPiecesMoveWhileAnotherPieceIsStillInProgress","l":118},
+    {"n":"AcceptsANewMoveImmediatelyAfterArrivalWithNoCooldown","l":134},
+    {"n":"CapturingANonKingPieceDoesNotEndTheGame","l":149},
+    {"n":"CapturingTheEnemyKingEndsTheGame","l":164},
+    {"n":"RejectsAnyFurtherMoveAfterTheGameHasEnded","l":177}]},
+  {"name":"RealTimeArbiterTest","file":"test_real_time_arbiter.cpp","tests":[
+    {"n":"PieceIsNotBusyInitially","l":24},
+    {"n":"PieceIsBusyRightAfterStartingAMotion","l":31},
+    {"n":"AnUnrelatedPieceIsNotBusyWhileAnotherOnesMotionIsActive","l":44},
+    {"n":"DoesNotArriveOneMillisecondBeforeDuration","l":56},
+    {"n":"ArrivesAfterExactlyItsDuration","l":73},
+    {"n":"PieceIsNoLongerBusyAfterArrivalWithNoCooldown","l":89},
+    {"n":"PieceStaysBusyDuringItsCooldownAfterArrival","l":103},
+    {"n":"PieceIsFreeAgainOnceItsCooldownFullyElapses","l":117},
+    {"n":"PartialWaitsAccumulateToTheSameResultAsOneFullWait","l":132},
+    {"n":"ArrivalEventReportsNoCaptureOnAnEmptyDestination","l":149},
+    {"n":"ArrivalEventReportsTheCapturedPieceWhenDestinationWasOccupied","l":164},
+    {"n":"TwoDifferentPiecesCanHaveActiveMotionsAtTheSameTime","l":181},
+    {"n":"AWhitePawnArrivingOnRowZeroIsPromotedToAQueen","l":200},
+    {"n":"ABlackPawnArrivingOnTheLastRowIsPromotedToAQueen","l":217},
+    {"n":"WhicheverMotionStartedFirstWinsAHeadOnCollisionAndTheOtherIsNotResurrected","l":233},
+    {"n":"APawnArrivingShortOfTheLastRowIsNotPromoted","l":256},
+    {"n":"AnOrdinaryMoveMarksThePieceAsHavingMoved","l":272},
+    {"n":"AJumpInPlaceDoesNotMarkThePieceAsHavingMoved","l":288},
+    {"n":"StartingAMotionMarksThePieceAsMoving","l":304},
+    {"n":"ArrivalReturnsTheMoverToIdle","l":319},
+    {"n":"ACapturedPiecesReportedSnapshotIsMarkedCaptured","l":335}]},
+  {"name":"BishopRuleTest","file":"test_piece_rules_remaining.cpp","tests":[
+    {"n":"MovesDiagonallyNotStraight","l":31},
+    {"n":"StopsBeforeAFriendlyBlockerOnTheDiagonal","l":45}]},
+  {"name":"QueenRuleTest","file":"test_piece_rules_remaining.cpp","tests":[
+    {"n":"CombinesRookAndBishopMovement","l":63}]},
+  {"name":"KnightRuleTest","file":"test_piece_rules_remaining.cpp","tests":[
+    {"n":"JumpsInAnLShape","l":79},
+    {"n":"JumpsOverBlockersOnAllAdjacentCells","l":93}]},
+  {"name":"KingRuleTest","file":"test_piece_rules_remaining.cpp","tests":[
+    {"n":"MovesExactlyOneCellInEveryDirection","l":117}]},
+  {"name":"PawnRuleTest","file":"test_piece_rules_remaining.cpp","tests":[
+    {"n":"WhitePawnMovesOneCellTowardDecreasingRow","l":134},
+    {"n":"BlackPawnMovesOneCellTowardIncreasingRow","l":147},
+    {"n":"CannotMoveStraightForwardOntoAnOccupiedCell","l":160},
+    {"n":"CapturesDiagonallyOntoAnEnemyPiece","l":174},
+    {"n":"CannotMoveDiagonallyOntoAnEmptyCell","l":188},
+    {"n":"CannotMoveTwoCellsOnceThePieceHasAlreadyMoved","l":201},
+    {"n":"WhitePawnHasATwoCellOpeningMoveWhenItHasNotMovedYet","l":214},
+    {"n":"BlackPawnHasATwoCellOpeningMoveWhenItHasNotMovedYet","l":226},
+    {"n":"TheTwoCellOpeningMoveIsAvailableFromAnyRowNotJustTheTraditionalOne","l":238},
+    {"n":"TwoCellOpeningMoveIsBlockedIfThePathIsNotClear","l":253}]},
+  {"name":"CooldownPolicyTest","file":"test_jump_in_place.cpp","tests":[
+    {"n":"OnlyJumpImposesARealCooldownInTheCommonRoute","l":51}]},
+  {"name":"MotionFactoryTest","file":"test_jump_in_place.cpp","tests":[
+    {"n":"CreateMoveDurationScalesWithCellSteps","l":61},
+    {"n":"CreateMoveUsesTheStandardCooldown","l":73},
+    {"n":"CreateJumpHasSourceEqualToDestination","l":84},
+    {"n":"CreateJumpUsesTheJumpCooldownNotTheStandardOne","l":96}]},
+  {"name":"RequestJumpTest","file":"test_jump_in_place.cpp","tests":[
+    {"n":"RejectsAnEmptyCell","l":109},
+    {"n":"AcceptsAJumpForAnIdlePiece","l":118},
+    {"n":"RejectsASecondJumpWhileTheFirstIsStillInFlight","l":129}]},
+  {"name":"JumpRaceTest","file":"test_jump_in_place.cpp","tests":[
+    {"n":"DefenderWinsWhenTheAttackerArrivesWhileTheJumpIsStillAirborne","l":150},
+    {"n":"AttackerWinsWhenTheDefenderHasAlreadyLandedAndIsResting","l":168}]},
+  {"name":"DroneRuleTest","file":"test_drone_rule.cpp","tests":[
+    {"n":"CanMoveOneOrTwoCellsAlongACardinalDirection","l":28},
+    {"n":"CannotMoveDiagonally","l":42},
+    {"n":"CannotMoveThreeCellsInAStraightLine","l":55},
+    {"n":"JumpsOverABlockerToReachTwoCellsAway","l":68},
+    {"n":"CannotLandOnAFriendlyPiece","l":82},
+    {"n":"CapturesAnEnemyPieceAtRange","l":96}]},
+  {"name":"MotionFactoryDroneTest","file":"test_drone_rule.cpp","tests":[
+    {"n":"CreateMoveIsSlowerForADroneThanForAnEquivalentMove","l":110}]},
+  {"name":"BoardParserTest","file":"test_board_parser.cpp","tests":[
+    {"n":"AcceptsARectangularBoard","l":11},
+    {"n":"RejectsInconsistentRowWidth","l":21},
+    {"n":"RejectsAnUnknownPieceToken","l":33},
+    {"n":"RejectsAnEmptyBoard","l":45},
+    {"n":"AssignsSequentialPieceIdsInReadingOrder","l":57},
+    {"n":"ParsesTheDroneToken","l":71}]},
+  {"name":"BoardPrinterTest","file":"test_board_printer.cpp","tests":[
+    {"n":"RoundTripsASimpleBoard","l":11},
+    {"n":"PrintsEmptyCellsAsDots","l":22},
+    {"n":"PrintsTheDroneToken","l":30}]},
+  {"name":"BoardMapperTest","file":"test_board_mapper.cpp","tests":[
+    {"n":"XZeroToNinetyNineMapsToColumnZero","l":8},
+    {"n":"XOneHundredToOneNinetyNineMapsToColumnOne","l":17},
+    {"n":"YOneHundredToOneNinetyNineMapsToRowOne","l":26},
+    {"n":"ClickOutsideTheBoardIsRejected","l":35}]},
+  {"name":"ControllerTest","file":"test_controller.cpp","tests":[
+    {"n":"FirstClickOnAnOccupiedCellSelectsIt","l":58},
+    {"n":"FirstClickOnAnEmptyCellLeavesSelectionEmpty","l":71},
+    {"n":"ClickOutsideTheBoardWithNoSelectionIsIgnored","l":80},
+    {"n":"ClickOutsideTheBoardWithASelectionCancelsItWithoutCallingTheEngine","l":89},
+    {"n":"SecondClickInsideTheBoardSendsTheCorrectSourceAndDestination","l":101},
+    {"n":"SecondClickInsideTheBoardClearsSelectionEvenWhenTheMoveIsIllegal","l":114},
+    {"n":"SecondClickOnAFriendlyPieceReplacesSelectionInsteadOfRequestingAMove","l":127},
+    {"n":"SecondClickOnAnEnemyPieceStillRequestsACapture","l":142},
+    {"n":"JumpOnAnOccupiedCellRequestsAJump","l":156},
+    {"n":"JumpOnAnEmptyCellIsRejectedAsEmptySource","l":168},
+    {"n":"JumpOutsideTheBoardIsIgnored","l":179},
+    {"n":"JumpDoesNotDisturbAnInProgressClickSelection","l":188}]},
+  {"name":"InputReaderTest","file":"test_input_reader.cpp","tests":[
+    {"n":"SplitsBoardAndCommandLinesAndDropsBlankLines","l":11},
+    {"n":"RejectsInputMissingTheBoardMarker","l":30},
+    {"n":"RejectsInputMissingTheCommandsMarker","l":41}]},
+  {"name":"TextScriptsTest","file":"test_text_scripts.cpp","tests":[
+    {"n":"PartialWaitLeavesTheBoardUnchangedThenArrivalUpdatesIt","l":34},
+    {"n":"CapturingTheKingEndsTheGameAndBlocksFurtherMoves","l":62},
+    {"n":"ABlockedSlideLeavesTheBoardUnchanged","l":91},
+    {"n":"AJumpLeavesThePieceOnItsOwnCellAfterLanding","l":114},
+    {"n":"AWhitePawnReachingTheLastRowIsPrintedAsAQueen","l":131},
+    {"n":"ClickingAnotherFriendlyPieceReplacesSelectionInsteadOfMoving","l":152},
+    {"n":"APawnCannotDoubleMoveAfterItHasAlreadyMovedOnce","l":174}]}
+];
+var TOTAL_TIME_MS = 5;
+
+(function () {
+  var total = 0;
+  SUITES.forEach(function (s) { total += s.tests.length; });
+
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statSuites').textContent = SUITES.length;
+  document.getElementById('statPass').textContent = total;
+  document.getElementById('statTime').textContent = TOTAL_TIME_MS + ' ms';
+
+  var list = document.getElementById('suiteList');
+  SUITES.forEach(function (s) {
+    var suiteEl = document.createElement('div');
+    suiteEl.className = 'suite';
+
+    var head = document.createElement('div');
+    head.className = 'suite-head';
+    head.innerHTML =
+      '<span><span class="caret">▸</span> <span class="suite-name">' + s.name + '</span>' +
+      '<span class="suite-file">' + s.file + '</span></span>' +
+      '<span class="suite-meta"><span class="pill">' + s.tests.length + ' PASS</span></span>';
+    head.addEventListener('click', function () { suiteEl.classList.toggle('open'); });
+
+    var body = document.createElement('div');
+    body.className = 'suite-body';
+    s.tests.forEach(function (t) {
+      var row = document.createElement('div');
+      row.className = 'test-row';
+      row.setAttribute('data-search', (s.name + ' ' + t.n + ' ' + s.file).toLowerCase());
+      row.innerHTML =
+        '<span class="status">✓</span>' +
+        '<span class="tname">' + t.n + '</span>' +
+        '<span class="loc">' + s.file + ':' + t.l + '</span>';
+      body.appendChild(row);
+    });
+
+    suiteEl.appendChild(head);
+    suiteEl.appendChild(body);
+    list.appendChild(suiteEl);
+  });
+
+  var box = document.getElementById('searchBox');
+  box.addEventListener('input', function () {
+    var q = box.value.trim().toLowerCase();
+    document.querySelectorAll('.suite').forEach(function (suiteEl) {
+      var anyVisible = false;
+      suiteEl.querySelectorAll('.test-row').forEach(function (row) {
+        var hit = !q || row.getAttribute('data-search').indexOf(q) !== -1;
+        row.classList.toggle('hidden-row', !hit);
+        if (hit) anyVisible = true;
+      });
+      suiteEl.classList.toggle('hidden-row', !anyVisible);
+      if (q && anyVisible) suiteEl.classList.add('open');
+    });
+  });
+
+  document.getElementById('expandAll').addEventListener('click', function () {
+    document.querySelectorAll('.suite').forEach(function (s) { s.classList.add('open'); });
+  });
+  document.getElementById('collapseAll').addEventListener('click', function () {
+    document.querySelectorAll('.suite').forEach(function (s) { s.classList.remove('open'); });
+  });
+})();
+</script>
+</body>
+</html>

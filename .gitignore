@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+build/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+
+# Compiler/linker artifacts anywhere in the tree
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.exp
+*.dll
+*.lib
+*.o
+*.a
+*.so
+*.dylib
+
+# ---------------------------------------------------------------------------
+# Runtime state -- produced by running the game, never source
+# ---------------------------------------------------------------------------
+
+# kfc_gui_app.log / kfc_server.log
+*.log
+
+# The accounts database: usernames, password salts+hashes and ELO ratings,
+# created on first run by UserRepository. Local state, and not something to
+# publish -- every machine builds its own from empty.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# Vendored third-party binaries -- large, platform-specific, and obtainable
+# from their own distribution
+# ---------------------------------------------------------------------------
+
+# The prebuilt Windows OpenCV 4.5.1: bin/ is ~200 MB of .dll/.lib and include/
+# is 300+ upstream headers. Windows builds expect it unpacked at this path (see
+# the OpenCV section of CMakeLists.txt); every other platform uses
+# find_package(OpenCV) against a system install and needs none of it.
+graphics/CTD26-main/OpenCV_451/
+
+# Sound files not wired to any cue -- see sounds/README.txt for the four names
+# the game actually plays. Kept locally as spares, not worth versioning.
+graphics/CTD26-main/sounds/moresound/
+
+# ---------------------------------------------------------------------------
+# Editors / IDEs / OS clutter
+# ---------------------------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.vcxproj.user
+*.sdf
+*.opensdf
+*.suo
+
+desktop.ini
+Thumbs.db
+.DS_Store

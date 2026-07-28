@@ -1,0 +1,33 @@
+name: CI
+
+# Builds the headless backend + runs the full test suite on every push and PR.
+# Only the kfc_tests target is built: kfc_core/kfc_protocol/server are portable
+# C++20 with no OpenCV dependency, so this runs on a clean Linux runner without
+# the vendored Windows-only OpenCV. The GUI targets (kfc_graphics/kfc_gui_app)
+# are intentionally not built here -- they need OpenCV and a display, and the
+# game logic they sit on top of is exactly what these tests already cover.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install a C++20 toolchain and CMake
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+
+      - name: Configure (Debug)
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build the test target
+        run: cmake --build build --target kfc_tests
+
+      - name: Run the full suite (unit + integration)
+        run: ctest --test-dir build --output-on-failure

@@ -1,0 +1,11 @@
+﻿{
+    "physics":  {
+                    "speed_m_per_sec":  0,
+                    "next_state_when_finished":  "short_rest"
+                },
+    "graphics":  {
+                     "frames_per_sec":  18,
+                     "is_loop":  false,
+                     "total_frames":  8
+                 }
+}

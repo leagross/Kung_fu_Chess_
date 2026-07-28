@@ -1,0 +1,20 @@
+{
+    "meters_per_cell": 0.6,
+    "speed_m_per_sec": {
+        "default": 1.5,
+        "Drone": 1.0
+    },
+    "cooldown_ms": {
+        "standard": 2500,
+        "jump": 834
+    },
+    "piece_value": {
+        "Pawn": 1,
+        "Knight": 3,
+        "Bishop": 3,
+        "Rook": 5,
+        "Queen": 9,
+        "King": 0,
+        "Drone": 1
+    }
+}

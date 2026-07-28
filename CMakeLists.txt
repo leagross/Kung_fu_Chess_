@@ -296,7 +296,7 @@ endif()
 # files need these macros to compile it, and so does anything (kfc_gui_app)
 # that links kfc_graphics and includes constants.hpp itself.
 target_compile_definitions(kfc_graphics PUBLIC
-  KFC_GRAPHICS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/graphics/CTD26-main"
+  KFC_GRAPHICS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
   KFC_GUI_APP_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ui/apps/kfc_gui_app"
 )
 

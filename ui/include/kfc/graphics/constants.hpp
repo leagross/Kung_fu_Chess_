@@ -21,10 +21,10 @@ inline std::filesystem::path assets_root() {
 /// currently wired into the app. Different packs may name their piece
 /// folders differently -- see IPieceCodeScheme -- this is only "which pack",
 /// not "how to read one".
-inline constexpr const char* kDefaultAssetPackName = "pieces_mine";
+inline constexpr const char* kDefaultAssetPackName = "pieces";
 
 /// Filename of the board background texture inside an asset pack folder.
-/// Every pack (pieces1, pieces_mine) ships its own board.png at this name.
+/// Every pack ships its own board.png at this name.
 inline constexpr const char* kBoardImageFilename = "board.png";
 
 /// Path segments inside one piece's folder down to a specific state's

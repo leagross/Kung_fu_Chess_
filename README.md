@@ -1,84 +1,73 @@
 # Kung Fu Chess
 
-A real-time chess variant: there are **no turns**. Either player may move any of
-their pieces at any moment, subject to a per-piece cooldown after each move.
+A real-time chess variant: **there are no turns.** Either player may move any of
+their own pieces at any moment, subject to a per-piece cooldown after each move.
 A piece does not teleport — it *travels* to its destination over time, and the
 board only changes at the instant it arrives. Capturing a king ends the game.
 
-Built in modern **C++20** with a test-first (TDD) workflow. The engine is
-headless and OpenCV-free; graphics and networking are separate layers on top.
+Built in modern **C++20** with a test-first (TDD) workflow, and split into
+layers that each build and test on their own. Play is local (one keyboard) or
+networked through a WebSocket server with accounts, ELO matchmaking, named
+rooms and spectators.
+
+**307 tests** cover the logic, protocol, database and server.
 
 ---
 
-## Architecture
+## Contents
 
-The codebase is split into three logic layers, each in its own tree:
+| Directory | What lives there | Guide |
+|-----------|------------------|-------|
+| `logic/` | Board, pieces, movement rules, real-time motion, the game engine. Headless — no graphics, no sockets, no database. | [logic/README.md](logic/README.md) |
+| `protocol/` | The JSON messages the client and server exchange, and their (de)serialization. | [protocol/README.md](protocol/README.md) |
+| `database/` | Accounts, salted password hashes and ELO ratings, in SQLite. | [database/README.md](database/README.md) |
+| `server/` | Rooms, matchmaking, one match per room, and the WebSocket transport. | [server/README.md](server/README.md) |
+| `ui/` | OpenCV rendering, sprite animation, mouse input, and the networked client. | [ui/README.md](ui/README.md) |
+| `assets/` | Piece sprites, board and background images, sound effects. | [assets/README.md](assets/README.md) |
+| `config/` | `gameplay.json` — the speeds, cooldowns and piece values both sides read. | — |
+| `docs/` | Generated reference and test reports. | — |
+| `legacy/` | The original CTD26 graphics demo, kept for reference. Not built. | — |
 
-| Layer | Directory | Responsibility | Depends on |
-|-------|-----------|----------------|------------|
-| **Business logic** | `logic/` | Board, pieces, movement rules, real-time motion, game engine, text I/O. No graphics, no sockets. | — |
-| **UI / graphics** | `ui/` | OpenCV-based rendering, sprite animation, mouse input, the windowed client, and the networked client (`ServerLink`). | logic |
-| **Protocol** | `protocol/` | JSON message shapes + (de)serialization shared by client and server. | logic |
-| **Server** | `server/` | WebSocket server hosting one match on a dedicated tick thread. | logic, protocol |
-
-Local single-player and networked play are interchangeable behind two small
-interfaces (`IGameView`, `IMoveRequester`), so the renderer never knows whether
-it is driving a local `Game` or a remote `ServerLink`. Both the local `Game`
-and the server's `Match` assemble the same simulation stack through a shared
-`GameCore` (Board → RuleEngine → RealTimeArbiter → MotionFactory → GameEngine).
-
----
-
-## Features
-
-**Game logic**
-- Board parsing from a text layout, full piece model with stable identities.
-- All standard movements: King, Queen, Rook, Bishop, Knight, Pawn (plus a Drone).
-- Illegal moves rejected with stable machine-readable reasons; sliding pieces
-  are blocked by, and capture, the first piece in their path.
-- Real-time motion: a moving piece occupies its source cell until it arrives;
-  head-on collisions, promotion, and cooldowns are resolved deterministically.
-- King capture ends the game (win, or a draw on a simultaneous double capture).
-
-**Graphics**
-- Transparent PNG sprites, per-piece animation with eased interpolation.
-- Windowed client driven by mouse clicks; a game-over banner and a live
-  score / move-list HUD.
-
-**Networking (Phase 1)**
-- WebSocket server validates every move through the same `GameEngine`.
-- First two connections are assigned White / Black; the server broadcasts an
-  identical game state (motion-start + arrival events) to both clients.
-- Client-side motion prediction keeps animation smooth over the network.
+Dependencies point one way only: `ui` and `server` depend on `protocol` and
+`logic`; `server` depends on `database`; `logic` depends on nothing. That is why
+the whole test suite runs without OpenCV, without a socket and without a
+database server.
 
 ---
 
 ## Building
 
-Requires **CMake ≥ 3.20** and a **C++20** compiler (MSVC 2022+, GCC 10+, Clang 12+).
-GoogleTest, nlohmann/json, and IXWebSocket are fetched automatically by CMake.
+Requires **CMake ≥ 3.20** and a **C++20** compiler (MSVC 2022+, GCC 10+,
+Clang 12+). GoogleTest, nlohmann/json, IXWebSocket and SQLiteCpp are downloaded
+automatically by CMake — nothing to install by hand.
 
-### Backend + tests (no OpenCV needed)
+**OpenCV** is the one dependency you provide yourself, and the only thing that
+differs per platform:
+
+- **Windows** — unpack the prebuilt OpenCV 4.5.1 "world" build to
+  `graphics/CTD26-main/OpenCV_451/`. It is not committed (see `.gitignore`).
+- **Linux / macOS** — install it (`sudo apt install libopencv-dev`, or
+  `brew install opencv`). CMake finds it with `find_package`.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target kfc_tests
-ctest --test-dir build --output-on-failure
+cmake -S . -B build
+cmake --build build --config Debug
 ```
 
-### GUI + server (needs OpenCV)
-
-The Windows GUI targets link **OpenCV 4.5.1**, expected at
-`graphics/CTD26-main/OpenCV_451/` (not committed — see `.gitignore`). With it
-in place:
+### Backend and tests only (no OpenCV needed)
 
 ```sh
-cmake --build build --target kfc_server kfc_gui_app
+cmake --build build --target kfc_tests
+ctest --test-dir build --output-on-failure
 ```
 
 ---
 
 ## Running
+
+Run everything from the repository root: the server writes `kfc_server.log` and
+`kfc_users.db` to the working directory. (Asset and config paths are baked in at
+build time, so those are found from anywhere.)
 
 ### Local single-player
 
@@ -86,46 +75,74 @@ cmake --build build --target kfc_server kfc_gui_app
 ./build/Debug/kfc_gui_app
 ```
 
-Click a piece, then click its destination. A double-click on a piece triggers
-its "jump-in-place" defensive move.
+Click a piece, then click its destination. Double-click a piece for its
+"jump-in-place" defensive move.
 
-### Networked (server + two clients)
+### Networked
 
-Start the server (defaults to `ws://localhost:8080`):
-
-```sh
-./build/Debug/kfc_server            # optional: pass a port, e.g. 8090
-```
-
-Then launch two clients, in separate windows:
+Start the server — it listens on `ws://localhost:8080` (pass a port to change
+it):
 
 ```sh
-./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=player1
-./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=player2
+./build/Debug/kfc_server
 ```
 
-The first to connect plays White, the second Black. To play across two
-machines, replace `localhost` with the server host's LAN IP and allow the port
-through its firewall.
+Then launch a client per player, **each with its own username**. The username and
+password are the shell login the spec asks for; the account is registered on
+first use and the password must match afterwards.
+
+```sh
+./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=alice --password=pw1
+./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=bob   --password=pw2
+```
+
+To play across machines, replace `localhost` with the server's LAN address and
+open the port on its firewall.
+
+### The home screen
+
+Each client shows two buttons:
+
+- **PLAY** — matchmaking. Pairs you with a waiting opponent rated within ±100.
+  If nobody suitable appears within a minute it says so and returns here.
+- **ROOM** — opens a dialog with **Create**, **Join** and **Cancel**.
+  - **Create** asks the server for a room; the server generates a short id
+    (e.g. `K7QM`) and shows it across the top of your screen. Read it to whoever
+    you arranged to play.
+  - **Join** takes an id someone gave you. The first to join is Black; **anyone
+    who joins after that watches** the game instead of playing, and their header
+    reads `WATCHING ROOM`.
+
+### If a player disconnects
+
+The remaining player sees a 20-second countdown. If the dropped player rejoins
+the same room **with the same username** they get their own colour and position
+back and play resumes. Otherwise the match is forfeited, the opponent wins, and
+the dropped player's rating takes a flat penalty. A few seconds after any game
+ends the server releases everyone and closes the room.
 
 ---
 
-## Tests
+## Testing
 
-A single `kfc_tests` target covers the logic, protocol, and server across
-unit and integration suites (run via `ctest`, above). Continuous integration
-builds and runs the full suite on every push (see `.github/workflows/ci.yml`).
+One `kfc_tests` target covers every layer:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+CI builds and runs the whole suite on every push — see
+[.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ---
 
-## Project structure
+## Portability
 
-```
-logic/      business logic (model, rules, realtime, engine, io, input, texttests)
-ui/         OpenCV graphics, animation, input, and the networked client
-legacy/     the original CTD26 graphics demo (not built; kept for reference)
-protocol/   shared JSON message shapes + (de)serialization
-server/      WebSocket server and the Match that hosts one game
-graphics/    asset packs (piece sprites, board, background)
-docs/        generated reference / test reports
-```
+`logic/`, `protocol/`, `database/` and `server/` are plain portable C++ — they
+contain no OS-specific code at all, so the server runs anywhere.
+
+In `ui/`, exactly two things cannot be written once and compiled everywhere:
+native dialogs and audio playback. Both sit behind interfaces
+(`IRoomPrompt`, `ISoundPlayer`) with one implementation chosen at build time, so
+no `#ifdef` appears anywhere else in the client. See
+[ui/README.md](ui/README.md) for what each platform gets.

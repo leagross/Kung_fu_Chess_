@@ -47,7 +47,7 @@ graphics/CTD26-main/OpenCV_451/
 
 # Sound files not wired to any cue -- see sounds/README.txt for the four names
 # the game actually plays. Kept locally as spares, not worth versioning.
-graphics/CTD26-main/sounds/moresound/
+assets/sounds/moresound/
 
 # ---------------------------------------------------------------------------
 # Editors / IDEs / OS clutter

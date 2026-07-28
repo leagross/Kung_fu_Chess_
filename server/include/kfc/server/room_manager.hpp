@@ -79,6 +79,10 @@ public:
         RoomId room;
         kfc::model::PieceColor color;
         bool spectator = false;
+        /// Which watcher this is, when spectator is true; 0 for a player. The
+        /// connection has to hand this back on disconnect -- it is the only
+        /// thing that says which of the room's viewers just left.
+        WatcherId watcher = 0;
     };
 
     /// Play-button matchmaking join. Seats this player with a waiting opponent
@@ -127,10 +131,14 @@ public:
     /// A connection dropped: ends that room's game in the opponent's favour
     /// (exactly as a resign would -- see Match::on_disconnect) and, once no
     /// players remain in the room, stops its tick thread and removes it.
-    /// spectator=true for a viewer leaving, which forfeits nothing -- it only
-    /// drops the room's live-connection count, so a room whose viewers all left
-    /// mid-game carries on exactly as before.
-    void on_disconnect(RoomId room, kfc::model::PieceColor color, bool spectator = false);
+    ///
+    /// Takes the whole Seat the connection was given, rather than its parts,
+    /// because they must agree: a viewer's colour is meaningless and passing it
+    /// as a player's would forfeit an innocent game. For a viewer this forfeits
+    /// nothing -- it unregisters that one watcher and drops the room's
+    /// live-connection count, and a room whose viewers all left mid-game
+    /// carries on exactly as before.
+    void on_disconnect(const Seat& seat);
 
     /// Number of rooms currently alive -- for tests and diagnostics.
     [[nodiscard]] std::size_t room_count() const;

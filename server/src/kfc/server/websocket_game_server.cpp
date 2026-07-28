@@ -66,7 +66,7 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
                     // empty (see RoomManager::on_disconnect). A connection that
                     // closed before being seated was never a player.
                     if (seat->has_value()) {
-                        rooms_.on_disconnect((*seat)->room, (*seat)->color, (*seat)->spectator);
+                        rooms_.on_disconnect(**seat);
                     }
                     return;
                 }

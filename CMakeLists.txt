@@ -219,6 +219,7 @@ add_executable(kfc_tests
   protocol/tests/unit/test_gameplay_config.cpp
   server/tests/unit/test_match.cpp
   server/tests/unit/test_room_manager.cpp
+  server/tests/unit/test_match_audience.cpp
   database/tests/unit/test_elo.cpp
   database/tests/unit/test_sha256.cpp
   database/tests/unit/test_user_repository.cpp

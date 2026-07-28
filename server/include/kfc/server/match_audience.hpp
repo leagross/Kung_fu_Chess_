@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -25,6 +27,17 @@ namespace kfc::server {
 /// broadcasting, so the table is guarded throughout. Callers pass already-
 /// encoded text rather than protocol messages, which keeps encoding (and its
 /// logging) where it belongs, in Match.
+///
+/// **No callback is ever invoked while the lock is held.** Sending is network
+/// I/O -- a slow or half-dead socket can block inside send() for as long as its
+/// TCP buffers stay full, and every seating, watching and username lookup in
+/// the match would queue behind it. Worse, a send that fails calls back into the
+/// server as a disconnect, which comes straight back here and deadlocks on a
+/// non-recursive mutex. So the roster is copy-on-write: readers take a pointer
+/// to the current version under the lock and then let go, and writers publish a
+/// new version rather than editing the one being read. The lock is held for a
+/// pointer copy either way -- membership changes (a few per match) pay the cost
+/// of the copy, not broadcasts (several per second, per match).
 class MatchAudience {
 public:
     /// Seats a player in the next free colour -- White first, then Black --
@@ -34,8 +47,19 @@ public:
     [[nodiscard]] std::optional<kfc::model::PieceColor> seat(const std::string& username, SendFn send, CloseFn close);
 
     /// Adds a watcher: reached by every broadcast, owns no colour, never
-    /// affects the game. Unlimited -- seats are what's capped at two.
-    void watch(SendFn send, CloseFn close);
+    /// affects the game. Unlimited -- seats are what's capped at two. Returns
+    /// the handle to pass to unwatch when that connection closes.
+    [[nodiscard]] WatcherId watch(SendFn send, CloseFn close);
+
+    /// Drops a watcher that disconnected. Unknown ids are ignored, so a double
+    /// close (or a close arriving after the match released everyone) is a no-op
+    /// rather than a surprise.
+    ///
+    /// Without this a watcher who left stayed in the table for the rest of the
+    /// match, and every broadcast kept paying to send to a socket nobody was
+    /// reading -- a room people drift in and out of would end up spending most
+    /// of its sending on an audience that had gone home.
+    void unwatch(WatcherId id);
 
     /// Swaps a seated colour's connection for a new one, for a player who
     /// dropped and came back. Their username and colour are unchanged -- it is
@@ -47,11 +71,15 @@ public:
     /// to keep in step with the seats themselves.
     ///
     /// A lock-free atomic read: Match::state() asks this for every command, and
-    /// it must not have to queue behind a broadcast holding the table's mutex.
+    /// it must not have to queue behind anything at all.
     [[nodiscard]] bool both_seats_taken() const { return seats_filled_.load(std::memory_order_acquire) == 2; }
 
     /// The username seated in that colour, or empty if nobody is.
     [[nodiscard]] std::string username_of(kfc::model::PieceColor color) const;
+
+    /// How many watchers are currently attached. For tests and diagnostics --
+    /// the game itself never behaves differently for having an audience.
+    [[nodiscard]] std::size_t watcher_count() const;
 
     /// Sends to both players and every watcher -- a viewer sees exactly what
     /// the players see, which is the whole point of watching.
@@ -67,28 +95,47 @@ public:
     void release_all() const;
 
 private:
-    // How many of the two seats are filled. Mirrors white_send_/black_send_
-    // below and is written only while holding mutex_, so the two agree; it
+    // One watcher: how to reach it, how to let it go, and which one it is.
+    struct Watcher {
+        WatcherId id;
+        SendFn send;
+        CloseFn close;
+    };
+
+    // Everyone attached, as one immutable value. Published by replacement, so
+    // any thread already reading a version keeps reading a consistent one --
+    // the alternative, mutating in place, is what forces a reader to hold the
+    // lock for the whole of its send.
+    struct Roster {
+        std::optional<SendFn> white_send;
+        std::optional<SendFn> black_send;
+        std::optional<CloseFn> white_close;
+        std::optional<CloseFn> black_close;
+        std::string white_username;
+        std::string black_username;
+        std::vector<Watcher> watchers;  // in arrival order
+    };
+
+    // The version to read from. One lock acquisition and one refcount bump --
+    // no allocation, no I/O, nothing that can block for long.
+    [[nodiscard]] std::shared_ptr<const Roster> current() const;
+
+    // A copy of the current roster for a writer to modify and then publish into
+    // roster_. Must be called with mutex_ held.
+    [[nodiscard]] std::shared_ptr<Roster> editable_copy() const;
+
+    // How many of the two seats are filled. Mirrors the roster's two send
+    // slots and is written only while holding mutex_, so the two agree; it
     // exists purely so both_seats_taken() needs no lock. Never decremented --
     // a player who drops still owns their seat until the grace expires.
     std::atomic<int> seats_filled_{0};
 
-    // One lock for the whole table: reads (broadcast, on the tick thread) and
-    // writes (seating, on connection threads) genuinely interleave.
+    // Guards the two writes below: replacing roster_, and handing out the next
+    // watcher id. Held only for those, never across a callback.
     mutable std::mutex mutex_;
 
-    std::optional<SendFn> white_send_;
-    std::optional<SendFn> black_send_;
-    std::optional<CloseFn> white_close_;
-    std::optional<CloseFn> black_close_;
-    std::string white_username_;
-    std::string black_username_;
-
-    // Watchers, in arrival order. Never removed when one disconnects: a send or
-    // close to a dead socket is a harmless no-op, and the whole table dies with
-    // the room moments later anyway.
-    std::vector<SendFn> spectator_sends_;
-    std::vector<CloseFn> spectator_closes_;
+    std::shared_ptr<const Roster> roster_{std::make_shared<const Roster>()};
+    WatcherId next_watcher_id_ = 1;  // 0 means "not a watcher"
 };
 
 }  // namespace kfc::server

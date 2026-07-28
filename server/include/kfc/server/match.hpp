@@ -134,8 +134,15 @@ public:
     /// disconnect is not a forfeit -- nothing about the game changes when one
     /// comes or goes. If the match is already under way it is also sent
     /// MatchStart immediately, so it starts watching instead of "searching".
-    /// Unlimited: seats are what's capped at two, not viewers.
-    void join_spectator(const std::string& username, SendFn send, CloseFn close = {});
+    /// Unlimited: seats are what's capped at two, not viewers. Returns the
+    /// handle identifying this watcher, to be given back to leave_spectator
+    /// when its connection closes.
+    [[nodiscard]] WatcherId join_spectator(const std::string& username, SendFn send, CloseFn close = {});
+
+    /// A watcher's connection closed: stop sending to it. Nothing else about
+    /// the game changes -- a viewer holds no seat, so this is not a forfeit and
+    /// not a reason to freeze anything. Unknown handles are ignored.
+    void leave_spectator(WatcherId watcher);
 
     /// What this match is doing right now -- see MatchState. Derived from the
     /// three things that actually decide it (decided? frozen? both seated?)

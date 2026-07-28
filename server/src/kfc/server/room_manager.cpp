@@ -246,10 +246,10 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
     }
 
     if (as_spectator) {
-        match->join_spectator(username, std::move(send), std::move(close));
+        WatcherId watcher = match->join_spectator(username, std::move(send), std::move(close));
         logger_.log("RoomManager: '" + username + "' is watching room '" + name + "'");
         // Colour is meaningless for a viewer -- see Seat::spectator.
-        return Seat{room_id, kfc::model::PieceColor::White, /*spectator=*/true};
+        return Seat{room_id, kfc::model::PieceColor::White, /*spectator=*/true, watcher};
     }
 
     std::optional<kfc::model::PieceColor> color = match->join(username, std::move(send), std::move(close));
@@ -268,7 +268,8 @@ void RoomManager::enqueue(RoomId room, kfc::model::PieceColor from, kfc::protoco
     }
 }
 
-void RoomManager::on_disconnect(RoomId room, kfc::model::PieceColor color, bool spectator) {
+void RoomManager::on_disconnect(const Seat& seat) {
+    RoomId room = seat.room;
     std::shared_ptr<Match> match;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
@@ -279,12 +280,15 @@ void RoomManager::on_disconnect(RoomId room, kfc::model::PieceColor color, bool 
         match = it->second.match;
     }
 
-    // Ends the game for the opponent. Done outside the lock -- it just hands
-    // the event to the Match's own tick thread. Skipped entirely for a viewer:
-    // it holds no seat, so telling the Match a colour dropped would forfeit an
-    // innocent player's game.
-    if (!spectator) {
-        match->on_disconnect(color);
+    // Both done outside the lock -- one hands the event to the Match's own tick
+    // thread, the other only edits its audience.
+    if (seat.spectator) {
+        // A viewer holds no seat, so telling the Match a colour dropped would
+        // forfeit an innocent player's game. All that ends is the sending: it
+        // stops being part of every broadcast for the rest of the match.
+        match->leave_spectator(seat.watcher);
+    } else {
+        match->on_disconnect(seat.color);
     }
 
     // Reap the room if that was its last live connection. The Match is stopped

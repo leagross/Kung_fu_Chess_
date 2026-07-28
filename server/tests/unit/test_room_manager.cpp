@@ -161,11 +161,11 @@ TEST(RoomManagerTest, RoomIsReapedOnceEveryPlayerHasDisconnected) {
     ASSERT_EQ(rooms.room_count(), 1u);
 
     // First disconnect ends the game but the other player is still in the room.
-    rooms.on_disconnect(a->room, a->color);
+    rooms.on_disconnect(*a);
     EXPECT_EQ(rooms.room_count(), 1u);
 
     // Second disconnect empties the room -> it is torn down.
-    rooms.on_disconnect(b->room, b->color);
+    rooms.on_disconnect(*b);
     EXPECT_EQ(rooms.room_count(), 0u);
 }
 
@@ -178,8 +178,8 @@ TEST(RoomManagerTest, EnqueueToAReapedRoomIsASilentNoOp) {
     std::optional<RoomManager::Seat> b = rooms.join_any("bob", 1200, bob.as_send_fn());
     ASSERT_TRUE(a && b);
 
-    rooms.on_disconnect(a->room, a->color);
-    rooms.on_disconnect(b->room, b->color);
+    rooms.on_disconnect(*a);
+    rooms.on_disconnect(*b);
     ASSERT_EQ(rooms.room_count(), 0u);
 
     // Routing a message to the now-gone room must not crash or resurrect it.
@@ -353,7 +353,7 @@ std::string room_with_black_mid_countdown(RoomManager& rooms, RecordingSink& whi
     std::string room_id = room_id_from_welcome(white_sink);
     std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", black_sink.as_send_fn());
     EXPECT_TRUE(black.has_value());
-    rooms.on_disconnect(black->room, PieceColor::Black);
+    rooms.on_disconnect(*black);
     // Wait until the countdown is genuinely running, so the reclaim below is
     // testing the real state rather than racing it into existence.
     EXPECT_TRUE(white_sink.wait_for(2000, [](const ServerMessage& m) {
@@ -403,7 +403,7 @@ TEST(RoomManagerTest, ReturningAfterTheGraceExpiredIsRefusedRatherThanSeated) {
 
     // Let the grace run all the way out, so the match is genuinely forfeit
     // before bob tries to come back.
-    rooms.on_disconnect(black->room, PieceColor::Black);
+    rooms.on_disconnect(*black);
     ASSERT_TRUE(white_sink.wait_for(3000, [](const ServerMessage& m) {
         return std::holds_alternative<GameOver>(m);
     }));
@@ -467,12 +467,37 @@ TEST(RoomManagerTest, ASpectatorLeavingDoesNotForfeitThePlayersGame) {
     // A viewer walking out holds no seat, so nothing about the game changes --
     // in particular White (whose colour the viewer's Seat nominally carries)
     // must not be handed a disconnect countdown, let alone a forfeit.
-    rooms.on_disconnect(carol->room, carol->color, /*spectator=*/true);
+    rooms.on_disconnect(*carol);
 
     EXPECT_FALSE(s1.wait_for(300, [](const ServerMessage& m) {
         return std::holds_alternative<OpponentDisconnected>(m) || std::holds_alternative<GameOver>(m);
     }));
     EXPECT_EQ(rooms.room_count(), 1u);  // the room lives on for its two players
+}
+
+TEST(RoomManagerTest, ASpectatorThatLeftIsNoLongerSentTheGame) {
+    FileLogger logger(log_path());
+    RoomManager rooms(two_pawn_factory(), logger);
+
+    RecordingSink s1, s2, s3;
+    ASSERT_TRUE(rooms.create_room("alice", s1.as_send_fn()).has_value());
+    std::string room_id = room_id_from_welcome(s1);
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", s2.as_send_fn());
+    ASSERT_TRUE(black.has_value());
+    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", s3.as_send_fn());
+    ASSERT_TRUE(carol.has_value());
+    ASSERT_TRUE(carol->spectator);
+    ASSERT_NE(carol->watcher, 0u) << "a viewer's Seat must carry the handle that identifies it";
+
+    rooms.on_disconnect(*carol);
+    std::size_t seen_before = s3.snapshot().size();
+
+    // A real move, so the room genuinely broadcasts something afterwards.
+    rooms.enqueue(black->room, PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    ASSERT_TRUE(s1.wait_for(2000, [](const ServerMessage& m) { return std::holds_alternative<BoardUpdate>(m); }));
+
+    EXPECT_EQ(s3.snapshot().size(), seen_before)
+        << "a viewer who disconnected must be dropped from the room's broadcasts, not merely ignored";
 }
 
 TEST(RoomManagerTest, PlayersMoreThanTheGapApartDoNotPairAndWaitSeparately) {

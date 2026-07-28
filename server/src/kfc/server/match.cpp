@@ -68,7 +68,7 @@ std::optional<kfc::model::PieceColor> Match::join(const std::string& username, S
     return assigned;
 }
 
-void Match::join_spectator(const std::string& username, SendFn send, CloseFn close) {
+WatcherId Match::join_spectator(const std::string& username, SendFn send, CloseFn close) {
     logger_.log("Match: '" + username + "' is watching");
 
     // Registered *first*, snapshotted second. The other order loses updates:
@@ -79,7 +79,7 @@ void Match::join_spectator(const std::string& username, SendFn send, CloseFn clo
     // update the snapshot already contains -- and that is what the revision is
     // for: the client discards any BoardUpdate at or below Welcome::revision.
     bool already_started = audience_.both_seats_taken();
-    audience_.watch(send, std::move(close));
+    WatcherId watcher = audience_.watch(send, std::move(close));
 
     kfc::protocol::Welcome welcome = welcome_for(kfc::model::PieceColor::White, /*spectator=*/true);
 
@@ -89,6 +89,12 @@ void Match::join_spectator(const std::string& username, SendFn send, CloseFn clo
     if (already_started) {
         send(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{}}));
     }
+    return watcher;
+}
+
+void Match::leave_spectator(WatcherId watcher) {
+    audience_.unwatch(watcher);
+    logger_.log("Match: a viewer stopped watching");
 }
 
 kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spectator) const {

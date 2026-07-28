@@ -10,12 +10,14 @@ std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& use
         white_send_ = std::move(send);
         white_close_ = std::move(close);
         white_username_ = username;
+        seats_filled_.fetch_add(1, std::memory_order_release);
         return kfc::model::PieceColor::White;
     }
     if (!black_send_.has_value()) {
         black_send_ = std::move(send);
         black_close_ = std::move(close);
         black_username_ = username;
+        seats_filled_.fetch_add(1, std::memory_order_release);
         return kfc::model::PieceColor::Black;
     }
     return std::nullopt;  // both seats taken
@@ -39,11 +41,6 @@ void MatchAudience::reseat(kfc::model::PieceColor color, SendFn send, CloseFn cl
         black_close_ = std::move(close);
     }
     // Username deliberately untouched: reseating is the same player returning.
-}
-
-bool MatchAudience::both_seats_taken() const {
-    std::lock_guard<std::mutex> guard(mutex_);
-    return white_send_.has_value() && black_send_.has_value();
 }
 
 std::string MatchAudience::username_of(kfc::model::PieceColor color) const {

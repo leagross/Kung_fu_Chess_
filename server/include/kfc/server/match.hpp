@@ -41,6 +41,30 @@ enum class GameEndReason { Decisive, Draw, Disconnect };
 using ResultCallback = std::function<void(GameEndReason reason, std::optional<kfc::model::PieceColor> winner,
                                           const std::string& white_username, const std::string& black_username)>;
 
+/// What a match is doing right now, and therefore what is allowed.
+///
+/// This exists because "may this command be applied?" used to be answered by
+/// reading several unrelated flags -- game_over_, the seat table, the disconnect
+/// watch -- and it was easy to check some and forget others. It was: a player
+/// waiting alone for an opponent could move their pieces, because nothing
+/// checked that anyone was there to move against.
+///
+/// One question, one answer, in one place. Every gate reads this.
+enum class MatchState {
+    /// Fewer than two players are seated. The board exists, but no gameplay
+    /// command is accepted -- there is no game yet.
+    Waiting,
+    /// Both seats filled and nobody has dropped: the game is on.
+    Running,
+    /// A player's connection dropped and their grace period is counting down.
+    /// The clock is stopped and no move is accepted from anyone, so a returning
+    /// player finds the position exactly as they left it.
+    Frozen,
+    /// Decided -- a king fell, someone resigned, or a grace period expired.
+    /// Nothing changes the board again.
+    Finished,
+};
+
 /// How long a dropped player has to come back before the match is forfeited on
 /// their behalf -- the CTD SERVER spec's 20 seconds.
 inline constexpr int kDefaultDisconnectGraceMs = 20000;
@@ -111,6 +135,14 @@ public:
     /// MatchStart immediately, so it starts watching instead of "searching".
     /// Unlimited: seats are what's capped at two, not viewers.
     void join_spectator(const std::string& username, SendFn send, CloseFn close = {});
+
+    /// What this match is doing right now -- see MatchState. Derived from the
+    /// three things that actually decide it (decided? frozen? both seated?)
+    /// rather than stored, so there is no fourth copy of the truth to drift.
+    ///
+    /// All three reads are lock-free atomics, because this is asked for every
+    /// command and every tick.
+    [[nodiscard]] MatchState state() const;
 
     /// True once this match is decided (a king fell, someone resigned, or a
     /// disconnect grace ran out). Nothing can be joined, watched or played in

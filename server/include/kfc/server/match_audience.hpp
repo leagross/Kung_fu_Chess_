@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -44,7 +45,10 @@ public:
     /// True once both seats are filled, i.e. the match can actually be played.
     /// This is what "has the match started" means -- there is no separate flag
     /// to keep in step with the seats themselves.
-    [[nodiscard]] bool both_seats_taken() const;
+    ///
+    /// A lock-free atomic read: Match::state() asks this for every command, and
+    /// it must not have to queue behind a broadcast holding the table's mutex.
+    [[nodiscard]] bool both_seats_taken() const { return seats_filled_.load(std::memory_order_acquire) == 2; }
 
     /// The username seated in that colour, or empty if nobody is.
     [[nodiscard]] std::string username_of(kfc::model::PieceColor color) const;
@@ -63,6 +67,12 @@ public:
     void release_all() const;
 
 private:
+    // How many of the two seats are filled. Mirrors white_send_/black_send_
+    // below and is written only while holding mutex_, so the two agree; it
+    // exists purely so both_seats_taken() needs no lock. Never decremented --
+    // a player who drops still owns their seat until the grace expires.
+    std::atomic<int> seats_filled_{0};
+
     // One lock for the whole table: reads (broadcast, on the tick thread) and
     // writes (seating, on connection threads) genuinely interleave.
     mutable std::mutex mutex_;

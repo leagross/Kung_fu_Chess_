@@ -19,5 +19,10 @@ inline constexpr const char* kNotYourPiece = "not_your_piece";
 /// until they return or the grace expires (see server::Match::apply). Like
 /// kNotYourPiece, this is about the connection rather than the rules.
 inline constexpr const char* kOpponentDisconnected = "opponent_disconnected";
+/// Server-level rejection: only one player is seated, so there is no game to
+/// play yet (see server::MatchState::Waiting). Without this a player waiting to
+/// be matched could move their pieces around, and their opponent would arrive
+/// into a game already under way.
+inline constexpr const char* kMatchNotStarted = "match_not_started";
 
 }  // namespace kfc::model::move_reasons

@@ -165,7 +165,7 @@ void Match::tick_loop() {
         // expire, while one side sits at a disconnected client -- so the game
         // would go on being played by one player. Freezing means a returning
         // player finds the position exactly as they left it.
-        bool frozen = !game_over_ && disconnect_watch_.watching().has_value();
+        bool frozen = state() == MatchState::Frozen;
 
         kfc::model::ArrivalEvents events;
         {
@@ -274,6 +274,21 @@ void Match::advance_disconnect_countdown(std::chrono::steady_clock::time_point n
     }
 }
 
+MatchState Match::state() const {
+    // Ordered by precedence: a decided match is Finished whatever else is true,
+    // and a frozen one is Frozen even though both seats are still filled.
+    if (game_over_) {
+        return MatchState::Finished;
+    }
+    if (disconnect_watch_.is_frozen()) {
+        return MatchState::Frozen;
+    }
+    if (!audience_.both_seats_taken()) {
+        return MatchState::Waiting;
+    }
+    return MatchState::Running;
+}
+
 bool Match::is_over() const {
     return game_over_;
 }
@@ -328,10 +343,24 @@ bool Match::owns_piece_at(kfc::model::PieceColor from, const kfc::model::Positio
 }
 
 void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessage& message) {
-    // The match is already decided (a king fell, or someone resigned/dropped):
-    // every later command is a no-op. Nothing is sent back -- there is no
-    // board left to act on and the result was already broadcast.
-    if (game_over_) {
+    MatchState current = state();
+
+    // Already decided (a king fell, or someone resigned/dropped): every later
+    // command is a no-op. Nothing is sent back -- there is no board left to act
+    // on and the result was already broadcast.
+    if (current == MatchState::Finished) {
+        return;
+    }
+
+    // Nobody to play against yet, so no gameplay command means anything --
+    // including a resign: there is no opponent to award the win to, and the
+    // result hook would be handed an empty username. Checked before the resign
+    // below, not after. Without this gate the first player to be seated could
+    // also move their pieces around while waiting to be matched, and their
+    // opponent would walk into a game already in progress.
+    if (current == MatchState::Waiting) {
+        send_to_and_log(from, kfc::protocol::ServerMessage{
+                                  kfc::protocol::MoveRejected{kfc::model::move_reasons::kMatchNotStarted}});
         return;
     }
 
@@ -339,6 +368,9 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
     // game in the opponent's favour. It touches no board state, so it just
     // latches the outcome; tick_loop broadcasts the GameOver once board_mutex_
     // is released.
+    //
+    // Deliberately above the Frozen gate: giving up must stay possible while an
+    // opponent's grace counts down. Everything else is refused there.
     if (std::holds_alternative<kfc::protocol::Resign>(message)) {
         kfc::model::PieceColor winner = opponent_of(from);
         logger_.log("Match: " + color_name(from) + " resigned; " + color_name(winner) + " wins");
@@ -353,7 +385,7 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
     // piece up and take an undefended king, which would make the grace (and the
     // reconnect it exists for) worthless. Rejected rather than dropped, so the
     // client learns why instead of watching its click do nothing.
-    if (disconnect_watch_.watching().has_value()) {
+    if (current == MatchState::Frozen) {
         send_to_and_log(from, kfc::protocol::ServerMessage{
                                   kfc::protocol::MoveRejected{kfc::model::move_reasons::kOpponentDisconnected}});
         return;

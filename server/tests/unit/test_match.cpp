@@ -226,6 +226,104 @@ TEST(MatchDisconnectTest, ShowsACountdownThenForfeitsAfterTheGrace) {
     match.stop();
 }
 
+// --- MatchState: one question, one answer ---
+
+TEST(MatchStateTest, WalksThroughWaitingRunningFrozenFinished) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+
+    EXPECT_EQ(match.state(), kfc::server::MatchState::Waiting) << "nobody seated";
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    EXPECT_EQ(match.state(), kfc::server::MatchState::Waiting) << "one seat filled is still no game";
+
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    EXPECT_EQ(match.state(), kfc::server::MatchState::Running);
+
+    // Frozen the instant the drop is reported -- not one tick later. That gap
+    // is exactly where a command used to slip through.
+    match.on_disconnect(PieceColor::Black);
+    EXPECT_EQ(match.state(), kfc::server::MatchState::Frozen) << "must not wait for the next tick";
+
+    match.enqueue(PieceColor::White, ClientMessage{Resign{}});
+    ASSERT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
+        return std::holds_alternative<GameOver>(m);
+    }));
+    EXPECT_EQ(match.state(), kfc::server::MatchState::Finished);
+
+    match.stop();
+}
+
+TEST(MatchStateTest, ALonePlayerCannotMoveWhileWaitingForAnOpponent) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.state(), kfc::server::MatchState::Waiting);
+
+    // Otherwise the first player to be seated could play out a whole opening
+    // while waiting to be matched, and their opponent would arrive into a game
+    // already under way.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+
+    EXPECT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
+        return is_move_rejected_with(m, move_reasons::kMatchNotStarted);
+    }));
+    EXPECT_FALSE(white_sink.wait_for(500, is_board_update)) << "nothing may have moved";
+
+    match.stop();
+}
+
+TEST(MatchStateTest, TheSameMoveIsAcceptedOnceTheOpponentArrives) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    // The gate is about state, not about the move: the very move refused above
+    // goes through now.
+    match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+
+    EXPECT_TRUE(white_sink.wait_for(2000, is_board_update));
+    EXPECT_FALSE(white_sink.wait_for(200, [](const ServerMessage& m) {
+        return std::holds_alternative<MoveRejected>(m);
+    }));
+
+    match.stop();
+}
+
+TEST(MatchStateTest, ResigningIsStillAllowedWhileFrozen) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    match.on_disconnect(PieceColor::Black);
+    ASSERT_EQ(match.state(), kfc::server::MatchState::Frozen);
+
+    // Freezing stops the game being *played*; it must not trap someone who
+    // simply wants to give up and leave.
+    match.enqueue(PieceColor::White, ClientMessage{Resign{}});
+
+    EXPECT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
+        return is_game_over_won_by(m, PieceColor::Black);
+    }));
+
+    match.stop();
+}
+
 TEST(MatchDisconnectTest, TheSurvivorCannotKeepPlayingWhileTheGraceCountsDown) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_freeze_test.log");
     // A long grace, so the whole test happens inside it.

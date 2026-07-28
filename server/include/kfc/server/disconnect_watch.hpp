@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <optional>
@@ -51,6 +52,20 @@ public:
     /// "am I the one who dropped?" has to ask.
     [[nodiscard]] std::optional<kfc::model::PieceColor> watching() const;
 
+    /// Whether a disconnect is in effect at all: a countdown already running,
+    /// **or** one reported and not yet picked up by the next tick.
+    ///
+    /// That second case is the point. watching() only becomes true once
+    /// advance() has run, so between a drop being reported on a connection
+    /// thread and the tick that opens its countdown there is a window -- and a
+    /// command arriving in that window would be applied against a player who
+    /// has already gone. Freezing reads this, not watching().
+    ///
+    /// A lock-free atomic read, deliberately: it is checked for every command
+    /// and every tick, so it must not queue behind the mutex that the countdown
+    /// itself uses.
+    [[nodiscard]] bool is_frozen() const { return frozen_.load(std::memory_order_acquire); }
+
     /// Stops counting down `color`, because that player came back in time.
     /// Returns false if the watch was not (or no longer) counting that colour
     /// down -- i.e. the grace already expired and the caller is too late. Safe
@@ -64,6 +79,12 @@ public:
     void clear();
 
 private:
+    // "A disconnect is in effect", mirroring pending_ || watching_ below.
+    // Kept as an atomic so is_frozen() -- on the hot path of every command and
+    // every tick -- never takes the mutex. Written only while holding it, so
+    // the two can never disagree.
+    std::atomic<bool> frozen_{false};
+
     mutable std::mutex mutex_;
 
     // How long a dropped player gets. Const after construction.

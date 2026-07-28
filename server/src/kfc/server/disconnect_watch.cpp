@@ -7,6 +7,10 @@ DisconnectWatch::DisconnectWatch(int grace_ms) : grace_ms_(grace_ms) {}
 void DisconnectWatch::report_disconnect(kfc::model::PieceColor color) {
     std::lock_guard<std::mutex> guard(mutex_);
     pending_ = color;
+    // Frozen from this instant, not from the tick that opens the countdown --
+    // otherwise a command arriving in between is applied against a player who
+    // has already left. See is_frozen().
+    frozen_.store(true, std::memory_order_release);
 }
 
 DisconnectWatch::Tick DisconnectWatch::advance(std::chrono::steady_clock::time_point now) {
@@ -30,6 +34,7 @@ DisconnectWatch::Tick DisconnectWatch::advance(std::chrono::steady_clock::time_p
         Tick tick;
         tick.expired_for = watching_;
         watching_.reset();  // stop watching before handing the expiry over
+        frozen_.store(false, std::memory_order_release);
         return tick;
     }
 
@@ -58,6 +63,7 @@ bool DisconnectWatch::cancel(kfc::model::PieceColor color) {
     }
     watching_.reset();
     pending_.reset();
+    frozen_.store(false, std::memory_order_release);
     return true;
 }
 
@@ -65,6 +71,7 @@ void DisconnectWatch::clear() {
     std::lock_guard<std::mutex> guard(mutex_);
     watching_.reset();
     pending_.reset();
+    frozen_.store(false, std::memory_order_release);
 }
 
 }  // namespace kfc::server

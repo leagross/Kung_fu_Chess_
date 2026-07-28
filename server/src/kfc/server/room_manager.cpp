@@ -25,11 +25,12 @@ void fail(std::string* out, const char* reason) {
 }  // namespace
 
 RoomManager::RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
-                         kfc::protocol::GameplayConfig config, ResultCallback on_result)
+                         kfc::protocol::GameplayConfig config, ResultCallback on_result, int disconnect_grace_ms)
     : board_factory_(std::move(board_factory)),
       logger_(logger),
       config_(std::move(config)),
-      on_result_(std::move(on_result)) {}
+      on_result_(std::move(on_result)),
+      disconnect_grace_ms_(disconnect_grace_ms) {}
 
 RoomManager::~RoomManager() {
     // Stop every room's tick thread before the Matches are destroyed. ~Match
@@ -44,7 +45,7 @@ RoomManager::~RoomManager() {
 RoomManager::Room& RoomManager::open_room(RoomId& id_out, std::string room_name) {
     id_out = next_room_id_++;
     Room room;
-    room.match = std::make_unique<Match>(board_factory_(), logger_, config_, on_result_, kDefaultDisconnectGraceMs,
+    room.match = std::make_shared<Match>(board_factory_(), logger_, config_, on_result_, disconnect_grace_ms_,
                                           kDefaultReleaseDelayMs, room_name);
     room.name = std::move(room_name);
     room.match->start();
@@ -81,7 +82,7 @@ std::string RoomManager::generate_room_id() {
 std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& username, int rating, SendFn send,
                                                         CloseFn close) {
     RoomId room_id = 0;
-    Match* match = nullptr;
+    std::shared_ptr<Match> match;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
 
@@ -114,17 +115,18 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
         // Match::join below -- this counter only gates availability.
         ++target->seats_taken;
         ++target->connected;
-        match = target->match.get();
+        match = target->match;
     }
 
     // Outside the lock: join()'s Welcome send is network I/O, and enqueue()
     // routing runs under rooms_mutex_ on the hot path -- a join must not block
-    // it. match stays valid: its room can't be reaped while connected > 0.
+    // it. The shared_ptr taken under the lock is what keeps the Match alive
+    // here, whatever another thread does to the room meanwhile.
     std::optional<kfc::model::PieceColor> color = match->join(username, std::move(send), std::move(close));
     if (!color.has_value()) {
         // Cannot happen -- seats_taken caps a room at two joiners -- but undo
         // the reservation defensively and reap the room if it's now empty.
-        std::unique_ptr<Match> reaped;
+        std::shared_ptr<Match> reaped;
         {
             std::lock_guard<std::mutex> guard(rooms_mutex_);
             auto it = rooms_.find(room_id);
@@ -149,7 +151,7 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
 std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& username, SendFn send, CloseFn close,
                                                           std::string* failure_reason) {
     RoomId room_id = 0;
-    Match* match = nullptr;
+    std::shared_ptr<Match> match;
     std::string room_key;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
@@ -160,7 +162,7 @@ std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& use
         named_rooms_[room_key] = room_id;
         ++room.seats_taken;
         ++room.connected;
-        match = room.match.get();
+        match = room.match;
         logger_.log("RoomManager: created room '" + room_key + "' (id " + std::to_string(room_id) + ") for '" +
                     username + "'");
     }
@@ -178,7 +180,7 @@ std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& use
 std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name, const std::string& username,
                                                         SendFn send, CloseFn close, std::string* failure_reason) {
     RoomId room_id = 0;
-    Match* match = nullptr;
+    std::shared_ptr<Match> match;
     bool as_spectator = false;
     std::optional<kfc::model::PieceColor> reclaimed;
     {
@@ -196,7 +198,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
             fail(failure_reason, kfc::protocol::join_reasons::kNoSuchRoom);
             return std::nullopt;  // gone
         }
-        match = it->second.match.get();
+        match = it->second.match;
 
         // A decided game can't be joined, played in, or usefully watched.
         // Refused with a reason the client can actually show, rather than
@@ -224,7 +226,21 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
     }
 
     if (reclaimed.has_value()) {
-        match->reconnect(*reclaimed, std::move(send), std::move(close));
+        if (!match->reconnect(*reclaimed, std::move(send), std::move(close))) {
+            // The grace expired in the gap between reclaimable_seat_for saying
+            // yes and this call: the match is already forfeit and this seat is
+            // nobody's. Give back the connection we counted above, or the room
+            // would never reach zero and never be reaped.
+            {
+                std::lock_guard<std::mutex> guard(rooms_mutex_);
+                auto it = rooms_.find(room_id);
+                if (it != rooms_.end()) {
+                    --it->second.connected;
+                }
+            }
+            fail(failure_reason, kfc::protocol::join_reasons::kRoomNotActive);
+            return std::nullopt;
+        }
         logger_.log("RoomManager: '" + username + "' returned to room '" + name + "'");
         return Seat{room_id, *reclaimed};
     }
@@ -253,14 +269,14 @@ void RoomManager::enqueue(RoomId room, kfc::model::PieceColor from, kfc::protoco
 }
 
 void RoomManager::on_disconnect(RoomId room, kfc::model::PieceColor color, bool spectator) {
-    Match* match = nullptr;
+    std::shared_ptr<Match> match;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
         auto it = rooms_.find(room);
         if (it == rooms_.end()) {
             return;
         }
-        match = it->second.match.get();
+        match = it->second.match;
     }
 
     // Ends the game for the opponent. Done outside the lock -- it just hands
@@ -273,7 +289,7 @@ void RoomManager::on_disconnect(RoomId room, kfc::model::PieceColor color, bool 
 
     // Reap the room if that was its last live connection. The Match is stopped
     // (which joins its tick thread) only after rooms_mutex_ is released.
-    std::unique_ptr<Match> reaped;
+    std::shared_ptr<Match> reaped;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
         auto it = rooms_.find(room);

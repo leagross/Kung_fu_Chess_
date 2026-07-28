@@ -323,13 +323,15 @@ std::optional<kfc::model::PieceColor> Match::reclaimable_seat_for(const std::str
     return counting_down;
 }
 
-void Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) {
+bool Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) {
     // Cancel the countdown first: until this lands, the tick thread is still one
     // tick away from forfeiting this very seat. cancel() returning false means
     // it already did -- this player is too late, and there is nothing to return
-    // to.
+    // to. Reported rather than swallowed, so the caller can undo its own
+    // bookkeeping (see RoomManager::join_room).
     if (game_over_ || !disconnect_watch_.cancel(color)) {
-        return;
+        logger_.log("Match: " + color_name(color) + " tried to return, but the grace had already expired");
+        return false;
     }
 
     logger_.log("Match: " + color_name(color) + " reconnected");
@@ -350,6 +352,7 @@ void Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) 
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{}}));
     // Clears the countdown banner the opponent has been staring at.
     broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::OpponentReconnected{}});
+    return true;
 }
 
 bool Match::owns_piece_at(kfc::model::PieceColor from, const kfc::model::Position& cell) const {

@@ -388,6 +388,35 @@ TEST(RoomManagerTest, TheDroppedPlayerReturningReclaimsTheirOwnSeatAndColor) {
     }));
 }
 
+TEST(RoomManagerTest, ReturningAfterTheGraceExpiredIsRefusedRatherThanSeated) {
+    FileLogger logger(log_path());
+    // A 100ms grace, so the expiry this test needs to observe costs 100ms
+    // rather than the spec's twenty seconds.
+    RoomManager rooms(two_pawn_factory(), logger, {}, {}, /*disconnect_grace_ms=*/100);
+
+    RecordingSink white_sink, black_sink, too_late;
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", white_sink.as_send_fn());
+    ASSERT_TRUE(white.has_value());
+    std::string room_id = room_id_from_welcome(white_sink);
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", black_sink.as_send_fn());
+    ASSERT_TRUE(black.has_value());
+
+    // Let the grace run all the way out, so the match is genuinely forfeit
+    // before bob tries to come back.
+    rooms.on_disconnect(black->room, PieceColor::Black);
+    ASSERT_TRUE(white_sink.wait_for(3000, [](const ServerMessage& m) {
+        return std::holds_alternative<GameOver>(m);
+    }));
+
+    // The seat is nobody's now. Reporting success here would leave bob's
+    // connection believing it is seated in a match that already ended without
+    // it -- and would leak the connection count, so the room could never reach
+    // zero and never be reaped.
+    std::string reason;
+    EXPECT_FALSE(rooms.join_room(room_id, "bob", too_late.as_send_fn(), {}, &reason).has_value());
+    EXPECT_EQ(reason, join_reasons::kRoomNotActive);
+}
+
 TEST(RoomManagerTest, AStrangerArrivingMidCountdownWatchesRatherThanTakingTheSeat) {
     FileLogger logger(log_path());
     RoomManager rooms(two_pawn_factory(), logger);

@@ -58,8 +58,13 @@ public:
     /// on_result, if set, is handed to every room's Match so a finished game
     /// reports its outcome for rating (see Match::ResultCallback); RoomManager
     /// just forwards it, staying unaware of ELO or the account store itself.
+    /// disconnect_grace_ms is passed to every room's Match -- how long a dropped
+    /// player has to return before the match is forfeited. Defaults to the
+    /// spec's 20 seconds; tests pass a short value so a countdown they need to
+    /// see expire does not cost twenty real seconds of suite time.
     RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
-                kfc::protocol::GameplayConfig config = {}, ResultCallback on_result = {});
+                kfc::protocol::GameplayConfig config = {}, ResultCallback on_result = {},
+                int disconnect_grace_ms = kDefaultDisconnectGraceMs);
     ~RoomManager();
 
     RoomManager(const RoomManager&) = delete;
@@ -132,7 +137,17 @@ public:
 
 private:
     struct Room {
-        std::unique_ptr<Match> match;
+        // Shared, not unique, so a caller can keep the Match alive across the
+        // gap where rooms_mutex_ is released.
+        //
+        // Every method here looks a room up under the lock and then uses its
+        // Match outside it -- joining sends a Welcome, which is network I/O and
+        // must not block the routing hot path. But between those two moments
+        // another thread's disconnect can take the room's last connection,
+        // reap it, and destroy the Match: a plain pointer would be dangling by
+        // the time it was used. Holding a shared_ptr means the object survives
+        // until the last user is finished with it, whoever reaps it first.
+        std::shared_ptr<Match> match;
         // Seats ever handed out (0..2). Only ever increases -- a seat is never
         // freed, so a room that filled up is never joinable again even after a
         // disconnect ends its game (which is what we want: that game is over).
@@ -167,6 +182,7 @@ private:
     kfc::protocol::FileLogger& logger_;
     kfc::protocol::GameplayConfig config_;
     ResultCallback on_result_;
+    int disconnect_grace_ms_;
 
     mutable std::mutex rooms_mutex_;
     std::map<RoomId, Room> rooms_;

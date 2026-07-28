@@ -164,9 +164,14 @@ public:
     /// Reseats a returning player: swaps in their new connection's send/close,
     /// cancels the countdown, tells the opponent (OpponentReconnected) to clear
     /// it, and sends the returning player a Welcome with the board as it stands
-    /// now plus MatchStart, so they resume the game already in progress. Only
-    /// valid for a colour reclaimable_seat_for just returned.
-    void reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close = {});
+    /// now plus MatchStart, so they resume the game already in progress.
+    ///
+    /// **Returns false if the seat was no longer theirs to take** -- the grace
+    /// expired in the moment between reclaimable_seat_for saying yes and this
+    /// being called, so the match is already forfeit. The caller must undo
+    /// whatever it did in anticipation; reporting success here would leave a
+    /// connection believing it is seated in a match that has ended without it.
+    [[nodiscard]] bool reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close = {});
 
     /// Thread-safe hand-off of one decoded client message, called from
     /// whatever IXWebSocket callback thread received it. Returns

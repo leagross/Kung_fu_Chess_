@@ -8,6 +8,7 @@ is where most of the game's difficulty lives.
 |--------|----------------|
 | `motion.hpp` | `Motion` — a piece in transit: source, destination, duration, elapsed, cooldown. |
 | `motion_kind.hpp` | `MotionKind` — an ordinary move, or a jump in place. |
+| `motion_kind_names.hpp` | Its written names, as one table read in both directions — see [`util/`](../util/README.md). |
 | `motion_factory.hpp` | Builds a `Motion`: how long this piece takes to cross this distance, and what it rests for afterwards. |
 | `real_time_arbiter.hpp` | The heart. Owns every in-flight motion, advances them all by elapsed time, and produces the arrivals. |
 | `collision_resolver.hpp` | What happens when two pieces arrive at the same cell in the same instant. |

@@ -29,7 +29,10 @@ AnimationClip load_clip(const std::filesystem::path& state_dir) {
     nlohmann::json config;
     file >> config;
 
-    std::string next_state_text = config.at("physics").at("next_state_when_finished").get<std::string>();
+    // Read as a reference into the parsed document: the name is only compared
+    // against the five known ones, so copying it out would be an allocation per
+    // state per piece for nothing.
+    const std::string& next_state_text = config.at("physics").at("next_state_when_finished").get_ref<const std::string&>();
     std::optional<PieceStateName> next_state = parse_piece_state_name(next_state_text);
     if (!next_state.has_value()) {
         throw std::runtime_error("Unknown next_state_when_finished '" + next_state_text + "' in " +
@@ -50,8 +53,11 @@ AnimationClip load_clip(const std::filesystem::path& state_dir) {
 
 PieceAnimationSet AnimationConfigLoader::load(const std::filesystem::path& piece_folder) const {
     std::unordered_map<PieceStateName, AnimationClip> clips;
-    for (PieceStateName state : kAllPieceStateNames) {
-        std::filesystem::path state_dir = piece_folder / kStatesFolderName / piece_state_name_folder(state);
+    // Driven straight off the folder table, so the set of states loaded and the
+    // set of states named can never drift apart. std::filesystem::path takes no
+    // string_view, so the folder is materialised here and only here.
+    for (const auto& [state, folder] : kPieceStateFolders.entries) {
+        std::filesystem::path state_dir = piece_folder / kStatesFolderName / std::string(folder);
         clips.emplace(state, load_clip(state_dir));
     }
     return PieceAnimationSet(std::move(clips));

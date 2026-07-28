@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include "kfc/model/board.hpp"
+#include "kfc/model/piece_names.hpp"
 #include "kfc/protocol/json.hpp"
+#include "kfc/realtime/motion_kind_names.hpp"
 
 using namespace kfc::model;
 using namespace kfc::protocol;
@@ -276,6 +278,79 @@ TEST(ProtocolJsonTest, DecodeClientMessageReturnsNulloptForGarbageText) {
 TEST(ProtocolJsonTest, DecodeServerMessageReturnsNulloptForGarbageText) {
     EXPECT_FALSE(decode_server_message("").has_value());
     EXPECT_FALSE(decode_server_message(R"({"type": "GameOver"})").has_value());  // missing payload
+}
+
+// --- Every enumerator is writable and readable, not just the ones in use ---
+
+// Driven off the name tables themselves, so an enumerator added tomorrow is
+// covered the moment it is given a name -- rather than needing someone to
+// remember to extend this test too. The tables' own static_asserts guarantee
+// no enumerator is missing from them; this checks the codec agrees.
+TEST(ProtocolJsonTest, EveryPieceEnumeratorSurvivesTheWireInBothDirections) {
+    Board board(8, 8);
+    int id = 0;
+    int cell = 0;
+    for (const auto& [kind, kind_name] : kPieceKindNames.entries) {
+        for (const auto& [color, color_name] : kPieceColorNames.entries) {
+            for (const auto& [state, state_name] : kPieceStateNames.entries) {
+                Piece piece = make_piece(++id, color, kind, Position{cell / 8, cell % 8});
+                piece.state = state;
+                board.add_piece(piece);
+                ++cell;
+            }
+        }
+    }
+    BoardSnapshot sent = snapshot_of(board);
+    ASSERT_EQ(sent.pieces.size(), 7u * 2u * 4u) << "precondition: one piece per combination";
+
+    std::optional<ServerMessage> decoded =
+        decode_server_message(encode(ServerMessage{Welcome{PieceColor::White, sent}}));
+
+    ASSERT_TRUE(decoded.has_value());
+    const std::vector<Piece>& received = std::get<Welcome>(*decoded).board.pieces;
+    ASSERT_EQ(received.size(), sent.pieces.size());
+    for (std::size_t i = 0; i < sent.pieces.size(); ++i) {
+        EXPECT_EQ(received[i].kind, sent.pieces[i].kind);
+        EXPECT_EQ(received[i].color, sent.pieces[i].color);
+        EXPECT_EQ(received[i].state, sent.pieces[i].state);
+    }
+}
+
+TEST(ProtocolJsonTest, EveryMotionKindSurvivesTheWireInBothDirections) {
+    std::vector<ArrivalEvent> events;
+    for (const auto& [kind, name] : kMotionKindNames.entries) {
+        ArrivalEvent event;
+        event.moved_piece = make_piece(1, PieceColor::White, PieceKind::Knight, Position{3, 3});
+        event.source = Position{3, 3};
+        event.destination = Position{3, 3};
+        event.kind = kind;
+        events.push_back(event);
+    }
+
+    std::optional<ServerMessage> decoded = decode_server_message(encode(ServerMessage{BoardUpdate{events}}));
+
+    ASSERT_TRUE(decoded.has_value());
+    const BoardUpdate& update = std::get<BoardUpdate>(*decoded);
+    ASSERT_EQ(update.arrival_events.size(), kMotionKindNames.entries.size());
+    for (std::size_t i = 0; i < events.size(); ++i) {
+        EXPECT_EQ(update.arrival_events[i].kind, events[i].kind);
+    }
+}
+
+// A name no table knows must fail the whole message rather than quietly
+// becoming whatever the first enumerator happens to be -- an untrusted client
+// could otherwise turn a typo into a piece the board never had.
+TEST(ProtocolJsonTest, AnUnknownEnumNameIsRefusedRatherThanDefaulted) {
+    auto welcome_with = [](const char* kind) {
+        return std::string(R"({"type":"Welcome","payload":{"assigned_color":"White","board":{"width":1,"height":1,)"
+                           R"("pieces":[{"id":1,"color":"White","kind":")") +
+               kind + R"(","cell":{"row":0,"col":0},"state":"Idle","has_moved":false}]}}})";
+    };
+
+    ASSERT_TRUE(decode_server_message(welcome_with("Rook")).has_value()) << "precondition: the shape is valid";
+    EXPECT_FALSE(decode_server_message(welcome_with("Wizard")).has_value());
+    EXPECT_FALSE(decode_server_message(welcome_with("rook")).has_value()) << "names are case-sensitive";
+    EXPECT_FALSE(decode_server_message(welcome_with("")).has_value());
 }
 
 // --- Never write a password into a log file ---

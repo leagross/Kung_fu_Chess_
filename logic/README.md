@@ -19,6 +19,7 @@ This is the layer everything else is built on, and it depends on nothing.
 | `io/` | Reading a board from a text layout, and printing one back. | [README](include/kfc/io/README.md) |
 | `audio/` | `SoundBoard` — maps game events to sound *cues*. Which file a cue plays belongs to the UI layer. | [README](include/kfc/audio/README.md) |
 | `texttests/` | `Game`, the headless local game, plus `IGameView` and the text-script driver. (The name is historic — this is production code.) | [README](include/kfc/texttests/README.md) |
+| `util/` | Small general tools with no game in them — currently the `constexpr` enum-name table every layer's text conversions are built on. | [README](include/kfc/util/README.md) |
 
 ## Two ideas worth knowing
 

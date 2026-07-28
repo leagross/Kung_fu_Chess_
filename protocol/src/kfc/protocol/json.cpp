@@ -1,11 +1,15 @@
 #include "kfc/protocol/json.hpp"
 
-#include "kfc/model/piece_kind_names.hpp"
+#include "kfc/model/piece_names.hpp"
+#include "kfc/realtime/motion_kind_names.hpp"
 
 #include <nlohmann/json.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 using nlohmann::json;
 
@@ -34,75 +38,60 @@ void from_json(const json& j, Position& pos) {
 }
 
 namespace {
-std::string color_to_string(PieceColor color) {
-    return color == PieceColor::White ? "White" : "Black";
+
+// The string a json value holds, without copying it out. get<std::string>()
+// allocates a duplicate of a value we only ever compare against a handful of
+// fixed names; get_ref hands back the parsed string itself. It throws when the
+// value is not a string at all -- which is exactly as unusable as an unknown
+// name, and decode_* below turns either into std::nullopt.
+[[nodiscard]] std::string_view text_of(const json& j) {
+    return j.get_ref<const std::string&>();
 }
 
-PieceColor color_from_string(const std::string& text) {
-    if (text == "White") return PieceColor::White;
-    if (text == "Black") return PieceColor::Black;
-    throw std::runtime_error("Unknown PieceColor '" + text + "'");
-}
-
-std::string kind_to_string(PieceKind kind) {
-    return std::string(name_of(kind));
-}
-
-PieceKind kind_from_string(const std::string& text) {
-    // Throws rather than returning nullopt: a kind we cannot read makes the
-    // whole message unusable, and decode_* turns the exception into nullopt.
-    std::optional<PieceKind> kind = piece_kind_from_name(text);
-    if (!kind.has_value()) {
-        throw std::runtime_error("Unknown PieceKind '" + text + "'");
+// Reads one enum written as its name. Throws rather than returning nullopt: a
+// field we cannot read makes the whole message unusable, and the decoders turn
+// the exception into nullopt for the caller.
+template <typename Enum, std::size_t N>
+[[nodiscard]] Enum read_named(const json& j, const kfc::util::EnumNames<Enum, N>& names, std::string_view what) {
+    std::string_view text = text_of(j);
+    std::optional<Enum> value = names.value_of(text);
+    if (!value.has_value()) {
+        throw std::runtime_error("Unknown " + std::string(what) + " '" + std::string(text) + "'");
     }
-    return *kind;
+    return *value;
 }
 
-std::string state_to_string(PieceState state) {
-    switch (state) {
-        case PieceState::Idle: return "Idle";
-        case PieceState::Moving: return "Moving";
-        case PieceState::Airborne: return "Airborne";
-        case PieceState::Captured: return "Captured";
-    }
-    throw std::runtime_error("Unknown PieceState");
-}
-
-PieceState state_from_string(const std::string& text) {
-    if (text == "Idle") return PieceState::Idle;
-    if (text == "Moving") return PieceState::Moving;
-    if (text == "Airborne") return PieceState::Airborne;
-    if (text == "Captured") return PieceState::Captured;
-    throw std::runtime_error("Unknown PieceState '" + text + "'");
-}
 }  // namespace
 
-// Readable full names, not the compact chess-notation letters kfc::io
-// uses -- these are for logs/wire traffic a human is expected to read
-// while debugging, per the CTD SERVER lecture's logging requirement.
+// Every enum on the wire is written as its name from the tables in
+// kfc/model/piece_names.hpp and kfc/realtime/motion_kind_names.hpp -- the
+// readable full words, not the compact chess-notation letters kfc::io uses,
+// because this traffic is what a human reads in the logs while debugging (the
+// CTD SERVER lecture's logging requirement). Writing is a table lookup
+// returning a view of a literal, so none of these hooks allocates a name.
 
 void to_json(json& j, PieceColor color) {
-    j = color_to_string(color);
+    j = name_of(color);
 }
 
 void from_json(const json& j, PieceColor& color) {
-    color = color_from_string(j.get<std::string>());
+    color = read_named(j, kPieceColorNames, "PieceColor");
 }
 
 void to_json(json& j, PieceKind kind) {
-    j = kind_to_string(kind);
+    j = name_of(kind);
 }
 
 void from_json(const json& j, PieceKind& kind) {
-    kind = kind_from_string(j.get<std::string>());
+    kind = read_named(j, kPieceKindNames, "PieceKind");
 }
 
 void to_json(json& j, PieceState state) {
-    j = state_to_string(state);
+    j = name_of(state);
 }
 
 void from_json(const json& j, PieceState& state) {
-    state = state_from_string(j.get<std::string>());
+    state = read_named(j, kPieceStateNames, "PieceState");
 }
 
 void to_json(json& j, const Piece& piece) {
@@ -153,22 +142,12 @@ void from_json(const json& j, ArrivalEvent& event) {
     }
 }
 
-std::string motion_kind_to_string(MotionKind kind) {
-    return kind == MotionKind::Move ? "Move" : "JumpInPlace";
-}
-
-MotionKind motion_kind_from_string(const std::string& text) {
-    if (text == "Move") return MotionKind::Move;
-    if (text == "JumpInPlace") return MotionKind::JumpInPlace;
-    throw std::runtime_error("Unknown MotionKind '" + text + "'");
-}
-
 void to_json(json& j, MotionKind kind) {
-    j = motion_kind_to_string(kind);
+    j = name_of(kind);
 }
 
 void from_json(const json& j, MotionKind& kind) {
-    kind = motion_kind_from_string(j.get<std::string>());
+    kind = read_named(j, kMotionKindNames, "MotionKind");
 }
 
 void to_json(json& j, const Motion& motion) {
@@ -209,8 +188,18 @@ void from_json(const json& j, BoardSnapshot& snapshot) {
 
 namespace {
 
-json envelope(const std::string& type, json payload) {
+// Every call site passes a literal, so the parameter is a view: a const
+// std::string& bound one freshly built std::string per encoded message purely
+// to be copied into the json a line later.
+json envelope(std::string_view type, json payload) {
     return json{{"type", type}, {"payload", std::move(payload)}};
+}
+
+// The "type" tag of a decoded envelope, as a view onto the parsed message
+// rather than a copy of it -- see text_of above. Throws if the field is absent
+// or not a string, which decode_* reports as an undecodable message.
+[[nodiscard]] std::string_view type_of(const json& j) {
+    return j.at("type").get_ref<const std::string&>();
 }
 
 }  // namespace
@@ -294,7 +283,7 @@ std::string encode(const ServerMessage& message) {
 std::optional<ClientMessage> decode_client_message(const std::string& text) {
     try {
         json j = json::parse(text);
-        std::string type = j.at("type").get<std::string>();
+        std::string_view type = type_of(j);
         const json& payload = j.at("payload");
 
         if (type == "Login") {
@@ -370,7 +359,7 @@ std::string redact_for_log(const std::string& text) {
 std::optional<ServerMessage> decode_server_message(const std::string& text) {
     try {
         json j = json::parse(text);
-        std::string type = j.at("type").get<std::string>();
+        std::string_view type = type_of(j);
         const json& payload = j.at("payload");
 
         if (type == "Welcome") {

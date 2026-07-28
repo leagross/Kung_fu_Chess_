@@ -299,7 +299,6 @@ if (KFC_HAVE_OPENCV)
     ui/src/kfc/graphics/io/board_file_loader.cpp
     ui/src/kfc/graphics/input/mouse_input_adapter.cpp
     ui/src/kfc/graphics/input/screen_mapper.cpp
-    ui/src/kfc/graphics/animation/piece_state_name.cpp
     ui/src/kfc/graphics/animation/piece_animation_set.cpp
     ui/src/kfc/graphics/animation/animation_config_loader.cpp
     ui/src/kfc/graphics/animation/piece_animator.cpp

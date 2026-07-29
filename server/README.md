@@ -118,6 +118,15 @@ connection, which releases the survivor and lets the room be reaped.
 
 ## Tests
 
+`tests/integration/test_websocket_end_to_end.cpp` is the only place a real
+socket is involved: it binds a port, speaks the real protocol, and asserts what a
+real client sees. **It is currently disabled** — the tests pass individually but
+running them together hangs about one run in three, after every assertion has
+already passed, during teardown. They found a real intermittent deadlock in the
+shutdown path rather than being wrong themselves; the file says what is known and
+what is left. Run them deliberately with
+`--gtest_also_run_disabled_tests`.
+
 `tests/unit/test_match.cpp` covers ownership, rejections, resignation, the
 countdown, forfeits and the release. `test_room_manager.cpp` covers matchmaking
 windows, room ids, spectators, refusals with reasons, and telling a returning

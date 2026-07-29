@@ -254,6 +254,7 @@ add_executable(kfc_tests
   server/tests/unit/test_match_audience.cpp
   server/tests/unit/test_client_session.cpp
   server/tests/unit/test_session_registry.cpp
+  server/tests/integration/test_websocket_end_to_end.cpp
   ui/tests/unit/test_match_overlay.cpp
   ui/src/kfc/graphics/app/match_overlay.cpp
   database/tests/unit/test_elo.cpp
@@ -265,6 +266,7 @@ add_executable(kfc_tests
   server/src/kfc/server/match_audience.cpp
   server/src/kfc/server/client_session.cpp
   server/src/kfc/server/session_registry.cpp
+  server/src/kfc/server/websocket_game_server.cpp
   server/src/kfc/server/disconnect_watch.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/sha256.cpp
@@ -276,7 +278,9 @@ add_executable(kfc_tests
 # (MatchOverlay). Nothing here pulls in OpenCV, so the suite still builds on a
 # machine without it -- which CI relies on.
 target_include_directories(kfc_tests PRIVATE server/include database/include ui/include)
-target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp kfc_argon2)
+# ixwebsocket is here only for the end-to-end tests, which bind a real port
+# and speak the real protocol -- see server/tests/integration.
+target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp kfc_argon2 ixwebsocket)
 # Test setup code deliberately fires request_move/request_jump for their board
 # side effect while arranging a scenario, discarding the [[nodiscard]]
 # MoveResult on purpose. Suppress C4834 for this target only -- production code

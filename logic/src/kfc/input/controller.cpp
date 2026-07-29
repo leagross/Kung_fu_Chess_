@@ -91,6 +91,21 @@ ControllerResult Controller::jump(int x, int y) {
         return ControllerResult{ClickOutcome::Ignored, std::nullopt};
     }
 
+    // The same gate click() applies, for the same reason: an empty cell has
+    // nothing to jump, and an opponent's piece is not this client's to command.
+    // Both were being sent to the server and bounced back as "not_your_piece",
+    // which costs a round trip to learn something the client already knows from
+    // the board in front of it.
+    //
+    // This is a convenience filter, never the enforcement. The server checks
+    // ownership itself (Match::owns_piece_at, against the colour in the Seat)
+    // because a client is free to send whatever it likes -- but every request
+    // filtered here is one the server never has to receive, decode and refuse.
+    std::optional<kfc::model::Piece> piece = board_.piece_at(*cell);
+    if (!piece.has_value() || !can_control(piece->color)) {
+        return ControllerResult{ClickOutcome::Ignored, std::nullopt};
+    }
+
     kfc::model::MoveResult result = move_requester_.request_jump(*cell);
     return ControllerResult{ClickOutcome::JumpRequested, result};
 }

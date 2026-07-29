@@ -136,8 +136,15 @@ int main(int argc, char** argv) {
         server.start();
         std::cout << "kfc_server listening on ws://localhost:" << port << "\n";
         server.wait();
-        // rooms' destructor stops every live room's tick thread as the scope
-        // exits (after server, declared later, has stopped accepting).
+
+        // Shutdown order matters, and it is the opposite of the declaration
+        // order, so it has to be spelled out rather than left to destructors.
+        // Stopping the transport first leaves a frozen match's tick thread
+        // broadcasting a disconnect countdown into the very sockets being closed
+        // underneath it, and the process can hang with every game already over.
+        // Rooms go quiet first; the socket layer comes down after, as this scope
+        // exits. See RoomManager::stop_all.
+        rooms.stop_all();
     } catch (const std::exception& e) {
         logger.log(kfc::protocol::LogLevel::Error, std::string("Fatal: ") + e.what());
         std::cerr << "Error: " << e.what() << "\n";

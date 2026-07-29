@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <random>
 #include <string>
+#include <vector>
 #include <utility>
 
 #include "kfc/protocol/file_logger.hpp"
@@ -33,12 +34,24 @@ RoomManager::RoomManager(std::function<kfc::model::Board()> board_factory, kfc::
       disconnect_grace_ms_(disconnect_grace_ms) {}
 
 RoomManager::~RoomManager() {
-    // Stop every room's tick thread before the Matches are destroyed. ~Match
-    // also calls stop(), but stopping them all here first keeps teardown order
-    // explicit and joins each thread while the map is still intact.
-    std::lock_guard<std::mutex> guard(rooms_mutex_);
-    for (auto& [id, room] : rooms_) {
-        room.match->stop();
+    stop_all();
+}
+
+void RoomManager::stop_all() {
+    // The matches are collected under the lock and stopped outside it: stop()
+    // joins a tick thread, and that thread may be part-way through a broadcast
+    // that wants this same table. Holding rooms_mutex_ across the join would be
+    // the deadlock this method exists to avoid, in miniature.
+    std::vector<std::shared_ptr<Match>> live;
+    {
+        std::lock_guard<std::mutex> guard(rooms_mutex_);
+        live.reserve(rooms_.size());
+        for (auto& [id, room] : rooms_) {
+            live.push_back(room.match);
+        }
+    }
+    for (const std::shared_ptr<Match>& match : live) {
+        match->stop();
     }
 }
 

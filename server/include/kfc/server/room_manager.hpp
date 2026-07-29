@@ -143,6 +143,21 @@ public:
     /// Number of rooms currently alive -- for tests and diagnostics.
     [[nodiscard]] std::size_t room_count() const;
 
+    /// Stops every live room's tick thread, and does not return until they have
+    /// all finished. Idempotent -- a stopped Match ignores a second stop().
+    ///
+    /// **Call this before shutting the socket layer down**, not after. A frozen
+    /// match's tick thread broadcasts an OpponentDisconnected every second, and
+    /// broadcasting means calling send() on the transport's sockets. Tearing the
+    /// transport down first leaves those two racing: the shutdown waits for the
+    /// connection threads while a tick thread is still inside a send on a socket
+    /// that is being closed underneath it, and the process deadlocks with every
+    /// game already over. Found by the end-to-end tests, which is the one place
+    /// a real socket is involved.
+    ///
+    /// The destructor calls this too, for the case where nobody remembered.
+    void stop_all();
+
 private:
     struct Room {
         // Shared, not unique, so a caller can keep the Match alive across the

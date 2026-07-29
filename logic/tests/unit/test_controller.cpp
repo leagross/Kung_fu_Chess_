@@ -199,15 +199,17 @@ TEST(ControllerTest, JumpOnAnOccupiedCellRequestsAJump) {
     EXPECT_EQ(result.move_result->reason, "ok");
 }
 
-TEST(ControllerTest, JumpOnAnEmptyCellIsRejectedAsEmptySource) {
+// This used to send the jump and let it come back "empty_source". There is
+// nothing on the cell to jump, and the client is looking at the same board the
+// server is -- so the request is dropped here rather than paying a round trip
+// to be told something already visible. click() has always worked this way.
+TEST(ControllerTest, JumpOnAnEmptyCellIsIgnoredWithoutAskingTheServer) {
     Harness h(8, 8);
 
     ControllerResult result = h.controller.jump(50, 50);
 
-    ASSERT_EQ(result.outcome, ClickOutcome::JumpRequested);
-    ASSERT_TRUE(result.move_result.has_value());
-    EXPECT_FALSE(result.move_result->is_accepted);
-    EXPECT_EQ(result.move_result->reason, "empty_source");
+    EXPECT_EQ(result.outcome, ClickOutcome::Ignored);
+    EXPECT_FALSE(result.move_result.has_value()) << "the request was still sent";
 }
 
 TEST(ControllerTest, JumpOutsideTheBoardIsIgnored) {
@@ -263,4 +265,43 @@ TEST(ControllerTest, WithNoControlledColorEitherSideCanBeSelectedForLocalHotSeat
     ControllerResult result = h.controller.click(cell_x(3), cell_y(2));
 
     EXPECT_EQ(result.outcome, ClickOutcome::Selected);  // black is selectable in local play
+}
+
+// --- and the same gate on jump, which had none ---
+
+// click() filtered opponent pieces from the start; jump() did not, so
+// double-clicking an enemy piece sent a request the server would only refuse.
+// Not a security hole -- Match::owns_piece_at is the actual enforcement, against
+// the colour stored in the Seat -- but a wasted round trip, and at the scale
+// Server_Design.md targets, five million of them a second are worth not sending.
+TEST(ControllerTest, AColorControlledClientIgnoresAJumpOnAnOpponentPiece) {
+    Harness h(8, 8, PieceColor::White);
+    h.board.add_piece(make_rook(1, PieceColor::Black, Position{2, 3}));
+
+    ControllerResult result = h.controller.jump(cell_x(3), cell_y(2));
+
+    EXPECT_EQ(result.outcome, ClickOutcome::Ignored);
+    EXPECT_FALSE(result.move_result.has_value()) << "an opponent's piece was asked to jump";
+}
+
+TEST(ControllerTest, AColorControlledClientStillJumpsItsOwnPiece) {
+    Harness h(8, 8, PieceColor::White);
+    h.board.add_piece(make_rook(1, PieceColor::White, Position{2, 3}));
+
+    ControllerResult result = h.controller.jump(cell_x(3), cell_y(2));
+
+    ASSERT_EQ(result.outcome, ClickOutcome::JumpRequested);
+    ASSERT_TRUE(result.move_result.has_value());
+    EXPECT_TRUE(result.move_result->is_accepted);
+}
+
+// Local hot-seat play has no controlled colour, and both sides share one
+// keyboard -- filtering by colour there would make half the board unusable.
+TEST(ControllerTest, WithNoControlledColorEitherSideCanJumpForLocalHotSeatPlay) {
+    Harness h(8, 8);
+    h.board.add_piece(make_rook(1, PieceColor::Black, Position{2, 3}));
+
+    ControllerResult result = h.controller.jump(cell_x(3), cell_y(2));
+
+    EXPECT_EQ(result.outcome, ClickOutcome::JumpRequested);
 }

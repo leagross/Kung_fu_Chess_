@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string>
+#include <utility>
 
 #include "kfc/protocol/json.hpp"
 #include "kfc/realtime/game_over_observer.hpp"
@@ -116,6 +118,14 @@ kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spe
 void Match::enqueue(kfc::model::PieceColor from, kfc::protocol::ClientMessage message) {
     {
         std::lock_guard<std::mutex> guard(queue_mutex_);
+        if (queue_.size() >= kMaxQueuedCommands) {
+            // Counted, not logged here: the whole point of the cap is that a
+            // flood costs the server a fixed amount, and a log line per dropped
+            // message would hand the denial of service straight back. The tick
+            // thread reports the total once, after it drains.
+            ++dropped_commands_;
+            return;
+        }
         queue_.emplace_back(from, std::move(message));
     }
     queue_cv_.notify_one();
@@ -151,14 +161,21 @@ void Match::tick_loop() {
 
     while (running_.load()) {
         std::deque<std::pair<kfc::model::PieceColor, kfc::protocol::ClientMessage>> pending;
+        int dropped = 0;
         {
             std::unique_lock<std::mutex> lock(queue_mutex_);
             queue_cv_.wait_for(lock, std::chrono::milliseconds(kTickIntervalMs),
                                [this] { return !queue_.empty() || !running_.load(); });
             pending.swap(queue_);
+            dropped = std::exchange(dropped_commands_, 0);
         }
         if (!running_.load()) {
             break;
+        }
+        if (dropped > 0) {
+            // One line per tick at worst, however hard the queue was flooded.
+            logger_.log(kfc::protocol::LogLevel::Warning,
+                        "Match: dropped " + std::to_string(dropped) + " command(s) -- queue full");
         }
 
         auto now = std::chrono::steady_clock::now();

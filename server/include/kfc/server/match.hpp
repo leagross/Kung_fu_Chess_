@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <condition_variable>
 #include <deque>
@@ -73,6 +74,19 @@ inline constexpr int kDefaultDisconnectGraceMs = 20000;
 /// How long after a match is decided its participants are released. Long enough
 /// for the final GameOver to reach every screen and register there.
 inline constexpr int kDefaultReleaseDelayMs = 3000;
+
+/// The most commands a match will hold waiting to be applied.
+///
+/// The queue is drained about sixty times a second, and a player cannot
+/// usefully issue commands faster than their pieces come off cooldown, so a
+/// legitimate depth is a handful -- reaching even a fraction of this means
+/// something is sending far faster than it can play. Without a cap, a client
+/// that simply sends in a loop grows this deque until the server runs out of
+/// memory, and it costs the attacker nothing.
+///
+/// Generous on purpose: a burst from a laggy connection catching up must not
+/// lose a real move. What is refused is the flood, not the burst.
+inline constexpr std::size_t kMaxQueuedCommands = 512;
 
 /// Owns one playable match: a GameCore (the very same Board/RuleEngine/
 /// RealTimeArbiter/MotionFactory/GameEngine stack kfc::texttests::Game
@@ -183,6 +197,10 @@ public:
     /// Thread-safe hand-off of one decoded client message, called from
     /// whatever IXWebSocket callback thread received it. Returns
     /// immediately; the message is applied on tick_loop's own thread.
+    ///
+    /// Dropped, rather than queued, once kMaxQueuedCommands are already
+    /// waiting -- see there. The newest is what goes: the ones already queued
+    /// arrived first and are the ones a real player actually meant.
     void enqueue(kfc::model::PieceColor from, kfc::protocol::ClientMessage message);
 
     /// A player's connection dropped: starts a disconnect grace countdown
@@ -274,6 +292,11 @@ private:
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
     std::deque<std::pair<kfc::model::PieceColor, kfc::protocol::ClientMessage>> queue_;
+    // Commands dropped because the queue was full since the last time it was
+    // reported, so a flood costs one log line and not one per message -- the
+    // logging is otherwise the easiest thing for the flood to turn into the
+    // actual denial of service. Queue-thread state, under queue_mutex_.
+    int dropped_commands_ = 0;
 
     std::thread tick_thread_;
     std::atomic<bool> running_{false};

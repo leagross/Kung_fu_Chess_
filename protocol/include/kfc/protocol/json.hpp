@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <string>
 
@@ -7,6 +8,16 @@
 #include "kfc/protocol/messages.hpp"
 
 namespace kfc::protocol {
+
+/// The largest wire message either side will parse, in bytes.
+///
+/// Sized for the biggest legitimate message by a wide margin: a Welcome for a
+/// full board plus the whole move history of a long game runs to a few tens of
+/// kilobytes. Anything past this is not a game -- and parsing it would mean
+/// allocating and walking whatever a peer chose to send, which is the cheapest
+/// possible way to exhaust a server's memory. Checked before parsing, since
+/// after parsing is too late.
+inline constexpr std::size_t kMaxMessageBytes = 1024 * 1024;
 
 /// Builds a BoardSnapshot by reading every occupied cell of board -- the
 /// only place Board's public piece_at()/width()/height() API is walked for
@@ -19,9 +30,9 @@ namespace kfc::protocol {
 [[nodiscard]] std::string encode(const ClientMessage& message);
 [[nodiscard]] std::string encode(const ServerMessage& message);
 
-/// Parses one JSON text line back into a message. std::nullopt for
-/// malformed JSON, an unrecognized "type", or a payload missing a required
-/// field -- callers (Match/ServerLink) log and drop the message rather than
+/// Parses one JSON text line back into a message. std::nullopt for a text
+/// longer than kMaxMessageBytes, malformed JSON, an unrecognized "type", or a
+/// payload missing a required field -- callers (Match/ServerLink) log and drop the message rather than
 /// crash on a bad frame from a misbehaving or out-of-date peer. [[nodiscard]]:
 /// the returned optional *is* the parse outcome -- dropping it means acting
 /// on an unvalidated frame.

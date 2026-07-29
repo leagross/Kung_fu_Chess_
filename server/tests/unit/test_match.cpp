@@ -669,3 +669,51 @@ TEST(MatchResignTest, CommandsArrivingAfterTheGameIsOverAreIgnored) {
 
     match.stop();
 }
+
+// --- A flood must cost the server a fixed amount ---
+
+// The queue used to be unbounded: a client that simply sends in a loop grew it
+// until the process ran out of memory, and it cost the sender nothing. The cap
+// drops the *newest*, so what survives is what a real player sent first.
+//
+// Filled while the match is stopped, so nothing drains it and the queue state
+// is exactly what the test arranged rather than a race against the tick thread.
+TEST(MatchQueueTest, CommandsPastTheQueueCapAreDroppedRatherThanQueued) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_queue_test.log");
+    kfc::server::Match match(make_two_pawn_board(), logger);
+
+    RecordingSink white_sink, black_sink;
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+
+    auto is_motion_started = [](const ServerMessage& m) { return std::holds_alternative<MotionStarted>(m); };
+    const ClientMessage legal_move{MoveRequest{Position{2, 0}, Position{1, 0}}};
+
+    // Exactly to the cap, with commands that are refused on arrival (Black
+    // cannot move White's pawn), so none of them can change the board and the
+    // only possible board change is the legal move that follows.
+    for (std::size_t i = 0; i < kfc::server::kMaxQueuedCommands; ++i) {
+        match.enqueue(PieceColor::Black, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
+    }
+    // One past the cap -- and legal, so if it were queued it would visibly move
+    // a piece. It must be the one that is lost.
+    match.enqueue(PieceColor::White, legal_move);
+
+    match.start();
+
+    // The rejection goes back to whoever sent it, so Black's sink is where the
+    // flood's refusals land. MotionStarted, in contrast, is broadcast.
+    ASSERT_TRUE(black_sink.wait_for(3000, [](const ServerMessage& m) {
+        return is_move_rejected_with(m, move_reasons::kNotYourPiece);
+    })) << "precondition: the queued flood was applied";
+    EXPECT_FALSE(white_sink.wait_for(300, is_motion_started))
+        << "a command past the cap was queued anyway";
+
+    // The control: the very same move, once the queue has drained, is accepted.
+    // Without this the test would also pass if the match had simply stopped
+    // working.
+    match.enqueue(PieceColor::White, legal_move);
+    EXPECT_TRUE(white_sink.wait_for(2000, is_motion_started)) << "the cap outlived the flood";
+
+    match.stop();
+}

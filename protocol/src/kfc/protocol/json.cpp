@@ -202,6 +202,17 @@ json envelope(std::string_view type, json payload) {
     return j.at("type").get_ref<const std::string&>();
 }
 
+// Parses one wire text. The length check comes first, and without parsing: the
+// whole point is to not hand an arbitrary number of bytes to the JSON parser.
+// Throws, like json::parse itself does, so both failures leave the decoders
+// below by the one path they already have.
+[[nodiscard]] json parse_envelope(const std::string& text) {
+    if (text.size() > kMaxMessageBytes) {
+        throw std::runtime_error("message of " + std::to_string(text.size()) + " bytes exceeds the limit");
+    }
+    return json::parse(text);
+}
+
 }  // namespace
 
 BoardSnapshot snapshot_of(const kfc::model::Board& board) {
@@ -282,7 +293,7 @@ std::string encode(const ServerMessage& message) {
 
 std::optional<ClientMessage> decode_client_message(const std::string& text) {
     try {
-        json j = json::parse(text);
+        json j = parse_envelope(text);
         std::string_view type = type_of(j);
         const json& payload = j.at("payload");
 
@@ -324,8 +335,23 @@ std::optional<ClientMessage> decode_client_message(const std::string& text) {
 std::string redact_for_log(const std::string& text) {
     // Scanned rather than parsed: see the header for why a message we cannot
     // decode still has to come out redacted.
-    static constexpr char kKey[] = "\"password\":\"";
-    static constexpr std::size_t kKeyLength = sizeof(kKey) - 1;
+    //
+    // The key and its value are located tolerantly, not by matching the exact
+    // byte sequence our own encoder happens to emit. JSON allows whitespace
+    // around a colon, and this ran against real traffic that had it -- a peer
+    // sending `"password": "hunter2"`, which any pretty-printing or
+    // hand-written client does, wrote the password straight into the log. The
+    // whole point of this function is to be correct for messages we did not
+    // produce, so it cannot assume our own formatting.
+    static constexpr std::string_view kKey = "\"password\"";
+
+    auto skip_whitespace = [&text](std::size_t from) {
+        while (from < text.size() &&
+               (text[from] == ' ' || text[from] == '\t' || text[from] == '\n' || text[from] == '\r')) {
+            ++from;
+        }
+        return from;
+    };
 
     std::string out;
     std::size_t at = 0;
@@ -336,29 +362,50 @@ std::string redact_for_log(const std::string& text) {
             return out;
         }
 
-        std::size_t value = key + kKeyLength;
-        // Walk to the closing quote, stepping over backslash escapes -- a
-        // password containing a quote is escaped on the wire, and stopping at
-        // it would leave the rest of the password in the log.
-        std::size_t end = value;
-        while (end < text.size() && text[end] != '"') {
-            end += (text[end] == '\\') ? 2 : 1;
+        std::size_t cursor = skip_whitespace(key + kKey.size());
+        if (cursor >= text.size() || text[cursor] != ':') {
+            // "password" appearing as a value rather than a key. Nothing to
+            // redact; copy what we scanned and carry on past it.
+            out.append(text, at, cursor - at);
+            at = cursor;
+            continue;
         }
-        if (end >= text.size()) {
-            // Truncated message: drop the remainder rather than risk emitting
-            // a partial password.
-            out.append(text, at, key - at).append(kKey).append("***");
-            return out;
+        cursor = skip_whitespace(cursor + 1);
+
+        if (cursor < text.size() && text[cursor] == '"') {
+            std::size_t value = cursor + 1;
+            // Walk to the closing quote, stepping over backslash escapes -- a
+            // password containing a quote is escaped on the wire, and stopping
+            // at it would leave the rest of the password in the log.
+            std::size_t end = value;
+            while (end < text.size() && text[end] != '"') {
+                end += (text[end] == '\\') ? 2 : 1;
+            }
+            out.append(text, at, value - at).append("***");
+            if (end >= text.size()) {
+                // Truncated message: drop the remainder rather than risk
+                // emitting a partial password.
+                return out;
+            }
+            at = end;
+            continue;
         }
 
-        out.append(text, at, value - at).append("***");
+        // A password that is not a quoted string -- a number, or null, from a
+        // client that built the message loosely. Still a secret, so it goes
+        // too: everything up to whatever ends the value.
+        std::size_t end = cursor;
+        while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']') {
+            ++end;
+        }
+        out.append(text, at, cursor - at).append("***");
         at = end;
     }
 }
 
 std::optional<ServerMessage> decode_server_message(const std::string& text) {
     try {
-        json j = json::parse(text);
+        json j = parse_envelope(text);
         std::string_view type = type_of(j);
         const json& payload = j.at("payload");
 

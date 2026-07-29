@@ -353,6 +353,36 @@ TEST(ProtocolJsonTest, AnUnknownEnumNameIsRefusedRatherThanDefaulted) {
     EXPECT_FALSE(decode_server_message(welcome_with("")).has_value());
 }
 
+// --- What a peer is allowed to send at all ---
+
+// Parsing is where an untrusted peer gets to make this process allocate, so
+// the length is checked before the parser ever sees the text. A gigabyte of
+// valid JSON is still a gigabyte.
+TEST(ProtocolJsonTest, AMessageLongerThanTheLimitIsRefusedWithoutParsing) {
+    std::string padding(kMaxMessageBytes, 'x');
+    std::string oversized = R"({"type":"MoveRejected","payload":{"reason":")" + padding + R"("}})";
+    ASSERT_GT(oversized.size(), kMaxMessageBytes);
+
+    EXPECT_FALSE(decode_server_message(oversized).has_value());
+    EXPECT_FALSE(decode_client_message(oversized).has_value());
+}
+
+TEST(ProtocolJsonTest, AMessageAtTheLimitIsStillAccepted) {
+    // Padded to exactly the limit, so the boundary itself is exercised rather
+    // than assumed -- an off-by-one here silently refuses legitimate traffic.
+    // The padding is measured from the real message, not counted by hand.
+    auto message_with = [](const std::string& reason) {
+        return R"({"type":"MoveRejected","payload":{"reason":")" + reason + R"("}})";
+    };
+    std::string reason(kMaxMessageBytes - message_with("").size(), 'x');
+    std::string message = message_with(reason);
+    ASSERT_EQ(message.size(), kMaxMessageBytes);
+
+    std::optional<ServerMessage> decoded = decode_server_message(message);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(std::get<MoveRejected>(*decoded).reason.size(), reason.size());
+}
+
 // --- Never write a password into a log file ---
 
 TEST(RedactForLogTest, StripsThePasswordFromAnEncodedLogin) {
@@ -386,4 +416,47 @@ TEST(RedactForLogTest, RedactsEvenWhenTheMessageCannotBeDecoded) {
     std::string malformed = R"({"type":"Login","payload":{"password":"s3cret","username":"bob",)";
     ASSERT_FALSE(decode_client_message(malformed).has_value());
     EXPECT_EQ(redact_for_log(malformed).find("s3cret"), std::string::npos);
+}
+
+// Found by pointing a hand-written client at the running server: its JSON had a
+// space after the colon, the scan was matching the exact bytes our own encoder
+// emits, and the password went into kfc_server.log in clear. Redaction exists
+// precisely for messages we did not produce, so it must not assume our format.
+TEST(RedactForLogTest, StripsThePasswordHoweverThePeerSpacedItsJson) {
+    for (const std::string& spaced : {
+             R"({"type":"Login","payload":{"username":"alice","password": "hunter2"}})",
+             R"({"type":"Login","payload":{"username":"alice","password" : "hunter2"}})",
+             R"({"type":"Login","payload":{"username":"alice","password":    "hunter2"}})",
+             "{\"type\":\"Login\",\"payload\":{\"password\":\n\t\"hunter2\"}}",
+         }) {
+        std::string safe = redact_for_log(spaced);
+        EXPECT_EQ(safe.find("hunter2"), std::string::npos) << "leaked from: " << spaced;
+        EXPECT_NE(safe.find("***"), std::string::npos) << "nothing was redacted in: " << spaced;
+    }
+}
+
+// A password that is not a quoted string is still a secret.
+TEST(RedactForLogTest, StripsAPasswordThatIsNotAString) {
+    std::string numeric = R"({"type":"Login","payload":{"password":12345,"username":"alice"}})";
+    std::string safe = redact_for_log(numeric);
+    EXPECT_EQ(safe.find("12345"), std::string::npos);
+    EXPECT_NE(safe.find("alice"), std::string::npos) << "redaction must not cost the log its value";
+}
+
+// The word appearing as a value, not a key, names no secret -- redacting it
+// would quietly corrupt an unrelated message.
+TEST(RedactForLogTest, LeavesTheWordPasswordAloneWhenItIsNotAKey) {
+    std::string message = R"({"type":"MoveRejected","payload":{"reason":"password"}})";
+    EXPECT_EQ(redact_for_log(message), message);
+}
+
+// The exact line that appeared in kfc_server.log, kept verbatim so the specific
+// traffic that leaked can never leak again.
+TEST(RedactForLogTest, StripsThePasswordFromTheLineThatActuallyLeaked) {
+    std::string leaked = R"({"v": 1, "type": "Login", "payload": {"username": "probe2", "password": "pw"}})";
+
+    std::string safe = redact_for_log(leaked);
+
+    EXPECT_EQ(safe.find("\"pw\""), std::string::npos) << "still leaking: " << safe;
+    EXPECT_NE(safe.find("probe2"), std::string::npos) << "the username is what makes the line worth logging";
 }

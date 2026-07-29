@@ -31,6 +31,24 @@ server.
 Rooms are independent: each has its own thread, so many games run genuinely in
 parallel. The queue only orders things *within* one game.
 
+## The queue is bounded
+
+A match holds at most `kMaxQueuedCommands` (512) commands waiting to be applied;
+past that, the newest is dropped. The queue is drained about sixty times a
+second and a player cannot issue commands faster than their pieces come off
+cooldown, so a legitimate depth is a handful — the cap is generous enough that a
+laggy connection catching up in a burst loses nothing, and it is the flood that
+is refused, not the burst.
+
+Unbounded, a client that simply sends in a loop grew that deque until the
+process ran out of memory, and it cost the sender nothing. The *newest* is what
+goes, because the commands already queued arrived first and are the ones a real
+player meant.
+
+Dropped commands are counted and reported once per tick rather than logged
+individually — a log line per dropped message would hand the denial of service
+straight back.
+
 ## Nothing is sent while a lock is held
 
 `MatchAudience` keeps its roster as an immutable value behind a `shared_ptr`.

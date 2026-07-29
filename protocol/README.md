@@ -44,11 +44,19 @@ wrong password from an unreachable server from a mistyped room id — it would
 wait out its own timeout and then guess. Now every refusal says which it was,
 immediately, and the client shows a sentence a player can act on.
 
-## Decoding is forgiving
+## Decoding is forgiving, but not unlimited
 
 Unknown message types decode to `std::nullopt` rather than throwing, and new
 optional fields (`spectator`, `room`) default sensibly when absent. A client
 built before a field existed still understands the message.
+
+One thing is refused outright, because being forgiving about it is how a peer
+takes the server down: **anything over `kMaxMessageBytes` (1 MB) is dropped
+without being parsed**, and the server hangs up on the connection that sent it.
+Parsing is where an untrusted peer gets to make this process allocate. The
+biggest legitimate message — a `Welcome` carrying a full board and a long game's
+history — is a few tens of kilobytes, so the limit is generous by more than an
+order of magnitude and still nowhere near "whatever you feel like sending".
 
 ## The log
 

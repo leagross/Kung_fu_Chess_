@@ -22,6 +22,8 @@
 #include "../../include/kfc/graphics/animation/piece_animator_registry.hpp"
 #include "../../include/kfc/graphics/animation/piece_asset_library.hpp"
 #include "../../include/kfc/graphics/app/game_session.hpp"
+#include "../../include/kfc/graphics/app/home_screen.hpp"
+#include "../../include/kfc/graphics/app/match_overlay.hpp"
 #include "../../include/kfc/graphics/assets/piece_code_scheme.hpp"
 #include "../../include/kfc/graphics/constants.hpp"
 #include "../../include/kfc/graphics/input/mouse_input_adapter.hpp"
@@ -39,107 +41,6 @@
 #include "kfc/realtime/score_observer.hpp"
 #include "kfc/texttests/game_view.hpp"
 
-namespace {
-
-// The Room dialog and the message boxes are the only native GUI here beyond the
-// OpenCV window, and the only thing that differs per platform -- reached
-// through IRoomPrompt so this file stays free of any #ifdef. RoomChoice is
-// that interface's own type now.
-using kfc::graphics::dialogs::RoomChoice;
-
-// --- Home screen ---
-
-// Records the most recent left-click, for the home-screen buttons.
-struct HomeClick {
-    int x = -1;
-    int y = -1;
-    bool clicked = false;
-};
-
-struct Button {
-    int x = 0, y = 0, w = 0, h = 0;
-    [[nodiscard]] bool hit(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
-};
-
-// Draws a bordered button centred at (cx, cy) and returns its rectangle.
-Button draw_button(kfc::graphics::Img& frame, const std::string& label, int cx, int cy, int w, int h) {
-    Button b{cx - w / 2, cy - h / 2, w, h};
-    kfc::graphics::Img::blank(w, h, cv::Scalar(220, 220, 220, 255)).draw_on(frame, b.x, b.y);
-    kfc::graphics::Img::blank(w - 6, h - 6, cv::Scalar(30, 30, 30, 255)).draw_on(frame, b.x + 3, b.y + 3);
-    double font = h / 45.0;
-    int baseline = 0;
-    cv::Size ts = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, font, 3, &baseline);
-    frame.put_text(label, b.x + (w - ts.width) / 2, b.y + (h + ts.height) / 2, font, cv::Scalar(255, 255, 255, 255), 3);
-    return b;
-}
-
-// Home screen: PLAY (matchmaking) and ROOM (named room via the dialog). Blocks
-// until the user picks one -- returning the seating action to send after Login
-// -- or closes the window / presses Esc, returning std::nullopt. Uses only the
-// window main already created, so play continues in it.
-std::optional<kfc::protocol::ClientMessage> run_home_screen(const std::string& window_name,
-                                                            const kfc::graphics::Img& background_source,
-                                                            kfc::graphics::dialogs::IRoomPrompt& prompt) {
-    HomeClick click;
-    cv::setMouseCallback(
-        window_name,
-        [](int event, int x, int y, int, void* userdata) {
-            if (event == cv::EVENT_LBUTTONDOWN) {
-                auto* c = static_cast<HomeClick*>(userdata);
-                c->x = x;
-                c->y = y;
-                c->clicked = true;
-            }
-        },
-        &click);
-    // Detach the callback from `click` (a local) before returning, so nothing
-    // dereferences it during the connect() that follows.
-    auto finish = [&](std::optional<kfc::protocol::ClientMessage> result) {
-        cv::setMouseCallback(window_name, [](int, int, int, int, void*) {}, nullptr);
-        return result;
-    };
-
-    while (true) {
-        cv::Rect rect = cv::getWindowImageRect(window_name);
-        int w = rect.width > 0 ? rect.width : 960;
-        int h = rect.height > 0 ? rect.height : 720;
-
-        kfc::graphics::Img frame = background_source.cover_scaled(w, h);
-        int bw = std::max(200, w / 4);
-        int bh = std::max(64, h / 11);
-        Button play = draw_button(frame, "PLAY", w / 2, h / 2 - bh, bw, bh);
-        Button room = draw_button(frame, "ROOM", w / 2, h / 2 + bh, bw, bh);
-
-        cv::imshow(window_name, frame.get_mat());
-        if (cv::waitKey(16) == 27) {  // Esc
-            return finish(std::nullopt);
-        }
-        if (cv::getWindowProperty(window_name, cv::WND_PROP_VISIBLE) < 1.0) {
-            return finish(std::nullopt);  // window closed
-        }
-        if (click.clicked) {
-            click.clicked = false;
-            if (play.hit(click.x, click.y)) {
-                return finish(kfc::protocol::Play{});
-            }
-            if (room.hit(click.x, click.y)) {
-                RoomChoice choice = prompt.ask_room();
-                if (choice.action == RoomChoice::Action::Create) {
-                    // No name: the server generates the id (see the dialog's
-                    // own comment) and reports it back in the Welcome.
-                    return finish(kfc::protocol::CreateRoom{});
-                }
-                if (choice.action == RoomChoice::Action::Join && !choice.room_id.empty()) {
-                    return finish(kfc::protocol::JoinRoom{choice.room_id});
-                }
-                // Cancel, or Join with nothing typed -> stay on the home screen.
-            }
-        }
-    }
-}
-
-}  // namespace
-
 int main(int argc, char** argv) {
     try {
         // code_scheme is needed below for asset/rendering lookups
@@ -150,7 +51,7 @@ int main(int argc, char** argv) {
         // every message box below.
         std::unique_ptr<kfc::graphics::dialogs::IRoomPrompt> prompt = kfc::graphics::dialogs::make_room_prompt();
         // How long the "KUNG FU CHESS" intro splash takes to fade out.
-        constexpr int kIntroDurationMs = 1500;
+        constexpr int kIntroDurationMs = kfc::graphics::app::kDefaultIntroDurationMs;
 
         // Board dimensions are known up front (GameSession reads the board file
         // before any networked connection), so the window can be laid out and
@@ -280,7 +181,7 @@ int main(int argc, char** argv) {
             // message box can too, and the home screen simply comes back.
             while (true) {
                 std::optional<kfc::protocol::ClientMessage> action =
-                    run_home_screen(window_name, background_source, *prompt);
+                    kfc::graphics::app::run_home_screen(window_name, background_source, *prompt);
                 if (!action.has_value()) {
                     cv::destroyAllWindows();
                     return 0;  // window closed on the home screen
@@ -323,31 +224,10 @@ int main(int argc, char** argv) {
             score.on_arrival(past);
         }
 
-        // Start/end visuals off the same bus: GameEnded carries the winner
-        // (covers every ending, local or networked); GameStarted stamps the
-        // intro (published at real match start); OpponentCountdown drives the
-        // disconnect countdown.
-        bool game_started = false;
-        bool game_ended = false;
-        std::optional<kfc::model::PieceColor> end_winner;
-        std::optional<int> countdown_seconds;  // set while a dropped opponent's grace counts down
-        std::chrono::steady_clock::time_point started_at;
-        game_view->events().subscribe<kfc::events::GameStarted>([&](const kfc::events::GameStarted&) {
-            game_started = true;
-            started_at = std::chrono::steady_clock::now();
-        });
-        game_view->events().subscribe<kfc::events::GameEnded>([&](const kfc::events::GameEnded& event) {
-            game_ended = true;
-            end_winner = event.winner;
-            countdown_seconds.reset();  // the end banner supersedes the countdown
-        });
-        game_view->events().subscribe<kfc::events::OpponentCountdown>(
-            [&](const kfc::events::OpponentCountdown& event) { countdown_seconds = event.seconds_remaining; });
-        // The other way a countdown ends: they came back in time, so the banner
-        // clears and play carries on (GameEnded covers the case where they
-        // didn't).
-        game_view->events().subscribe<kfc::events::OpponentReturned>(
-            [&](const kfc::events::OpponentReturned&) { countdown_seconds.reset(); });
+        // Which banner the board wears, and the rules deciding between them,
+        // live in MatchOverlay -- it subscribes to the whole-game signals here
+        // and answers one question per frame below.
+        kfc::graphics::app::MatchOverlay overlay(game_view->events(), kIntroDurationMs);
 
         // Sound is just another bus subscriber; silent until .wav files exist in
         // the sounds directory (see its README). Must outlive the render loop.
@@ -421,25 +301,25 @@ int main(int argc, char** argv) {
 
             kfc::graphics::Img board_frame = board_texture.clone();
             piece_renderer.draw(animator_registry, board_frame);
-            // While searching, a "waiting for opponent" overlay; otherwise the
-            // end banner (GameEnded, any ending), the disconnect countdown, or
-            // the intro splash for its first moment.
-            if (searching) {
-                kfc::graphics::draw_searching_banner(board_pixel_width, board_pixel_height, board_frame);
-            } else if (game_ended) {
-                kfc::graphics::draw_game_over_banner(end_winner, board_pixel_width, board_pixel_height, board_frame);
-            } else if (countdown_seconds.has_value()) {
-                // A networked opponent dropped -- show their grace countdown
-                // until they return (future) or it runs out into a GameEnded.
-                kfc::graphics::draw_countdown_banner(*countdown_seconds, board_pixel_width, board_pixel_height,
-                                                      board_frame);
-            } else if (game_started) {
-                int since_start_ms = static_cast<int>(
-                    std::chrono::duration_cast<std::chrono::milliseconds>(now - started_at).count());
-                if (since_start_ms < kIntroDurationMs) {
-                    double opacity = 1.0 - static_cast<double>(since_start_ms) / kIntroDurationMs;
-                    kfc::graphics::draw_intro_banner(board_pixel_width, board_pixel_height, opacity, board_frame);
-                }
+            // Which banner, decided by MatchOverlay; this only draws it.
+            switch (overlay.current(searching, now)) {
+                case kfc::graphics::app::Overlay::Searching:
+                    kfc::graphics::draw_searching_banner(board_pixel_width, board_pixel_height, board_frame);
+                    break;
+                case kfc::graphics::app::Overlay::GameOver:
+                    kfc::graphics::draw_game_over_banner(overlay.winner(), board_pixel_width, board_pixel_height,
+                                                          board_frame);
+                    break;
+                case kfc::graphics::app::Overlay::Countdown:
+                    kfc::graphics::draw_countdown_banner(overlay.countdown_seconds(), board_pixel_width,
+                                                          board_pixel_height, board_frame);
+                    break;
+                case kfc::graphics::app::Overlay::Intro:
+                    kfc::graphics::draw_intro_banner(board_pixel_width, board_pixel_height,
+                                                      overlay.intro_opacity(now), board_frame);
+                    break;
+                case kfc::graphics::app::Overlay::None:
+                    break;
             }
 
             kfc::graphics::Img canvas = static_backdrop.clone();

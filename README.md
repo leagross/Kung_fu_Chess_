@@ -25,6 +25,7 @@ rooms and spectators.
 | `ui/` | OpenCV rendering, sprite animation, mouse input, and the networked client. | [ui/README.md](ui/README.md) |
 | `assets/` | Piece sprites, board and background images, sound effects. | [assets/README.md](assets/README.md) |
 | `config/` | `gameplay.json` — the speeds, cooldowns and piece values both sides read. | — |
+| `third_party/argon2/` | The vendored Argon2 reference implementation — the password hash. | [third_party/argon2/README.md](third_party/argon2/README.md) |
 
 **[Server_Design.md](Server_Design.md)** — how this server would have to change
 to carry 100 M registered players and 10 M concurrent ones: which database,
@@ -95,7 +96,29 @@ build time, so those are found from anywhere.)
 Click a piece, then click its destination. Double-click a piece for its
 "jump-in-place" defensive move.
 
-### Networked
+### In Docker
+
+The shortest path to a running server, and the one that needs nothing installed
+but Docker itself:
+
+```sh
+docker compose up
+```
+
+That builds a Release image and serves `ws://localhost:8080`. Accounts, ratings
+and the log live in a named volume, so they survive the container being replaced
+— which is the point, since replacing containers is how a deploy works.
+
+The runtime image carries the server, two data files and libstdc++, and nothing
+else: no compiler, no source, and it does not run as root.
+
+```sh
+docker compose logs -f     # follow the server log
+docker compose down        # stop
+docker compose down -v     # stop and delete the accounts too
+```
+
+### Networked, from a local build
 
 Start the server — it listens on `ws://localhost:8080` (pass a port to change
 it):

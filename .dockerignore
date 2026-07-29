@@ -1,0 +1,30 @@
+# The build context is copied into the image, so everything that is large,
+# machine-specific or regenerated must stay out of it. A fat context is slow to
+# send to the daemon and invalidates the layer cache on every unrelated change.
+
+# Local build trees -- the image builds its own, for its own platform.
+build/
+build_*/
+out/
+
+# The vendored Windows OpenCV: ~160 MB, and the server does not use OpenCV at
+# all. third_party/argon2 is *not* excluded -- the server needs it to build.
+third_party/OpenCV_451/
+
+# Local runtime state. The container keeps its own in the data volume; copying a
+# developer's accounts and log into an image would be both wrong and a leak.
+kfc_users.db
+kfc_server.log
+*.db
+*.log
+
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+
+# Documentation and assets the server never reads.
+docs/
+assets/
+*.md

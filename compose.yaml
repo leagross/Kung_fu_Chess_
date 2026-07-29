@@ -1,0 +1,22 @@
+# One service today. The point of writing it now, before there is anything to
+# orchestrate, is that "how do I run this?" becomes one command -- and that when
+# Server_Design.md's split into gateway / game server / matchmaker happens, the
+# shape to add them to already exists.
+
+services:
+  server:
+    build: .
+    image: kfc-server
+    ports:
+      # host:container. The server takes its port as argv[1] (see CMD), so
+      # changing the container side means changing both.
+      - "8080:8080"
+    volumes:
+      # Accounts, ratings and the log. Without this every `docker compose up`
+      # would start from an empty user table -- the container filesystem does
+      # not survive being replaced, and replacing containers is the whole idea.
+      - kfc-data:/data
+    restart: unless-stopped
+
+volumes:
+  kfc-data:

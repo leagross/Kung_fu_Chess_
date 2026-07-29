@@ -214,6 +214,15 @@ struct LoginFailed {
     std::string reason;
 };
 
+/// The reasons a LoginFailed can carry, beyond the account store's own
+/// ("wrong_password"). Same convention as join_reasons.
+namespace login_reasons {
+/// This username already has a live connection. One account, one session: two
+/// at once would be one player in two games at the same time, and the returning
+/// player's own seat could not be told apart from a second copy of them.
+inline constexpr const char* kAlreadyLoggedIn = "already_logged_in";
+}  // namespace login_reasons
+
 /// Broadcast when a player who dropped came back before their grace ran out --
 /// the countdown the opponent's screen is showing must stop. There is no payload:
 /// who returned is whoever the countdown was for, which only the server knows.

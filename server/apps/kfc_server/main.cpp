@@ -19,6 +19,7 @@
 #include "kfc/database/rating_service.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/database/user_repository.hpp"
+#include "kfc/server/session_registry.hpp"
 #include "kfc/server/websocket_game_server.hpp"
 
 namespace {
@@ -123,7 +124,10 @@ int main(int argc, char** argv) {
 
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result);
 
-        kfc::server::WebSocketGameServer server(port, rooms, users, logger);
+        // One account, one live connection (see SessionRegistry).
+        kfc::server::SessionRegistry sessions;
+
+        kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger);
         if (!server.listen()) {
             std::cerr << "Failed to listen on port " << port << " (see kfc_server.log)\n";
             return 1;

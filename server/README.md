@@ -7,7 +7,7 @@ move by lying.
 Depends on `logic`, `protocol` and `database`. Contains no OS-specific code —
 the server builds and runs anywhere.
 
-## The four pieces
+## The pieces
 
 | File | Responsibility |
 |------|----------------|
@@ -15,6 +15,7 @@ the server builds and runs anywhere.
 | `room_manager` | **Which game you are in.** Owns every live room, pairs players by rating, generates room ids, decides player vs. spectator vs. returning player, and tears down rooms once empty. |
 | `match` | **What the game does.** One room's simulation: a command queue, a dedicated tick thread, and the game-over state. |
 | `match_audience` | Who is attached to a match and how to reach them — the two seats and any number of watchers. All broadcasting goes through here, and none of it under a lock (see below). |
+| `session_registry` | One account, one live connection. A second login for a username that is already connected is refused with `already_logged_in`. |
 | `disconnect_watch` | The 20-second grace a dropped player gets: opening it, counting it down once per second, cancelling it on a reconnect, expiring it into a forfeit. |
 
 ## The command queue
@@ -64,6 +65,29 @@ back into the same table and deadlocks a non-recursive mutex against itself.
 
 The cost lands where it belongs: a membership change (a few per match) copies
 the roster, a broadcast (several per second, per match) copies a pointer.
+
+## One account, one session
+
+A username can only have one live connection. Two at once would be one player in
+two games, two rating changes for one account, and — worst — a returning player
+indistinguishable from a second copy of themselves, which is the one distinction
+the reconnect feature depends on.
+
+The **duplicate** is refused, never the session already playing: kicking the
+first would have its close arrive later, asynchronously, and report a disconnect
+against a seat the newcomer had meanwhile reclaimed.
+
+This does not get in the way of reconnecting, because the name is released the
+instant the connection closes — the same instant the grace countdown starts. A
+player mid-countdown always finds their name free.
+
+**Known gap:** a client that vanishes *without* a closing handshake (a crash, a
+closed lid) is not detected, so the name stays held until TCP gives up. The same
+missing dead-peer detection already breaks the grace itself — no countdown
+starts either. The fix is server-side ping, which IXWebSocket 11.4.5 cannot
+provide: it closes any connection whose first ping interval elapses before a
+pong it never asked for, so enabling it disconnects every healthy client after
+one interval. See `session_registry.hpp`.
 
 ## Seating
 

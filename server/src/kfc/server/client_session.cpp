@@ -1,5 +1,6 @@
 #include "kfc/server/client_session.hpp"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -11,12 +12,14 @@
 namespace kfc::server {
 
 ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
-                             kfc::database::UserRepository& users, kfc::protocol::FileLogger& logger)
+                             kfc::database::UserRepository& users, SessionRegistry& sessions,
+                             kfc::protocol::FileLogger& logger)
     : connection_id_(std::move(connection_id)),
       send_(std::move(send)),
       close_(std::move(close)),
       rooms_(rooms),
       users_(users),
+      sessions_(sessions),
       logger_(logger) {}
 
 void ClientSession::on_open() {
@@ -31,6 +34,11 @@ void ClientSession::on_close() {
     if (seat_.has_value()) {
         rooms_.on_disconnect(*seat_);
     }
+
+    // Released here, not merely when this object is destroyed: this is the same
+    // moment the disconnect grace starts, so a player whose countdown is running
+    // can always log in again to reclaim their seat. See SessionRegistry.
+    username_lease_.reset();
 }
 
 void ClientSession::drop(const std::string& why) {
@@ -92,6 +100,17 @@ bool ClientSession::handle_login(const kfc::protocol::ClientMessage& message) {
         return true;
     }
 
+    // Claimed only after the password checks out: an unauthenticated stranger
+    // must not be able to lock a real account out by guessing at its name.
+    std::optional<SessionRegistry::Lease> lease = sessions_.claim(login.username);
+    if (!lease.has_value()) {
+        send_(kfc::protocol::encode(kfc::protocol::ServerMessage{
+            kfc::protocol::LoginFailed{kfc::protocol::login_reasons::kAlreadyLoggedIn}}));
+        drop("'" + login.username + "': " + kfc::protocol::login_reasons::kAlreadyLoggedIn);
+        return true;
+    }
+
+    username_lease_ = std::move(lease);
     pending_ = AuthedUser{login.username, auth.rating};
     logger_.log("Authenticated '" + login.username + "' (rating " + std::to_string(auth.rating) +
                 (auth.newly_registered ? ", new account)" : ")"));

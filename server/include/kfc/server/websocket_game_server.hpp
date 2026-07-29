@@ -19,6 +19,7 @@ class UserRepository;
 namespace kfc::server {
 
 class RoomManager;
+class SessionRegistry;
 
 /// Owns the WebSocket transport for one kfc_server: the IXWebSocket network
 /// system's lifetime, the server socket itself, and all per-connection
@@ -39,11 +40,11 @@ class RoomManager;
 /// while what those credentials *are* lives in UserRepository.
 class WebSocketGameServer {
 public:
-    /// rooms, users, and logger must outlive this server. Brings up the network
-    /// system and wires the connection handler, but does not bind the port --
-    /// call listen() for that.
+    /// rooms, users, sessions and logger must outlive this server. Brings up the
+    /// network system and wires the connection handler, but does not bind the
+    /// port -- call listen() for that.
     WebSocketGameServer(int port, RoomManager& rooms, kfc::database::UserRepository& users,
-                        kfc::protocol::FileLogger& logger);
+                        SessionRegistry& sessions, kfc::protocol::FileLogger& logger);
     ~WebSocketGameServer();
 
     WebSocketGameServer(const WebSocketGameServer&) = delete;
@@ -64,6 +65,7 @@ private:
     int port_;
     RoomManager& rooms_;
     kfc::database::UserRepository& users_;
+    SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
     std::unique_ptr<ix::WebSocketServer> server_;
 };

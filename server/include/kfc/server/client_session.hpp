@@ -6,6 +6,7 @@
 #include "kfc/protocol/messages.hpp"
 #include "kfc/server/connection_callbacks.hpp"
 #include "kfc/server/room_manager.hpp"
+#include "kfc/server/session_registry.hpp"
 
 namespace kfc::protocol {
 class FileLogger;
@@ -32,6 +33,10 @@ namespace kfc::server {
 /// what it is actually for -- owning the transport and handing each connection
 /// one of these.
 ///
+/// A successful Login also claims the username for this connection, so one
+/// account cannot be in two games at once -- see SessionRegistry, including
+/// why that does not get in the way of a player reconnecting.
+///
 /// The order is fixed and each step is refused before the one before it has
 /// happened: **Login**, then exactly one of Play / CreateRoom / JoinRoom, then
 /// Move / Jump / Resign for as long as the game lasts. A refusal always says
@@ -46,9 +51,10 @@ class ClientSession {
 public:
     /// connection_id only ever appears in the log, to tell connections apart.
     /// send and close are how this one client is reached and released; rooms,
-    /// users and logger are shared and must outlive the session.
+    /// users, sessions and logger are shared and must outlive the session.
     ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
-                  kfc::database::UserRepository& users, kfc::protocol::FileLogger& logger);
+                  kfc::database::UserRepository& users, SessionRegistry& sessions,
+                  kfc::protocol::FileLogger& logger);
 
     /// The socket opened. Logging only -- nothing is decided until a Login
     /// arrives.
@@ -98,8 +104,12 @@ private:
     CloseFn close_;
     RoomManager& rooms_;
     kfc::database::UserRepository& users_;
+    SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
 
+    // This connection's hold on its username, taken once the password checks
+    // out and given back when the session is destroyed -- see SessionRegistry.
+    std::optional<SessionRegistry::Lease> username_lease_;
     std::optional<AuthedUser> pending_;
     std::optional<RoomManager::Seat> seat_;
 };

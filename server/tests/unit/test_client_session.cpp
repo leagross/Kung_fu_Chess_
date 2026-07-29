@@ -13,6 +13,7 @@
 #include "kfc/protocol/json.hpp"
 #include "kfc/server/client_session.hpp"
 #include "kfc/server/room_manager.hpp"
+#include "kfc/server/session_registry.hpp"
 
 using namespace kfc::model;
 using namespace kfc::protocol;
@@ -76,12 +77,13 @@ struct Fixture {
           rooms(two_pawn_factory(), logger) {}
 
     ClientSession session(FakeSocket& socket, const std::string& id = "conn-1") {
-        return ClientSession(id, socket.send_fn(), socket.close_fn(), rooms, users, logger);
+        return ClientSession(id, socket.send_fn(), socket.close_fn(), rooms, users, sessions, logger);
     }
 
     FileLogger logger;
     kfc::database::UserRepository users;
     RoomManager rooms;
+    kfc::server::SessionRegistry sessions;
 };
 
 std::string login_text(const std::string& user, const std::string& password) {
@@ -316,4 +318,123 @@ TEST(ClientSessionTest, ClosingAfterBeingSeatedReleasesTheRoom) {
     session.on_close();
 
     EXPECT_EQ(fixture.rooms.room_count(), 0u) << "the room outlived its only occupant";
+}
+
+// --- One account, one live session ---
+
+TEST(ClientSessionTest, ASecondConnectionForALoggedInAccountIsRefused) {
+    Fixture fixture;
+    FakeSocket first_socket;
+    ClientSession first = fixture.session(first_socket, "conn-1");
+    first.on_text(login_text("alice", "pw"));
+    ASSERT_TRUE(first.authenticated());
+
+    FakeSocket second_socket;
+    ClientSession second = fixture.session(second_socket, "conn-2");
+    second.on_text(login_text("alice", "pw"));  // right password, wrong moment
+
+    std::optional<LoginFailed> failure = second_socket.first_of<LoginFailed>();
+    ASSERT_TRUE(failure.has_value()) << "the duplicate was hung up on without being told why";
+    EXPECT_EQ(failure->reason, login_reasons::kAlreadyLoggedIn);
+    EXPECT_EQ(second_socket.closes, 1);
+    EXPECT_FALSE(second.authenticated());
+    EXPECT_EQ(fixture.sessions.live_count(), 1u);
+}
+
+TEST(ClientSessionTest, TheDuplicateIsRefusedRatherThanTheOriginalBeingKicked) {
+    Fixture fixture;
+    FakeSocket first_socket;
+    ClientSession first = fixture.session(first_socket, "conn-1");
+    first.on_text(login_text("alice", "pw"));
+    first.on_text(encode(ClientMessage{CreateRoom{}}));
+    ASSERT_TRUE(first.seat().has_value());
+
+    FakeSocket second_socket;
+    ClientSession second = fixture.session(second_socket, "conn-2");
+    second.on_text(login_text("alice", "pw"));
+
+    // Kicking the first is the other plausible policy, and it is the wrong one:
+    // its close arrives asynchronously and would report a disconnect against a
+    // seat the newcomer had meanwhile reclaimed. The player already playing must
+    // not be disturbed by someone else logging in as them.
+    EXPECT_EQ(first_socket.closes, 0) << "the rightful session was kicked";
+    EXPECT_TRUE(first.seat().has_value());
+    EXPECT_EQ(fixture.rooms.room_count(), 1u);
+}
+
+// The invariant that keeps this from fighting with reconnection: the name is
+// held for exactly as long as the connection is, and comes back the instant it
+// closes -- which is the same instant the disconnect grace starts. A player
+// mid-countdown can therefore always log in again to reclaim their seat.
+TEST(ClientSessionTest, ClosingAConnectionFreesTheNameForTheSameAccountToReturn) {
+    Fixture fixture;
+    std::string room;
+    {
+        FakeSocket socket;
+        ClientSession dropped = fixture.session(socket, "conn-1");
+        dropped.on_text(login_text("alice", "pw"));
+        dropped.on_text(encode(ClientMessage{CreateRoom{}}));
+        std::optional<Welcome> welcome = socket.first_of<Welcome>();
+        ASSERT_TRUE(welcome.has_value());
+        room = welcome->room;
+
+        dropped.on_close();
+        EXPECT_EQ(fixture.sessions.live_count(), 0u) << "the name was still held after the socket closed";
+    }
+
+    FakeSocket returning_socket;
+    ClientSession returning = fixture.session(returning_socket, "conn-2");
+    returning.on_text(login_text("alice", "pw"));
+
+    EXPECT_TRUE(returning.authenticated()) << "a returning player was locked out by their own old session";
+    EXPECT_TRUE(returning_socket.first_of<LoginFailed>() == std::nullopt);
+}
+
+TEST(ClientSessionTest, AWrongPasswordDoesNotClaimTheName) {
+    Fixture fixture;
+    FakeSocket registering_socket;
+    ClientSession registering = fixture.session(registering_socket, "conn-0");
+    registering.on_text(login_text("alice", "correct"));
+    registering.on_close();
+    ASSERT_EQ(fixture.sessions.live_count(), 0u);
+
+    FakeSocket guesser_socket;
+    ClientSession guesser = fixture.session(guesser_socket, "conn-1");
+    guesser.on_text(login_text("alice", "wrong"));
+
+    // Otherwise anyone could lock a real account out simply by guessing at its
+    // name and getting the password wrong on purpose.
+    EXPECT_EQ(fixture.sessions.live_count(), 0u) << "a failed login reserved the name anyway";
+
+    FakeSocket owner_socket;
+    ClientSession owner = fixture.session(owner_socket, "conn-2");
+    owner.on_text(login_text("alice", "correct"));
+    EXPECT_TRUE(owner.authenticated());
+}
+
+TEST(ClientSessionTest, DestroyingASessionWithoutACloseStillFreesTheName) {
+    Fixture fixture;
+    {
+        FakeSocket socket;
+        ClientSession abandoned = fixture.session(socket);
+        abandoned.on_text(login_text("alice", "pw"));
+        ASSERT_EQ(fixture.sessions.live_count(), 1u);
+    }
+    // The lease is RAII precisely so a path that forgets to close cannot lock an
+    // account out permanently.
+    EXPECT_EQ(fixture.sessions.live_count(), 0u);
+}
+
+TEST(ClientSessionTest, DifferentAccountsAreUnaffectedByEachOther) {
+    Fixture fixture;
+    FakeSocket alice_socket, bob_socket;
+    ClientSession alice = fixture.session(alice_socket, "conn-1");
+    ClientSession bob = fixture.session(bob_socket, "conn-2");
+
+    alice.on_text(login_text("alice", "pw"));
+    bob.on_text(login_text("bob", "pw"));
+
+    EXPECT_TRUE(alice.authenticated());
+    EXPECT_TRUE(bob.authenticated());
+    EXPECT_EQ(fixture.sessions.live_count(), 2u);
 }

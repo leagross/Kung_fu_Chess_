@@ -141,15 +141,17 @@ flowchart TB
         PG[("PostgreSQL<br/><small>sharded by user_id<br/>~8–16 shards</small>")]
     end
 
-    C --> LB --> GW
+    C --> LB
+    LB --> GW
     GW -->|"Play / Create / Join"| MM
-    GW <-->|"moves, board updates"| GS
+    GW -->|"moves"| GS
+    GS -->|"board updates"| GW
     MM --> RD
     MM -->|"assign room"| GS
     GW -->|"which server?"| RD
     GS --> RD
     GW -->|"login"| PG
-    GS -->|"result → rating"| PG
+    GS -->|"result, rating"| PG
 
     classDef stateful stroke-width:3px
     class GS,PG,RD stateful

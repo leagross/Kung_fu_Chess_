@@ -13,7 +13,7 @@ class FileLogger;
 // The account store lives in its own layer (database/), not here -- the server
 // uses it, never defines it.
 namespace kfc::database {
-class UserRepository;
+class IUserStore;
 }
 
 namespace kfc::server {
@@ -43,7 +43,7 @@ public:
     /// rooms, users, sessions and logger must outlive this server. Brings up the
     /// network system and wires the connection handler, but does not bind the
     /// port -- call listen() for that.
-    WebSocketGameServer(int port, RoomManager& rooms, kfc::database::UserRepository& users,
+    WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
                         SessionRegistry& sessions, kfc::protocol::FileLogger& logger);
     ~WebSocketGameServer();
 
@@ -64,7 +64,7 @@ public:
 private:
     int port_;
     RoomManager& rooms_;
-    kfc::database::UserRepository& users_;
+    kfc::database::IUserStore& users_;
     SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
     std::unique_ptr<ix::WebSocketServer> server_;

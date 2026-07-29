@@ -5,14 +5,14 @@
 #include <utility>
 #include <variant>
 
-#include "kfc/database/user_repository.hpp"
+#include "kfc/database/user_store.hpp"
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/protocol/json.hpp"
 
 namespace kfc::server {
 
 ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
-                             kfc::database::UserRepository& users, SessionRegistry& sessions,
+                             kfc::database::IUserStore& users, SessionRegistry& sessions,
                              kfc::protocol::FileLogger& logger)
     : connection_id_(std::move(connection_id)),
       send_(std::move(send)),
@@ -89,7 +89,7 @@ bool ClientSession::handle_login(const kfc::protocol::ClientMessage& message) {
     }
 
     const kfc::protocol::Login& login = std::get<kfc::protocol::Login>(message);
-    kfc::database::UserRepository::AuthOutcome auth = users_.authenticate(login.username, login.password);
+    kfc::database::IUserStore::AuthOutcome auth = users_.authenticate(login.username, login.password);
     if (!auth.ok) {
         // Say why before hanging up. Otherwise the client sees only a closed
         // socket, times out, and reports whatever it was trying to do

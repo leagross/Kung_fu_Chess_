@@ -15,7 +15,7 @@
 
 namespace kfc::server {
 
-WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::database::UserRepository& users,
+WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
                                          SessionRegistry& sessions, kfc::protocol::FileLogger& logger)
     : port_(port), rooms_(rooms), users_(users), sessions_(sessions), logger_(logger) {
     // Windows needs WSAStartup (what this wraps) before any socket use;

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "kfc/database/elo.hpp"
 #include "kfc/database/rating_service.hpp"
 #include "kfc/database/user_repository.hpp"
+#include "kfc/database/user_store.hpp"
 
 using namespace kfc::database;
 using kfc::model::PieceColor;
@@ -145,4 +147,70 @@ TEST(RatingServiceTest, ConcurrentForfeitsAreAllCharged) {
     // one reading the rating before it was written.
     EXPECT_EQ(*users.rating_of("quitter"),
               kStartingRating - kThreads * kForfeitsPerThread * kDisconnectPenalty);
+}
+
+// --- The store is an interface, not a database ---
+
+namespace {
+
+// A whole IUserStore in thirty lines, with no SQL, no file and no SQLiteCpp.
+// That it can exist at all is the point of IUserStore: PostgreSQL is a second
+// implementation of this same interface, not an edit to every caller.
+class InMemoryUserStore : public IUserStore {
+public:
+    void add(const std::string& username, int rating) { ratings_[username] = rating; }
+    [[nodiscard]] int rating(const std::string& username) const { return ratings_.at(username); }
+
+    AuthOutcome authenticate(const std::string& username, const std::string&) override {
+        return AuthOutcome{true, "", ratings_.count(username) ? ratings_[username] : 0, false};
+    }
+
+    std::optional<int> rating_of(const std::string& username) override {
+        auto it = ratings_.find(username);
+        return it == ratings_.end() ? std::nullopt : std::optional<int>{it->second};
+    }
+
+    bool rerate_pair(const std::string& first, const std::string& second,
+                     const std::function<std::pair<int, int>(int, int)>& compute) override {
+        auto a = ratings_.find(first);
+        auto b = ratings_.find(second);
+        if (a == ratings_.end() || b == ratings_.end()) {
+            return false;
+        }
+        auto [after_a, after_b] = compute(a->second, b->second);
+        a->second = after_a;
+        b->second = after_b;
+        return true;
+    }
+
+    bool rerate(const std::string& username, const std::function<int(int)>& compute) override {
+        auto it = ratings_.find(username);
+        if (it == ratings_.end()) {
+            return false;
+        }
+        it->second = compute(it->second);
+        return true;
+    }
+
+private:
+    std::map<std::string, int> ratings_;
+};
+
+}  // namespace
+
+TEST(RatingServiceTest, WorksAgainstAnyStoreNotJustTheSQLiteOne) {
+    InMemoryUserStore store;
+    store.add("white", kStartingRating);
+    store.add("black", kStartingRating);
+
+    apply_game_result(store, PieceColor::White, "white", "black");
+
+    // The same numbers the SQLite-backed tests above assert, from a store that
+    // shares no code with it -- so the ELO logic really does live in the service
+    // rather than having leaked into the repository.
+    EXPECT_EQ(store.rating("white"), 1216);
+    EXPECT_EQ(store.rating("black"), 1184);
+
+    apply_forfeit(store, "black");
+    EXPECT_EQ(store.rating("black"), 1184 - kDisconnectPenalty);
 }

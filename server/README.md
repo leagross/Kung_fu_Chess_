@@ -93,7 +93,7 @@ one interval. See `session_registry.hpp`.
 
 - **Play** — matchmaking. A newcomer joins the waiting room whose lone player is
   closest in rating and within ±100; if there is none, they open a room and wait.
-- **Create** — a new room with a **server-generated** id: four characters from an
+- **Create** — a new room with a **server-generated** id: six characters from an
   alphabet that omits the pairs people misread aloud (`0/O`, `1/I/L`, `2/Z`,
   `5/S`, `8/B`). The client never picks a name, so two creators cannot collide.
 - **Join** — by id. First arrival is Black; **anyone after that spectates**, and

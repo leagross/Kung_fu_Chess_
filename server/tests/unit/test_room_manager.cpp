@@ -236,7 +236,10 @@ TEST(RoomManagerTest, AGeneratedRoomIdIsShortAndUnambiguousToReadOut) {
     ASSERT_TRUE(rooms.create_room("alice", s1.as_send_fn()).has_value());
 
     std::string id = room_id_from_welcome(s1);
-    EXPECT_EQ(id.size(), 4u);
+    // Six, not four: five million concurrent rooms need five million live
+    // ids, and a four-character alphabet-of-25 space holds only 390,625 --
+    // see RoomManager::generate_room_id.
+    EXPECT_EQ(id.size(), 6u);
     for (char c : id) {
         // The pairs that actually get confused: 0/O, 1/I/L, 2/Z, 5/S, 8/B.
         EXPECT_EQ(std::string("01258BILOSZ").find(c), std::string::npos)

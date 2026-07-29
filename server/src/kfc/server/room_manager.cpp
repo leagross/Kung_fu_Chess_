@@ -57,7 +57,26 @@ std::string RoomManager::generate_room_id() {
     // player reads the id out to another: 0/O, 1/I/L, 5/S, 2/Z, 8/B.
     static constexpr char kAlphabet[] = "34679ACDEFGHJKMNPQRTUVWXY";
     static constexpr int kAlphabetSize = sizeof(kAlphabet) - 1;
-    static constexpr int kLength = 4;  // 25^4 ~ 390k -- plenty, and still short
+
+    // Six characters: 25^6 = 244 million ids.
+    //
+    // It was four, which is 390,625 -- and that quietly contradicted the target
+    // in Server_Design.md. Five million concurrent games need five million live
+    // ids at once, so a four-character id is not merely crowded, it is **1280%
+    // full**: there are fewer ids in the whole space than rooms that need one,
+    // and the retry loop below would spin forever having exhausted them. Even
+    // five characters runs at 51% occupancy, where every id takes two draws on
+    // average and the loop is doing as much work as the room.
+    //
+    // Six leaves the space 2% full at that scale -- 1.02 draws per id, so the
+    // retry is the rare event it is written as. The cost is two more characters
+    // to read out loud, which is the right trade against an id that cannot be
+    // issued at all.
+    //
+    // If the concurrent-room target ever grows by another two orders of
+    // magnitude, this has to grow with it; the arithmetic is
+    // rooms / 25^kLength, and it wants to stay a few percent.
+    static constexpr int kLength = 6;
 
     // One generator for the process, seeded once. Not deterministic across runs
     // on purpose: ids that restart from the same sequence every launch would be

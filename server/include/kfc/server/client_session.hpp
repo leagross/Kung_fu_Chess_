@@ -13,7 +13,7 @@ class FileLogger;
 }
 
 namespace kfc::database {
-class UserRepository;
+class IUserStore;
 }
 
 namespace kfc::server {
@@ -53,7 +53,7 @@ public:
     /// send and close are how this one client is reached and released; rooms,
     /// users, sessions and logger are shared and must outlive the session.
     ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
-                  kfc::database::UserRepository& users, SessionRegistry& sessions,
+                  kfc::database::IUserStore& users, SessionRegistry& sessions,
                   kfc::protocol::FileLogger& logger);
 
     /// The socket opened. Logging only -- nothing is decided until a Login
@@ -103,7 +103,7 @@ private:
     SendFn send_;
     CloseFn close_;
     RoomManager& rooms_;
-    kfc::database::UserRepository& users_;
+    kfc::database::IUserStore& users_;
     SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
 

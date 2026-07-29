@@ -8,7 +8,7 @@
 // The cost is text entry. Win32 gives an EDIT control that handles typing,
 // caret, selection and clipboard for free; here the room id has to be
 // assembled key by key from cv::waitKey, which is why this file has an input
-// loop and the Windows one does not. Room ids are four characters from a
+// loop and the Windows one does not. Room ids are six characters from a
 // deliberately unambiguous alphabet (see RoomManager::generate_room_id), so
 // that is a fair trade -- but if a richer dialog is ever wanted on Linux, this
 // is the file to replace with tinyfiledialogs or SDL.

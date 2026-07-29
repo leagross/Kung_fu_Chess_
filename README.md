@@ -10,7 +10,7 @@ layers that each build and test on their own. Play is local (one keyboard) or
 networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators.
 
-**393 tests** cover the logic, protocol, database and server.
+**394 tests** cover the logic, protocol, database and server.
 
 ---
 
@@ -131,7 +131,7 @@ Each client shows two buttons:
   If nobody suitable appears within a minute it says so and returns here.
 - **ROOM** — opens a dialog with **Create**, **Join** and **Cancel**.
   - **Create** asks the server for a room; the server generates a short id
-    (e.g. `K7QM`) and shows it across the top of your screen. Read it to whoever
+    (e.g. `K7QM9C`) and shows it across the top of your screen. Read it to whoever
     you arranged to play.
   - **Join** takes an id someone gave you. The first to join is Black; **anyone
     who joins after that watches** the game instead of playing, and their header

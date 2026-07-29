@@ -188,7 +188,7 @@ server had capacity.
 
 ### Joining a room by id
 
-The four-character room id our server already generates
+The six-character room id our server already generates
 ([`generate_room_id`](server/README.md)) becomes a Redis key. Join is: gateway
 looks up `room_id` → game server → forwards. One hop, one lookup, no broadcast,
 no searching. **The id must stay meaningless** — deriving the server from the id

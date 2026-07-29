@@ -7,6 +7,8 @@
 #include <string>
 #include <utility>
 
+#include "kfc/database/user_store.hpp"
+
 namespace SQLite {
 class Database;
 }
@@ -21,31 +23,28 @@ namespace kfc::database {
 /// Password policy is exactly the spec's: the first time a username is seen its
 /// password is registered; every later login must match it. Rating starts at
 /// kStartingRating (see elo.hpp) and is nudged by ELO after each game.
-class UserRepository {
+///
+/// This is the SQLite implementation of IUserStore. It is the right one for a
+/// single machine and the wrong one for the load Server_Design.md targets --
+/// which is exactly why callers hold the interface rather than this class.
+class UserRepository : public IUserStore {
 public:
     /// Opens (creating if needed) the SQLite database at db_path and ensures
     /// the users table exists. Pass ":memory:" for a throwaway in-process DB
     /// (tests). Throws if the database cannot be opened.
     explicit UserRepository(const std::string& db_path);
-    ~UserRepository();
+    ~UserRepository() override;
     UserRepository(const UserRepository&) = delete;
     UserRepository& operator=(const UserRepository&) = delete;
-
-    struct AuthOutcome {
-        bool ok = false;
-        std::string reason;             // empty on success; else e.g. "wrong_password"
-        int rating = 0;                 // the account's rating, valid when ok
-        bool newly_registered = false;  // true if this call created the account
-    };
 
     /// Registers username with password on first sight (rating =
     /// kStartingRating), or verifies password against the stored hash on a
     /// return visit. reason is "wrong_password" when an existing user's
     /// password does not match.
-    [[nodiscard]] AuthOutcome authenticate(const std::string& username, const std::string& password);
+    [[nodiscard]] AuthOutcome authenticate(const std::string& username, const std::string& password) override;
 
     /// The user's current rating, or std::nullopt if there is no such user.
-    [[nodiscard]] std::optional<int> rating_of(const std::string& username);
+    [[nodiscard]] std::optional<int> rating_of(const std::string& username) override;
 
     /// Overwrites the user's rating. A no-op if the user does not exist.
     ///
@@ -70,11 +69,11 @@ public:
     /// this repository. It is pure arithmetic (see elo.hpp) precisely so that
     /// it can be.
     [[nodiscard]] bool rerate_pair(const std::string& first, const std::string& second,
-                                   const std::function<std::pair<int, int>(int, int)>& compute);
+                                   const std::function<std::pair<int, int>(int, int)>& compute) override;
 
     /// The one-player form of rerate_pair, for an adjustment that depends on
     /// the player's current rating (a forfeit penalty). False if unknown.
-    [[nodiscard]] bool rerate(const std::string& username, const std::function<int(int)>& compute);
+    [[nodiscard]] bool rerate(const std::string& username, const std::function<int(int)>& compute) override;
 
 private:
     // Both assume mutex_ is already held: the compound operations above must do

@@ -3,11 +3,11 @@
 #include <utility>
 
 #include "kfc/database/elo.hpp"
-#include "kfc/database/user_repository.hpp"
+#include "kfc/database/user_store.hpp"
 
 namespace kfc::database {
 
-void apply_game_result(UserRepository& users, std::optional<kfc::model::PieceColor> winner,
+void apply_game_result(IUserStore& users, std::optional<kfc::model::PieceColor> winner,
                        const std::string& white_username, const std::string& black_username) {
     // Score from White's point of view: 1 win, 0.5 draw, 0 loss. Black's is the
     // complement, so the exchange is symmetric.
@@ -29,7 +29,7 @@ void apply_game_result(UserRepository& users, std::optional<kfc::model::PieceCol
     });
 }
 
-void apply_forfeit(UserRepository& users, const std::string& loser_username) {
+void apply_forfeit(IUserStore& users, const std::string& loser_username) {
     (void)users.rerate(loser_username, [](int rating) { return rating - kDisconnectPenalty; });
 }
 

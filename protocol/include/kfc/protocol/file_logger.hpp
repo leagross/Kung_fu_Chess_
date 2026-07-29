@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -78,13 +77,8 @@ public:
     /// Whether a line at this level would be written. For call sites where
     /// *building* the line costs something -- encoding a message, redacting a
     /// password out of one -- so that work can be skipped too, not just the
-    /// write. A lock-free atomic read.
-    [[nodiscard]] bool enabled(LogLevel level) const {
-        return level >= minimum_.load(std::memory_order_relaxed);
-    }
-
-    /// Changes the least severe level written, at any time.
-    void set_minimum(LogLevel minimum) { minimum_.store(minimum, std::memory_order_relaxed); }
+    /// write.
+    [[nodiscard]] bool enabled(LogLevel level) const { return level >= minimum_; }
 
     /// Pushes anything buffered to disk. Called for you on any line above
     /// Debug and on destruction; public for a caller that wants the traffic
@@ -97,7 +91,7 @@ public:
     [[nodiscard]] static std::optional<LogLevel> level_from_name(std::string_view name);
 
 private:
-    std::atomic<LogLevel> minimum_;
+    LogLevel minimum_;
     std::mutex mutex_;
     std::ofstream file_;
 };

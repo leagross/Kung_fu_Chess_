@@ -73,9 +73,6 @@ TEST(FileLoggerTest, EnabledAnswersWithoutWritingAnything) {
     EXPECT_TRUE(logger.enabled(LogLevel::Info));
     EXPECT_TRUE(logger.enabled(LogLevel::Error));
 
-    logger.set_minimum(LogLevel::Debug);
-    EXPECT_TRUE(logger.enabled(LogLevel::Debug)) << "the level can be changed after construction";
-
     logger.flush();
     EXPECT_TRUE(read_all(path).empty()) << "asking about a level must not log anything";
 }

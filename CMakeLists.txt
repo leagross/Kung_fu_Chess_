@@ -221,6 +221,9 @@ add_executable(kfc_tests
   server/tests/unit/test_match.cpp
   server/tests/unit/test_room_manager.cpp
   server/tests/unit/test_match_audience.cpp
+  server/tests/unit/test_client_session.cpp
+  ui/tests/unit/test_match_overlay.cpp
+  ui/src/kfc/graphics/app/match_overlay.cpp
   database/tests/unit/test_elo.cpp
   database/tests/unit/test_sha256.cpp
   database/tests/unit/test_user_repository.cpp
@@ -228,13 +231,17 @@ add_executable(kfc_tests
   server/src/kfc/server/match.cpp
   server/src/kfc/server/room_manager.cpp
   server/src/kfc/server/match_audience.cpp
+  server/src/kfc/server/client_session.cpp
   server/src/kfc/server/disconnect_watch.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/sha256.cpp
   database/src/kfc/database/user_repository.cpp
   database/src/kfc/database/rating_service.cpp
 )
-target_include_directories(kfc_tests PRIVATE server/include database/include)
+# ui/include is on the test path only for the OpenCV-free parts of the client
+# (MatchOverlay). Nothing here pulls in OpenCV, so the suite still builds on a
+# machine without it -- which CI relies on.
+target_include_directories(kfc_tests PRIVATE server/include database/include ui/include)
 target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp)
 # Test setup code deliberately fires request_move/request_jump for their board
 # side effect while arranging a scenario, discarding the [[nodiscard]]
@@ -268,6 +275,7 @@ add_executable(kfc_server
   server/src/kfc/server/match.cpp
   server/src/kfc/server/room_manager.cpp
   server/src/kfc/server/match_audience.cpp
+  server/src/kfc/server/client_session.cpp
   server/src/kfc/server/disconnect_watch.cpp
   server/src/kfc/server/websocket_game_server.cpp
   database/src/kfc/database/elo.cpp
@@ -301,6 +309,8 @@ if (KFC_HAVE_OPENCV)
     ui/src/kfc/graphics/io/board_file_loader.cpp
     ui/src/kfc/graphics/input/mouse_input_adapter.cpp
     ui/src/kfc/graphics/input/screen_mapper.cpp
+    ui/src/kfc/graphics/app/home_screen.cpp
+    ui/src/kfc/graphics/app/match_overlay.cpp
     ui/src/kfc/graphics/animation/piece_animation_set.cpp
     ui/src/kfc/graphics/animation/animation_config_loader.cpp
     ui/src/kfc/graphics/animation/piece_animator.cpp

@@ -1,34 +1,15 @@
 #include "kfc/database/user_repository.hpp"
 
-#include <random>
 
 #include <SQLiteCpp/Database.h>
 #include <SQLiteCpp/Statement.h>
 #include <SQLiteCpp/Transaction.h>
 
 #include "kfc/database/elo.hpp"
+#include "kfc/database/password_hash.hpp"
 #include "kfc/database/sha256.hpp"
 
 namespace kfc::database {
-
-namespace {
-
-// 16 random bytes, hex-encoded. Per-user, so two accounts with the same
-// password still hash differently and a stolen DB can't be cracked with a
-// single precomputed table.
-std::string random_salt() {
-    static thread_local std::mt19937_64 rng(std::random_device{}());
-    std::uniform_int_distribution<int> nibble(0, 15);
-    static const char* kHex = "0123456789abcdef";
-    std::string salt;
-    salt.reserve(32);
-    for (int i = 0; i < 32; ++i) {
-        salt.push_back(kHex[nibble(rng)]);
-    }
-    return salt;
-}
-
-}  // namespace
 
 UserRepository::UserRepository(const std::string& db_path)
     : db_(std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)) {
@@ -50,20 +31,38 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
 
     if (lookup.executeStep()) {
         std::string salt = lookup.getColumn(0).getString();
-        std::string stored_hash = lookup.getColumn(1).getString();
+        std::string stored = lookup.getColumn(1).getString();
         int rating = lookup.getColumn(2).getInt();
-        if (sha256_hex(salt + password) == stored_hash) {
-            return AuthOutcome{true, "", rating, false};
+
+        // An account created before Argon2 still holds a salted SHA-256, and is
+        // checked the old way -- otherwise adding a better hash would lock every
+        // existing player out of their own account.
+        bool legacy = !password_hash::is_argon2(stored);
+        bool correct = legacy ? sha256_hex(salt + password) == stored
+                              : password_hash::verify_password(password, stored);
+        if (!correct) {
+            return AuthOutcome{false, "wrong_password", 0, false};
         }
-        return AuthOutcome{false, "wrong_password", 0, false};
+        if (legacy) {
+            // Upgraded here because this is the only moment the plaintext is
+            // ever in hand. Per successful login rather than as a batch
+            // migration: nobody is locked out, nothing needs downtime, and the
+            // weak hashes simply drain away as people come back.
+            SQLite::Statement upgrade(*db_, "UPDATE users SET salt = '', password_hash = ? WHERE username = ?");
+            upgrade.bind(1, password_hash::hash_password(password));
+            upgrade.bind(2, username);
+            upgrade.exec();
+        }
+        return AuthOutcome{true, "", rating, false};
     }
 
-    // First time we've seen this username -> register it.
-    std::string salt = random_salt();
+    // First time we've seen this username -> register it. The salt column is
+    // left empty: Argon2 carries its own salt inside the encoded string, so
+    // there is no longer a second value to keep in step with the hash.
     SQLite::Statement insert(*db_, "INSERT INTO users (username, salt, password_hash, rating) VALUES (?, ?, ?, ?)");
     insert.bind(1, username);
-    insert.bind(2, salt);
-    insert.bind(3, sha256_hex(salt + password));
+    insert.bind(2, "");
+    insert.bind(3, password_hash::hash_password(password));
     insert.bind(4, kStartingRating);
     insert.exec();
     return AuthOutcome{true, "", kStartingRating, true};

@@ -14,16 +14,45 @@ SQLite for something else would touch nothing outside this folder.
 |------|----------------|
 | `user_store` | **`IUserStore`** — what everything above sees: authenticate, read a rating, re-rate atomically. Which database is behind it is not visible from here. |
 | `user_repository` | The SQLite implementation of it. Registers a username on first sight, verifies the password on every visit after that, and reads/writes ratings. Internally synchronized — the server calls it from several connection threads at once. |
-| `sha256` | A self-contained SHA-256, so passwords are never stored in the clear and no crypto library has to be installed. |
+| `password_hash` | Argon2id hashing and verification — what a stored credential is, and how one is checked. |
+| `sha256` | A self-contained SHA-256. No longer the password hash; kept to verify (and upgrade) accounts created before Argon2. |
 | `elo` | The rating maths and its constants: starting rating 1200, K-factor 32, ±100 matchmaking window, and the flat 10-point forfeit penalty. |
 | `rating_service` | Applies a finished game's outcome to the stored ratings — the normal ELO exchange for a decisive result or a draw, the flat penalty for a disconnect. |
 
 ## How passwords are stored
 
-Never as text. Each account gets its own random **salt**; what is stored is
-`sha256(salt + password)` alongside that salt. Verifying re-hashes the attempt
-with the stored salt and compares. Two people who pick the same password get
-different hashes, and the stored value cannot be read back into a password.
+**Argon2id**, with a fresh random salt per account. What is stored is one PHC
+string — `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>` — which carries the
+algorithm, the cost it was made with, and the salt, so there is no second column
+to keep in step with it.
+
+### Why not a salted SHA-256, which is what this was
+
+SHA-256 is built to be **fast**; that is its job everywhere else. A password hash
+needs the opposite. Commodity hardware computes billions of SHA-256 per second,
+so a stolen table of salted SHA-256 hashes is a dictionary attack that finishes
+over a weekend. The salt only forces an attacker to work one account at a time —
+it never makes the work *hard*.
+
+Argon2id makes each guess cost real time **and memory**, and the memory is the
+part that matters: it is what a GPU or an ASIC cannot simply add thousands of in
+parallel. The `id` variant is the default to reach for — Argon2i's resistance to
+side-channel attacks on the first pass, Argon2d's resistance to time-memory
+trade-offs on the rest.
+
+Verification uses Argon2's own constant-time comparison, so how long a check
+takes cannot reveal how much of a guess was right.
+
+The cost is deliberate and visible: the test suite went from 13 to 27 seconds
+when this landed. That is the feature working.
+
+### Accounts made before this
+
+They still hold a salted SHA-256, and are still verified that way — otherwise a
+better hash would have locked every existing player out of their own account.
+Each one is **upgraded in place on the next successful login**, which is the only
+moment the plaintext is ever in hand. No batch migration, no downtime; the weak
+hashes drain away as people come back. `sha256.cpp` stays for exactly this.
 
 ## The database file
 

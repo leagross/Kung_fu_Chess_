@@ -10,7 +10,7 @@ layers that each build and test on their own. Play is local (one keyboard) or
 networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators.
 
-**394 tests** cover the logic, protocol, database and server.
+**395 tests** cover the logic, protocol, database and server.
 
 ---
 
@@ -20,7 +20,7 @@ rooms and spectators.
 |-----------|------------------|-------|
 | `logic/` | Board, pieces, movement rules, real-time motion, the game engine. Headless — no graphics, no sockets, no database. | [logic/README.md](logic/README.md) |
 | `protocol/` | The JSON messages the client and server exchange, and their (de)serialization. | [protocol/README.md](protocol/README.md) |
-| `database/` | Accounts, salted password hashes and ELO ratings, in SQLite. | [database/README.md](database/README.md) |
+| `database/` | Accounts, Argon2id password hashes and ELO ratings, in SQLite. | [database/README.md](database/README.md) |
 | `server/` | Rooms, matchmaking, one match per room, and the WebSocket transport. | [server/README.md](server/README.md) |
 | `ui/` | OpenCV rendering, sprite animation, mouse input, and the networked client. | [ui/README.md](ui/README.md) |
 | `assets/` | Piece sprites, board and background images, sound effects. | [assets/README.md](assets/README.md) |

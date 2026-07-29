@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(kfc LANGUAGES CXX)
+# C as well as C++: the vendored Argon2 (third_party/argon2) is C.
+project(kfc LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +50,36 @@ FetchContent_Declare(
   URL https://github.com/SRombauts/SQLiteCpp/archive/refs/tags/3.3.2.zip
 )
 FetchContent_MakeAvailable(SQLiteCpp)
+
+# Argon2 -- the password hash (see database/README.md for why a single SHA-256
+# is not one). Committed under third_party/ rather than downloaded: upstream
+# ships a Makefile and no CMake build, so the target has to be declared by hand
+# either way, and a build that cannot produce the credential-hashing code
+# because a download failed is not an acceptable failure mode. It is 126 KB.
+#
+# ref.c, not opt.c: the portable compression function, so there is no
+# architecture detection to get wrong. ARGON2_NO_THREADS because we hash with
+# parallelism 1 -- the threading support would only add a pthread dependency for
+# code that never runs.
+set(ARGON2_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/argon2)
+add_library(kfc_argon2 STATIC
+  ${ARGON2_ROOT}/src/argon2.c
+  ${ARGON2_ROOT}/src/core.c
+  ${ARGON2_ROOT}/src/encoding.c
+  ${ARGON2_ROOT}/src/ref.c
+  ${ARGON2_ROOT}/src/blake2/blake2b.c
+  ${ARGON2_ROOT}/src/thread.c
+)
+target_include_directories(kfc_argon2 PUBLIC ${ARGON2_ROOT}/include)
+target_include_directories(kfc_argon2 PRIVATE ${ARGON2_ROOT}/src)
+target_compile_definitions(kfc_argon2 PRIVATE ARGON2_NO_THREADS)
+if (MSVC)
+  # Upstream C, built as-is: its warnings are not ours to fix, and treating them
+  # as errors would make every upstream refresh a merge conflict.
+  target_compile_options(kfc_argon2 PRIVATE /w)
+else()
+  target_compile_options(kfc_argon2 PRIVATE -w)
+endif()
 
 # miniaudio: the audio backend for every platform except Windows, which has
 # PlaySound built into the OS (see make_sound_player). A single public-domain
@@ -237,6 +268,7 @@ add_executable(kfc_tests
   server/src/kfc/server/disconnect_watch.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/sha256.cpp
+  database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
   database/src/kfc/database/rating_service.cpp
 )
@@ -244,7 +276,7 @@ add_executable(kfc_tests
 # (MatchOverlay). Nothing here pulls in OpenCV, so the suite still builds on a
 # machine without it -- which CI relies on.
 target_include_directories(kfc_tests PRIVATE server/include database/include ui/include)
-target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp)
+target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp kfc_argon2)
 # Test setup code deliberately fires request_move/request_jump for their board
 # side effect while arranging a scenario, discarding the [[nodiscard]]
 # MoveResult on purpose. Suppress C4834 for this target only -- production code
@@ -283,11 +315,12 @@ add_executable(kfc_server
   server/src/kfc/server/websocket_game_server.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/sha256.cpp
+  database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
   database/src/kfc/database/rating_service.cpp
 )
 target_include_directories(kfc_server PRIVATE server/include database/include)
-target_link_libraries(kfc_server PRIVATE kfc_core kfc_protocol ixwebsocket SQLiteCpp)
+target_link_libraries(kfc_server PRIVATE kfc_core kfc_protocol ixwebsocket SQLiteCpp kfc_argon2)
 target_compile_definitions(kfc_server PRIVATE
   KFC_SERVER_DEFAULT_BOARD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/server/apps/kfc_server/default_board.txt"
 )

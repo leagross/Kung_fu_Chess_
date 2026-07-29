@@ -26,6 +26,11 @@ rooms and spectators.
 | `assets/` | Piece sprites, board and background images, sound effects. | [assets/README.md](assets/README.md) |
 | `config/` | `gameplay.json` — the speeds, cooldowns and piece values both sides read. | — |
 
+**[Server_Design.md](Server_Design.md)** — how this server would have to change
+to carry 100 M registered players and 10 M concurrent ones: which database,
+how the work splits across containers, what the traffic actually comes to, and
+what a 60-second game does to a deployment.
+
 Dependencies point one way only: `ui` and `server` depend on `protocol` and
 `logic`; `server` depends on `database`; `logic` depends on nothing. That is why
 the whole test suite runs without OpenCV, without a socket and without a

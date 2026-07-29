@@ -213,8 +213,32 @@ public:
     /// tick thread and returns, so it never races the simulation.
     void on_disconnect(kfc::model::PieceColor color);
 
+    /// Advances this match by one step: drains the command queue, applies what
+    /// was waiting, advances the simulation by elapsed_ms, and broadcasts
+    /// whatever happened.
+    ///
+    /// **Time comes in as parameters rather than being read from a clock**, for
+    /// the same reason GameCore::wait does it: it is what lets something other
+    /// than this object decide the cadence. One thread can drive thousands of
+    /// matches by calling this on each in turn -- which is the shape
+    /// Server_Design.md needs, since a thread per match is five million threads
+    /// at the target scale. It is also what would let a test step a match
+    /// forward deterministically instead of sleeping.
+    ///
+    /// now is the wall-clock instant of this step (the disconnect countdown and
+    /// the post-game release are measured against it); elapsed_ms is how much
+    /// simulated time to advance, already clamped by the caller.
+    ///
+    /// Runs the whole step on the calling thread. Safe to call from any one
+    /// thread at a time; two threads must not tick the same match at once.
+    void tick(std::chrono::steady_clock::time_point now, int elapsed_ms);
+
     /// Starts the dedicated tick thread (advances real time and drains the
     /// command queue every iteration). No-op if already running.
+    ///
+    /// One thread per match, which is the thing Server_Design.md identifies as
+    /// the blocker for scaling out. tick() above is the seam that replaces it;
+    /// this remains the only caller of it for now.
     void start();
 
     /// Signals the tick thread to stop and joins it. No-op if not running.

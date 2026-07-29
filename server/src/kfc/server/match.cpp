@@ -160,112 +160,118 @@ void Match::tick_loop() {
     auto last_tick_at = std::chrono::steady_clock::now();
 
     while (running_.load()) {
-        std::deque<std::pair<kfc::model::PieceColor, kfc::protocol::ClientMessage>> pending;
-        int dropped = 0;
         {
+            // Wait out the tick interval, or wake early if a command arrives.
             std::unique_lock<std::mutex> lock(queue_mutex_);
             queue_cv_.wait_for(lock, std::chrono::milliseconds(kTickIntervalMs),
                                [this] { return !queue_.empty() || !running_.load(); });
-            pending.swap(queue_);
-            dropped = std::exchange(dropped_commands_, 0);
         }
         if (!running_.load()) {
             break;
         }
-        if (dropped > 0) {
-            // One line per tick at worst, however hard the queue was flooded.
-            logger_.log(kfc::protocol::LogLevel::Warning,
-                        "Match: dropped " + std::to_string(dropped) + " command(s) -- queue full");
-        }
 
         auto now = std::chrono::steady_clock::now();
+        int elapsed_ms =
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tick_at).count());
+        // Advanced every tick either way, so time spent frozen is never banked
+        // up and dumped into the simulation the moment play resumes.
+        last_tick_at = now;
+        tick(now, std::clamp(elapsed_ms, kMinTickAdvanceMs, kMaxTickAdvanceMs));
+    }
+}
 
-        // All board-touching work for this tick runs under board_mutex_ so a
-        // concurrent join() snapshot (on a connection thread) never reads the
-        // board mid-mutation. Released before broadcasting below -- network
-        // I/O must not hold the board lock. Applied in the order the queue
-        // delivered them: deterministic, and the answer to "which of two
-        // near-simultaneous commands wins" is whichever arrived first.
-        // A dropped player's grace period stops the game clock as well as
-        // refusing their opponent's commands (see apply). Without this a piece
-        // already in flight would still arrive, and every cooldown would still
-        // expire, while one side sits at a disconnected client -- so the game
-        // would go on being played by one player. Freezing means a returning
-        // player finds the position exactly as they left it.
-        bool frozen = state() == MatchState::Frozen;
+void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
+    std::deque<std::pair<kfc::model::PieceColor, kfc::protocol::ClientMessage>> pending;
+    int dropped = 0;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        pending.swap(queue_);
+        dropped = std::exchange(dropped_commands_, 0);
+    }
+    if (dropped > 0) {
+        // One line per tick at worst, however hard the queue was flooded.
+        logger_.log(kfc::protocol::LogLevel::Warning,
+                    "Match: dropped " + std::to_string(dropped) + " command(s) -- queue full");
+    }
 
-        kfc::model::ArrivalEvents events;
-        std::uint64_t at_revision = 0;
-        {
-            std::lock_guard<std::mutex> board_guard(board_mutex_);
-            for (auto& [from, message] : pending) {
-                apply(from, message);
-            }
+    // All board-touching work for this tick runs under board_mutex_ so a
+    // concurrent join() snapshot (on a connection thread) never reads the
+    // board mid-mutation. Released before broadcasting below -- network
+    // I/O must not hold the board lock. Applied in the order the queue
+    // delivered them: deterministic, and the answer to "which of two
+    // near-simultaneous commands wins" is whichever arrived first.
+    // A dropped player's grace period stops the game clock as well as
+    // refusing their opponent's commands (see apply). Without this a piece
+    // already in flight would still arrive, and every cooldown would still
+    // expire, while one side sits at a disconnected client -- so the game
+    // would go on being played by one player. Freezing means a returning
+    // player finds the position exactly as they left it.
+    bool frozen = state() == MatchState::Frozen;
 
-            int elapsed_ms =
-                static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tick_at).count());
-            // Advanced every tick either way, so the time spent frozen is never
-            // banked up and dumped into the simulation the moment play resumes.
-            last_tick_at = now;
-            elapsed_ms = std::clamp(elapsed_ms, kMinTickAdvanceMs, kMaxTickAdvanceMs);
-
-            if (!frozen) {
-                events = core_.engine().wait(elapsed_ms);
-                // Kept so a client joining or returning mid-game can rebuild the
-                // move list and score it never saw -- see welcome_for.
-                history_.insert(history_.end(), events.begin(), events.end());
-                if (!events.empty()) {
-                    // Bumped here, under the same lock as the board change, so
-                    // a snapshot taken concurrently can never report a revision
-                    // that disagrees with the position it contains.
-                    ++revision_;
-                }
-            }
-            at_revision = revision_;
+    kfc::model::ArrivalEvents events;
+    std::uint64_t at_revision = 0;
+    {
+        std::lock_guard<std::mutex> board_guard(board_mutex_);
+        for (auto& [from, message] : pending) {
+            apply(from, message);
         }
-        if (!events.empty()) {
-            broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::BoardUpdate{events, at_revision}});
 
-            kfc::model::GameOverObserver game_over;
-            for (const auto& event : events) {
-                game_over.on_arrival(event);
-            }
-            if (game_over.is_game_over()) {
-                // Latch it so any command still in flight after the king fell
-                // is dropped by apply() rather than mutating a decided board.
-                game_over_ = true;
-                std::optional<kfc::model::PieceColor> winner =
-                    game_over.is_draw() ? std::nullopt : game_over.winner();
-                broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::GameOver{winner}});
-                report_result(winner.has_value() ? GameEndReason::Decisive : GameEndReason::Draw, winner);
+        if (!frozen) {
+            events = core_.engine().wait(elapsed_ms);
+            // Kept so a client joining or returning mid-game can rebuild the
+            // move list and score it never saw -- see welcome_for.
+            history_.insert(history_.end(), events.begin(), events.end());
+            if (!events.empty()) {
+                // Bumped here, under the same lock as the board change, so
+                // a snapshot taken concurrently can never report a revision
+                // that disagrees with the position it contains.
+                ++revision_;
             }
         }
+        at_revision = revision_;
+    }
+    if (!events.empty()) {
+        broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::BoardUpdate{events, at_revision}});
 
-        // A resign ends the game without any arrival to ride along with, so its
-        // GameOver is broadcast here, after board_mutex_ is released (network
-        // I/O must not hold the board lock -- see above). A deliberate resign is
-        // a decisive loss, so it feeds normal ELO (unlike a disconnect forfeit).
-        if (pending_game_over_.has_value()) {
-            broadcast_and_log(kfc::protocol::ServerMessage{*pending_game_over_});
-            report_result(GameEndReason::Decisive, pending_game_over_->winner);
-            pending_game_over_.reset();
+        kfc::model::GameOverObserver game_over;
+        for (const auto& event : events) {
+            game_over.on_arrival(event);
         }
+        if (game_over.is_game_over()) {
+            // Latch it so any command still in flight after the king fell
+            // is dropped by apply() rather than mutating a decided board.
+            game_over_ = true;
+            std::optional<kfc::model::PieceColor> winner =
+                game_over.is_draw() ? std::nullopt : game_over.winner();
+            broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::GameOver{winner}});
+            report_result(winner.has_value() ? GameEndReason::Decisive : GameEndReason::Draw, winner);
+        }
+    }
 
-        advance_disconnect_countdown(now);
+    // A resign ends the game without any arrival to ride along with, so its
+    // GameOver is broadcast here, after board_mutex_ is released (network
+    // I/O must not hold the board lock -- see above). A deliberate resign is
+    // a decisive loss, so it feeds normal ELO (unlike a disconnect forfeit).
+    if (pending_game_over_.has_value()) {
+        broadcast_and_log(kfc::protocol::ServerMessage{*pending_game_over_});
+        report_result(GameEndReason::Decisive, pending_game_over_->winner);
+        pending_game_over_.reset();
+    }
 
-        // The match is decided -- by a capture, a resign, or a disconnect whose
-        // grace ran out. Nobody is still playing here, so after a short grace
-        // (so the GameOver just broadcast is seen first) everyone is let go.
-        // Without this the survivor of a forfeit stays seated in a finished
-        // game indefinitely, still sending moves at a board that will never
-        // answer, and the room can never be reaped because a live connection
-        // remains in it.
-        if (game_over_ && !release_at_.has_value()) {
-            release_at_ = now + std::chrono::milliseconds(release_delay_ms_);
-        }
-        if (!released_ && release_at_.has_value() && now >= *release_at_) {
-            release_participants();
-        }
+    advance_disconnect_countdown(now);
+
+    // The match is decided -- by a capture, a resign, or a disconnect whose
+    // grace ran out. Nobody is still playing here, so after a short grace
+    // (so the GameOver just broadcast is seen first) everyone is let go.
+    // Without this the survivor of a forfeit stays seated in a finished
+    // game indefinitely, still sending moves at a board that will never
+    // answer, and the room can never be reaped because a live connection
+    // remains in it.
+    if (game_over_ && !release_at_.has_value()) {
+        release_at_ = now + std::chrono::milliseconds(release_delay_ms_);
+    }
+    if (!released_ && release_at_.has_value() && now >= *release_at_) {
+        release_participants();
     }
 }
 

@@ -4,13 +4,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <condition_variable>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -91,11 +89,12 @@ inline constexpr std::size_t kMaxQueuedCommands = 512;
 /// Owns one playable match: a GameCore (the very same Board/RuleEngine/
 /// RealTimeArbiter/MotionFactory/GameEngine stack kfc::texttests::Game
 /// assembles locally, now shared rather than re-wired by hand), plus a
-/// dedicated tick thread and a thread-safe incoming-command queue. This
-/// *is* the CTD SERVER lecture's "bus": IXWebSocket's own connection
-/// threads only ever call enqueue(), never touch GameEngine/Board directly
-/// -- every mutation happens on tick_loop's single thread, exactly the
-/// single-threaded assumption kfc_core makes everywhere already.
+/// thread-safe incoming-command queue. This *is* the CTD SERVER lecture's
+/// "bus": IXWebSocket's own connection threads only ever call enqueue(),
+/// never touch GameEngine/Board directly -- every mutation happens inside
+/// tick(), called from whichever thread a MatchScheduler assigns this match
+/// to, exactly the single-threaded assumption kfc_core makes everywhere
+/// already.
 ///
 /// One Match is exactly two players (first join = White, second = Black), no
 /// spectators, no persistence. Matchmaking across many concurrent games lives
@@ -123,7 +122,6 @@ public:
                    int disconnect_grace_ms = kDefaultDisconnectGraceMs,
                    int release_delay_ms = kDefaultReleaseDelayMs, std::string room_name = {});
 
-    /// Stops the tick thread if still running (see stop()).
     ~Match();
 
     Match(const Match&) = delete;
@@ -196,7 +194,10 @@ public:
 
     /// Thread-safe hand-off of one decoded client message, called from
     /// whatever IXWebSocket callback thread received it. Returns
-    /// immediately; the message is applied on tick_loop's own thread.
+    /// immediately; the message is applied inside this match's next tick().
+    /// If a wake hook is set (see set_wake_hook), it is called too, so a
+    /// scheduler backing this match applies the command right away rather
+    /// than at its next scheduled tick.
     ///
     /// Dropped, rather than queued, once kMaxQueuedCommands are already
     /// waiting -- see there. The newest is what goes: the ones already queued
@@ -209,8 +210,8 @@ public:
     /// count it down; if the grace elapses the match is forfeited on the
     /// dropped player's behalf (opponent wins, GameEndReason::Disconnect, the
     /// flat -10 penalty). Called from an IXWebSocket connection thread when a
-    /// joined socket closes; like enqueue(), it just hands the event to the
-    /// tick thread and returns, so it never races the simulation.
+    /// joined socket closes; like enqueue(), it just records the event for
+    /// the next tick() and returns, so it never races the simulation.
     void on_disconnect(kfc::model::PieceColor color);
 
     /// Advances this match by one step: drains the command queue, applies what
@@ -233,19 +234,16 @@ public:
     /// thread at a time; two threads must not tick the same match at once.
     void tick(std::chrono::steady_clock::time_point now, int elapsed_ms);
 
-    /// Starts the dedicated tick thread (advances real time and drains the
-    /// command queue every iteration). No-op if already running.
-    ///
-    /// One thread per match, which is the thing Server_Design.md identifies as
-    /// the blocker for scaling out. tick() above is the seam that replaces it;
-    /// this remains the only caller of it for now.
-    void start();
-
-    /// Signals the tick thread to stop and joins it. No-op if not running.
-    void stop();
+    /// Sets the callback enqueue() fires after queuing a command -- how a
+    /// MatchScheduler learns to tick this match now rather than waiting out
+    /// its worker's normal cadence, without Match knowing the scheduler or
+    /// even that one exists. Unset by default, which is what tests and any
+    /// standalone Match (ticked by hand, or via a test-only scheduling loop)
+    /// use. Expected to be set once, before the match is handed to anything
+    /// that might call enqueue() concurrently -- see RoomManager::open_room.
+    void set_wake_hook(std::function<void()> hook);
 
 private:
-    void tick_loop();
     void apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessage& message);
     /// True if cell is empty or holds a piece of color from -- false only
     /// when it holds an opponent's piece, i.e. from is trying to command a
@@ -258,7 +256,7 @@ private:
     /// the first two.
     [[nodiscard]] kfc::protocol::Welcome welcome_for(kfc::model::PieceColor color, bool spectator) const;
     /// Fires on_result_ once (guarded by result_reported_) with the end reason,
-    /// winner, and the two usernames. Called from tick_loop the tick the game is
+    /// winner, and the two usernames. Called from tick() the tick the game is
     /// decided, whichever way it ended (capture, resign, disconnect).
     void report_result(GameEndReason reason, std::optional<kfc::model::PieceColor> winner);
     /// Turns this tick of the disconnect grace into game state: broadcasts each
@@ -300,10 +298,10 @@ private:
     std::vector<kfc::model::ArrivalEvent> history_;
 
     // Serializes every read of / write to core_'s board across threads.
-    // Nearly all board access already happens on tick_loop's own thread, but
-    // join() runs on an IXWebSocket connection thread and reads the board to
-    // build its Welcome snapshot -- without this, that read can race a
-    // simultaneous mutation the tick thread is making inside engine().wait().
+    // Nearly all board access already happens inside tick(), but join() runs
+    // on an IXWebSocket connection thread and reads the board to build its
+    // Welcome snapshot -- without this, that read can race a simultaneous
+    // mutation the tick thread is making inside engine().wait().
     mutable std::mutex board_mutex_;
 
     kfc::protocol::FileLogger& logger_;
@@ -314,7 +312,6 @@ private:
     MatchAudience audience_;
 
     std::mutex queue_mutex_;
-    std::condition_variable queue_cv_;
     std::deque<std::pair<kfc::model::PieceColor, kfc::protocol::ClientMessage>> queue_;
     // Commands dropped because the queue was full since the last time it was
     // reported, so a flood costs one log line and not one per message -- the
@@ -322,17 +319,20 @@ private:
     // actual denial of service. Queue-thread state, under queue_mutex_.
     int dropped_commands_ = 0;
 
-    std::thread tick_thread_;
-    std::atomic<bool> running_{false};
+    // Set once, before this match is reachable from more than one thread (see
+    // set_wake_hook) -- read by enqueue(), which can run on any connection
+    // thread, so it is never written again after that point rather than
+    // guarded by a lock.
+    std::function<void()> wake_hook_;
 
     // tick-thread-only game-over state. Once a king is captured, a player
     // resigns, or a player disconnects, the match is decided: game_over_ stays
     // true and apply() drops every later command, so a stray move arriving
     // after the win can never mutate a finished board or emit a second result.
-    // Only apply()/tick_loop touch these, both on the tick thread, so no mutex
+    // Only apply()/tick() touch these, both on the tick thread, so no mutex
     // is needed (unlike the board or the player table, which connection threads
     // also read). pending_game_over_ is set the tick a resign/disconnect is
-    // applied and consumed by tick_loop, which does the actual broadcast after
+    // applied and consumed by tick(), which does the actual broadcast after
     // releasing board_mutex_ -- network I/O must not hold the board lock.
     // atomic only so is_over() can be asked from a connection thread deciding
     // whether a room is still joinable; every write is still the tick thread's.

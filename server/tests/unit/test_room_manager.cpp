@@ -538,3 +538,31 @@ TEST(RoomManagerTest, NewcomerPairsWithTheClosestRatedWaitingOpponent) {
     EXPECT_EQ(c->color, PieceColor::Black);  // joined b's waiting room
     EXPECT_EQ(rooms.room_count(), 2u);       // a still waiting, b+c now playing
 }
+
+// join_any indexes waiting rooms by rating (see RoomManager::waiting_by_rating_)
+// rather than scanning every room in rooms_ -- a lone waiter's room disappearing
+// out from under that index, with the index still pointing at it, is exactly the
+// bug that would crash the *next* join_any (RoomManager::Room& lookup on a RoomId
+// that's already gone). This is the scenario that would catch it.
+TEST(RoomManagerTest, JoiningAtTheRatingOfAWaiterWhoAlreadyLeftOpensAFreshRoom) {
+    FileLogger logger(log_path());
+    RoomManager rooms(two_pawn_factory(), logger);
+
+    RecordingSink alice, bob;
+    std::optional<RoomManager::Seat> a = rooms.join_any("alice", 1200, alice.as_send_fn());
+    ASSERT_TRUE(a.has_value());
+    ASSERT_EQ(rooms.room_count(), 1u);
+
+    // The only player in the only room disconnects -- reaped before anyone
+    // ever paired with them.
+    rooms.on_disconnect(*a);
+    ASSERT_EQ(rooms.room_count(), 0u);
+
+    // Same rating a moment later must not resurrect or crash on the room that
+    // is gone -- it opens its own fresh one.
+    std::optional<RoomManager::Seat> b = rooms.join_any("bob", 1200, bob.as_send_fn());
+    ASSERT_TRUE(b.has_value());
+    EXPECT_NE(b->room, a->room);
+    EXPECT_EQ(b->color, PieceColor::White);
+    EXPECT_EQ(rooms.room_count(), 1u);
+}

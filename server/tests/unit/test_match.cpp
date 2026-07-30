@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <mutex>
@@ -15,6 +17,53 @@ using namespace kfc::model;
 using namespace kfc::protocol;
 
 namespace {
+
+// Match itself has no thread of its own any more -- a MatchScheduler ticks it
+// in production (see match_scheduler.hpp). These tests still want a match
+// that advances in real time so RecordingSink::wait_for can observe it
+// without every call site turning into a manual tick() loop, so this stands
+// in for that scheduler with the simplest thing that could work: one thread,
+// ticking this one match at the same ~60 Hz a production worker would.
+class ScheduledMatch : public kfc::server::Match {
+public:
+    using Match::Match;
+
+    // Match::~Match is not virtual -- fine here, since every test holds a
+    // ScheduledMatch by value and never deletes one through a Match*.
+    ~ScheduledMatch() { stop(); }
+
+    void start() {
+        if (running_.exchange(true)) {
+            return;
+        }
+        thread_ = std::thread([this] { run(); });
+    }
+
+    void stop() {
+        if (!running_.exchange(false)) {
+            return;
+        }
+        if (thread_.joinable()) {
+            thread_.join();
+        }
+    }
+
+private:
+    void run() {
+        auto last_tick_at = std::chrono::steady_clock::now();
+        while (running_.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            auto now = std::chrono::steady_clock::now();
+            int elapsed_ms =
+                static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tick_at).count());
+            last_tick_at = now;
+            tick(now, std::clamp(elapsed_ms, 1, 200));
+        }
+    }
+
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+};
 
 // A tiny board with one white pawn and one black pawn, positioned with
 // genuine room to move forward (white moves toward row 0, black toward the
@@ -113,7 +162,7 @@ bool is_game_over_won_by(const ServerMessage& message, PieceColor winner) {
 
 TEST(MatchOwnershipTest, RejectsAMoveRequestForAPieceOfTheWrongColor) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_ownership_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -134,7 +183,7 @@ TEST(MatchOwnershipTest, RejectsAMoveRequestForAPieceOfTheWrongColor) {
 
 TEST(MatchOwnershipTest, AcceptsAMoveRequestForOnesOwnPiece) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_ownership_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -155,7 +204,7 @@ TEST(MatchOwnershipTest, AcceptsAMoveRequestForOnesOwnPiece) {
 
 TEST(MatchJoinTest, MatchStartIsSentToBothOnlyWhenTheSecondPlayerJoins) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_join_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -181,7 +230,7 @@ TEST(MatchJoinTest, MatchStartIsSentToBothOnlyWhenTheSecondPlayerJoins) {
 
 TEST(MatchResignTest, ResignAwardsTheWinToTheOpponentAndTellsBothPlayers) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_resign_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -205,7 +254,7 @@ TEST(MatchResignTest, ResignAwardsTheWinToTheOpponentAndTellsBothPlayers) {
 TEST(MatchDisconnectTest, ShowsACountdownThenForfeitsAfterTheGrace) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_disconnect_test.log");
     // 150ms grace so the countdown resolves fast.
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/150);
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/150);
     match.start();
 
     RecordingSink white_sink;
@@ -230,7 +279,7 @@ TEST(MatchDisconnectTest, ShowsACountdownThenForfeitsAfterTheGrace) {
 
 TEST(MatchStateTest, WalksThroughWaitingRunningFrozenFinished) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
     match.start();
 
     RecordingSink white_sink;
@@ -259,7 +308,7 @@ TEST(MatchStateTest, WalksThroughWaitingRunningFrozenFinished) {
 
 TEST(MatchStateTest, ALonePlayerCannotMoveWhileWaitingForAnOpponent) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -281,7 +330,7 @@ TEST(MatchStateTest, ALonePlayerCannotMoveWhileWaitingForAnOpponent) {
 
 TEST(MatchStateTest, TheSameMoveIsAcceptedOnceTheOpponentArrives) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -303,7 +352,7 @@ TEST(MatchStateTest, TheSameMoveIsAcceptedOnceTheOpponentArrives) {
 
 TEST(MatchStateTest, ResigningIsStillAllowedWhileFrozen) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_state_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
     match.start();
 
     RecordingSink white_sink;
@@ -327,7 +376,7 @@ TEST(MatchStateTest, ResigningIsStillAllowedWhileFrozen) {
 TEST(MatchDisconnectTest, TheSurvivorCannotKeepPlayingWhileTheGraceCountsDown) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_freeze_test.log");
     // A long grace, so the whole test happens inside it.
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
     match.start();
 
     RecordingSink white_sink;
@@ -358,7 +407,7 @@ TEST(MatchDisconnectTest, TheSurvivorCannotKeepPlayingWhileTheGraceCountsDown) {
 
 TEST(MatchDisconnectTest, TheClockStopsWhileTheGraceCountsDownSoAPieceInFlightDoesNotArrive) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_freeze_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000);
     match.start();
 
     RecordingSink white_sink;
@@ -383,7 +432,7 @@ TEST(MatchDisconnectTest, TheClockStopsWhileTheGraceCountsDownSoAPieceInFlightDo
 
 TEST(MatchJoinTest, AWelcomeCarriesTheArrivalsThatAlreadyHappened) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_history_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -408,7 +457,7 @@ TEST(MatchJoinTest, AWelcomeCarriesTheArrivalsThatAlreadyHappened) {
 
 TEST(MatchJoinTest, AWelcomeBeforeAnyMoveCarriesAnEmptyHistory) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_history_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -425,7 +474,7 @@ TEST(MatchJoinTest, AWelcomeBeforeAnyMoveCarriesAnEmptyHistory) {
 
 TEST(MatchRevisionTest, EachUpdateCarriesAHigherRevisionThanTheLast) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_revision_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -454,7 +503,7 @@ TEST(MatchRevisionTest, EachUpdateCarriesAHigherRevisionThanTheLast) {
 
 TEST(MatchRevisionTest, AWelcomesRevisionMatchesTheBoardItCarries) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_revision_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -490,7 +539,7 @@ TEST(MatchRevisionTest, AWelcomesRevisionMatchesTheBoardItCarries) {
 
 TEST(MatchRevisionTest, AJoinerIsRegisteredBeforeItsSnapshotIsTaken) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_revision_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -527,7 +576,7 @@ TEST(MatchRevisionTest, AJoinerIsRegisteredBeforeItsSnapshotIsTaken) {
 TEST(MatchReleaseTest, ForfeitAfterTheCountdownReleasesBothPlayers) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_release_test.log");
     // Short grace and short release delay so the whole sequence resolves fast.
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/100,
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/100,
                              /*release_delay_ms=*/50);
     match.start();
 
@@ -552,7 +601,7 @@ TEST(MatchReleaseTest, ForfeitAfterTheCountdownReleasesBothPlayers) {
 
 TEST(MatchReleaseTest, PlayersAreNotReleasedWhileTheGameIsStillOn) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_release_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000,
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000,
                              /*release_delay_ms=*/20);
     match.start();
 
@@ -572,7 +621,7 @@ TEST(MatchReleaseTest, PlayersAreNotReleasedWhileTheGameIsStillOn) {
 
 TEST(MatchReleaseTest, ANormalWinAlsoReleasesBothPlayers) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_release_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000,
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, {}, /*disconnect_grace_ms=*/20000,
                              /*release_delay_ms=*/50);
     match.start();
 
@@ -608,7 +657,7 @@ TEST(MatchDisconnectTest, ForfeitReportsTheDisconnectReasonToTheResultHook) {
         fired = true;
     };
 
-    kfc::server::Match match(make_two_pawn_board(), logger, {}, on_result, /*disconnect_grace_ms=*/120);
+    ScheduledMatch match(make_two_pawn_board(), logger, {}, on_result, /*disconnect_grace_ms=*/120);
     match.start();
 
     RecordingSink white_sink;
@@ -649,7 +698,7 @@ TEST(MatchDisconnectTest, ForfeitReportsTheDisconnectReasonToTheResultHook) {
 
 TEST(MatchResignTest, CommandsArrivingAfterTheGameIsOverAreIgnored) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_resign_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
     match.start();
 
     RecordingSink white_sink;
@@ -680,7 +729,7 @@ TEST(MatchResignTest, CommandsArrivingAfterTheGameIsOverAreIgnored) {
 // is exactly what the test arranged rather than a race against the tick thread.
 TEST(MatchQueueTest, CommandsPastTheQueueCapAreDroppedRatherThanQueued) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_queue_test.log");
-    kfc::server::Match match(make_two_pawn_board(), logger);
+    ScheduledMatch match(make_two_pawn_board(), logger);
 
     RecordingSink white_sink, black_sink;
     ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);

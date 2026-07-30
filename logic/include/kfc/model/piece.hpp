@@ -30,6 +30,13 @@ enum class PieceColor {
     Black,
 };
 
+/// The other side. Used wherever "whoever didn't just do X" needs a value --
+/// the winner of a forfeit or a resign, for instance -- rather than every
+/// caller re-deriving it with its own White/Black ternary.
+[[nodiscard]] constexpr PieceColor opposite_of(PieceColor color) {
+    return color == PieceColor::White ? PieceColor::Black : PieceColor::White;
+}
+
 /// The chess role a piece plays. Extending this list (e.g. adding a custom
 /// piece type) is the one place in the model layer that must be touched by
 /// hand; movement behavior for the new kind belongs in a PieceRules strategy,

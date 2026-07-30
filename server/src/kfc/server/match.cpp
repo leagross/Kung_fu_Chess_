@@ -1,10 +1,11 @@
 #include "kfc/server/match.hpp"
 
-#include <algorithm>
 #include <chrono>
 #include <string>
 #include <utility>
 
+#include "kfc/model/piece.hpp"
+#include "kfc/model/piece_names.hpp"
 #include "kfc/protocol/json.hpp"
 #include "kfc/realtime/game_over_observer.hpp"
 #include "kfc/rules/move_reasons.hpp"
@@ -13,24 +14,13 @@ namespace kfc::server {
 
 namespace {
 
-// The server ticks at roughly 60 Hz: even when no command is waiting in the
-// queue, tick_loop wakes at least this often to advance the simulation clock
-// and let in-flight motions arrive on time.
-constexpr int kTickIntervalMs = 16;
-
-// The real wall-clock gap between ticks that advance_time is fed, clamped:
-// never 0 (guarantees the simulation always moves forward) and never a huge
-// jump (a momentarily stalled or paused process must not dump multiple
-// seconds of simulated time into a single tick).
-constexpr int kMinTickAdvanceMs = 1;
-constexpr int kMaxTickAdvanceMs = 200;
-
+// A thin adapter, not a second copy of the logic: the White/Black spelling
+// itself lives in exactly one place, kfc::model::name_of (see piece_names.hpp
+// -- it used to be re-derived here and in game_session.cpp too). This exists
+// only because every call site below builds a std::string by concatenation,
+// which std::string_view (name_of's return type) doesn't support directly.
 std::string color_name(kfc::model::PieceColor color) {
-    return color == kfc::model::PieceColor::White ? "White" : "Black";
-}
-
-kfc::model::PieceColor opponent_of(kfc::model::PieceColor color) {
-    return color == kfc::model::PieceColor::White ? kfc::model::PieceColor::Black : kfc::model::PieceColor::White;
+    return std::string(kfc::model::name_of(color));
 }
 
 }  // namespace
@@ -48,9 +38,7 @@ Match::Match(kfc::model::Board board, kfc::protocol::FileLogger& logger, kfc::pr
       room_name_(std::move(room_name)),
       disconnect_watch_(disconnect_grace_ms) {}
 
-Match::~Match() {
-    stop();
-}
+Match::~Match() = default;
 
 std::optional<kfc::model::PieceColor> Match::join(const std::string& username, SendFn send, CloseFn close) {
     std::optional<kfc::model::PieceColor> assigned = audience_.seat(username, send, std::move(close));
@@ -128,7 +116,13 @@ void Match::enqueue(kfc::model::PieceColor from, kfc::protocol::ClientMessage me
         }
         queue_.emplace_back(from, std::move(message));
     }
-    queue_cv_.notify_one();
+    if (wake_hook_) {
+        wake_hook_();
+    }
+}
+
+void Match::set_wake_hook(std::function<void()> hook) {
+    wake_hook_ = std::move(hook);
 }
 
 void Match::on_disconnect(kfc::model::PieceColor color) {
@@ -137,47 +131,6 @@ void Match::on_disconnect(kfc::model::PieceColor color) {
     // watch records it here and the tick loop, which wakes at least every
     // ~16ms, opens the countdown on its next advance().
     disconnect_watch_.report_disconnect(color);
-}
-
-void Match::start() {
-    if (running_.exchange(true)) {
-        return;
-    }
-    tick_thread_ = std::thread(&Match::tick_loop, this);
-}
-
-void Match::stop() {
-    if (!running_.exchange(false)) {
-        return;
-    }
-    queue_cv_.notify_all();
-    if (tick_thread_.joinable()) {
-        tick_thread_.join();
-    }
-}
-
-void Match::tick_loop() {
-    auto last_tick_at = std::chrono::steady_clock::now();
-
-    while (running_.load()) {
-        {
-            // Wait out the tick interval, or wake early if a command arrives.
-            std::unique_lock<std::mutex> lock(queue_mutex_);
-            queue_cv_.wait_for(lock, std::chrono::milliseconds(kTickIntervalMs),
-                               [this] { return !queue_.empty() || !running_.load(); });
-        }
-        if (!running_.load()) {
-            break;
-        }
-
-        auto now = std::chrono::steady_clock::now();
-        int elapsed_ms =
-            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - last_tick_at).count());
-        // Advanced every tick either way, so time spent frozen is never banked
-        // up and dumped into the simulation the moment play resumes.
-        last_tick_at = now;
-        tick(now, std::clamp(elapsed_ms, kMinTickAdvanceMs, kMaxTickAdvanceMs));
-    }
 }
 
 void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
@@ -200,13 +153,25 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
     // I/O must not hold the board lock. Applied in the order the queue
     // delivered them: deterministic, and the answer to "which of two
     // near-simultaneous commands wins" is whichever arrived first.
-    // A dropped player's grace period stops the game clock as well as
-    // refusing their opponent's commands (see apply). Without this a piece
-    // already in flight would still arrive, and every cooldown would still
-    // expire, while one side sits at a disconnected client -- so the game
-    // would go on being played by one player. Freezing means a returning
-    // player finds the position exactly as they left it.
-    bool frozen = state() == MatchState::Frozen;
+    //
+    // engine().wait() itself -- the part that actually costs CPU -- only runs
+    // while the match is genuinely Running. Not Frozen: a dropped player's
+    // grace period stops the game clock as well as refusing their opponent's
+    // commands (see apply); without this a piece already in flight would
+    // still arrive, and every cooldown would still expire, while one side
+    // sits at a disconnected client. Not Waiting: apply() refuses every
+    // gameplay command until both seats are filled (kMatchNotStarted), so
+    // nothing can be in flight to advance yet. Not Finished: once game_over_
+    // latches, no new command can mutate the board (see apply), so further
+    // calls buy nothing but CPU -- at the five-million-room scale
+    // Server_Design.md targets, a room sitting in a matchmaking queue or
+    // holding its post-game release delay is not rare, and ticking it exactly
+    // like a live game 60 times a second for no observable effect is the
+    // waste MatchScheduler was built to take seriously. Read once per tick,
+    // before apply() runs below -- the very tick a resign or capture decides
+    // the match, state() here still reports the state it was in when the
+    // tick began, so that decisive tick still gets its engine().wait() call.
+    bool should_advance = state() == MatchState::Running;
 
     kfc::model::ArrivalEvents events;
     std::uint64_t at_revision = 0;
@@ -216,7 +181,7 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
             apply(from, message);
         }
 
-        if (!frozen) {
+        if (should_advance) {
             events = core_.engine().wait(elapsed_ms);
             // Kept so a client joining or returning mid-game can rebuild the
             // move list and score it never saw -- see welcome_for.
@@ -299,7 +264,7 @@ void Match::advance_disconnect_countdown(std::chrono::steady_clock::time_point n
     if (tick.expired_for.has_value()) {
         // Grace ran out -> forfeit the match for the player who never came back.
         kfc::model::PieceColor loser = *tick.expired_for;
-        kfc::model::PieceColor winner = opponent_of(loser);
+        kfc::model::PieceColor winner = kfc::model::opposite_of(loser);
         game_over_ = true;
         logger_.log("Match: " + color_name(loser) + " did not return; " + color_name(winner) + " wins by forfeit");
         broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::GameOver{winner}});
@@ -423,7 +388,7 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
     // Deliberately above the Frozen gate: giving up must stay possible while an
     // opponent's grace counts down. Everything else is refused there.
     if (std::holds_alternative<kfc::protocol::Resign>(message)) {
-        kfc::model::PieceColor winner = opponent_of(from);
+        kfc::model::PieceColor winner = kfc::model::opposite_of(from);
         logger_.log("Match: " + color_name(from) + " resigned; " + color_name(winner) + " wins");
         game_over_ = true;
         pending_game_over_ = kfc::protocol::GameOver{winner};

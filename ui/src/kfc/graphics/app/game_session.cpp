@@ -7,6 +7,7 @@
 #include "kfc/graphics/constants.hpp"
 #include "kfc/graphics/io/board_file_loader.hpp"
 #include "kfc/io/board_parser.hpp"
+#include "kfc/model/piece_names.hpp"
 
 namespace kfc::graphics::app {
 
@@ -93,8 +94,7 @@ bool GameSession::connect(kfc::protocol::ClientMessage seating_action) {
         server_link_.reset();
         return false;
     }
-    std::cout << "Connected. Assigned color: "
-              << (server_link_->assigned_color() == kfc::model::PieceColor::White ? "White" : "Black") << "\n";
+    std::cout << "Connected. Assigned color: " << kfc::model::name_of(server_link_->assigned_color()) << "\n";
     view_ = server_link_.get();
     return true;
 }

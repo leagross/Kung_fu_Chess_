@@ -250,6 +250,7 @@ add_executable(kfc_tests
   protocol/tests/unit/test_gameplay_config.cpp
   protocol/tests/unit/test_file_logger.cpp
   server/tests/unit/test_match.cpp
+  server/tests/unit/test_match_scheduler.cpp
   server/tests/unit/test_room_manager.cpp
   server/tests/unit/test_match_audience.cpp
   server/tests/unit/test_client_session.cpp
@@ -262,6 +263,7 @@ add_executable(kfc_tests
   database/tests/unit/test_user_repository.cpp
   database/tests/unit/test_rating_service.cpp
   server/src/kfc/server/match.cpp
+  server/src/kfc/server/match_scheduler.cpp
   server/src/kfc/server/room_manager.cpp
   server/src/kfc/server/match_audience.cpp
   server/src/kfc/server/client_session.cpp
@@ -311,6 +313,7 @@ target_link_libraries(kfc_app PRIVATE kfc_core)
 add_executable(kfc_server
   server/apps/kfc_server/main.cpp
   server/src/kfc/server/match.cpp
+  server/src/kfc/server/match_scheduler.cpp
   server/src/kfc/server/room_manager.cpp
   server/src/kfc/server/match_audience.cpp
   server/src/kfc/server/client_session.cpp

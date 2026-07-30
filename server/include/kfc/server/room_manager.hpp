@@ -13,6 +13,7 @@
 #include "kfc/protocol/gameplay_config.hpp"
 #include "kfc/protocol/messages.hpp"
 #include "kfc/server/match.hpp"
+#include "kfc/server/match_scheduler.hpp"
 
 namespace kfc::protocol {
 class FileLogger;
@@ -32,8 +33,9 @@ using RoomId = int;
 /// A connection is placed in a room the moment it logs in (join_any: fill a
 /// room that still has an open seat, else open a fresh one), and every later
 /// message from that connection is routed back to the same room by id. A room
-/// is torn down -- its tick thread stopped -- once the last player in it has
-/// disconnected, so finished games don't leak threads.
+/// is torn down -- unregistered from the MatchScheduler that was ticking it
+/// -- once the last player in it has disconnected, so finished games don't
+/// leak memory.
 ///
 /// Explicit "create/join this specific room" and a lobby to drive it are a
 /// later stage; this layer is deliberately just auto-matchmaking, so the
@@ -46,10 +48,12 @@ using RoomId = int;
 ///
 /// Threading: IXWebSocket calls these from connection threads. Only the room
 /// table and its per-room seat/connection counters are guarded here; Match's
-/// own methods are already internally synchronized, and the two that can block
-/// or do network I/O (join's Welcome send, on_disconnect's hand-off, stop's
-/// thread join) are called with rooms_mutex_ released, so a slow join never
-/// stalls move routing on the hot path.
+/// own methods are already internally synchronized, and the ones that can
+/// block or do network I/O (join's Welcome send, on_disconnect's hand-off)
+/// are called with rooms_mutex_ released, so a slow join never stalls move
+/// routing on the hot path. Every room's Match is ticked by a MatchScheduler
+/// this RoomManager owns -- see match_scheduler.hpp for why that replaced a
+/// thread per Match.
 class RoomManager {
 public:
     /// board_factory produces a fresh starting Board per room (called once
@@ -130,7 +134,8 @@ public:
 
     /// A connection dropped: ends that room's game in the opponent's favour
     /// (exactly as a resign would -- see Match::on_disconnect) and, once no
-    /// players remain in the room, stops its tick thread and removes it.
+    /// players remain in the room, unregisters it from the scheduler and
+    /// removes it.
     ///
     /// Takes the whole Seat the connection was given, rather than its parts,
     /// because they must agree: a viewer's colour is meaningless and passing it
@@ -143,17 +148,18 @@ public:
     /// Number of rooms currently alive -- for tests and diagnostics.
     [[nodiscard]] std::size_t room_count() const;
 
-    /// Stops every live room's tick thread, and does not return until they have
-    /// all finished. Idempotent -- a stopped Match ignores a second stop().
+    /// Tears down the scheduler backing every room and does not return until
+    /// every one of its worker threads has actually exited -- so no tick can
+    /// still be in progress once this returns. Idempotent -- a second call
+    /// finds the scheduler already gone and does nothing.
     ///
-    /// **Call this before shutting the socket layer down**, not after. A frozen
-    /// match's tick thread broadcasts an OpponentDisconnected every second, and
-    /// broadcasting means calling send() on the transport's sockets. Tearing the
-    /// transport down first leaves those two racing: the shutdown waits for the
-    /// connection threads while a tick thread is still inside a send on a socket
-    /// that is being closed underneath it, and the process deadlocks with every
-    /// game already over. Found by the end-to-end tests, which is the one place
-    /// a real socket is involved.
+    /// **Call this before shutting the socket layer down**, not after. A
+    /// frozen match's tick broadcasts an OpponentDisconnected every second,
+    /// and broadcasting means calling send() on the transport's sockets.
+    /// Tearing the transport down first leaves those two racing: a worker
+    /// thread can still be inside a send on a socket that is being closed
+    /// underneath it. Found by the end-to-end tests, which is the one place a
+    /// real socket is involved.
     ///
     /// The destructor calls this too, for the case where nobody remembered.
     void stop_all();
@@ -189,10 +195,10 @@ private:
         std::string name;
     };
 
-    // Creates a fresh room (a started Match), inserts it, and returns it with
-    // its new id. room_name is the displayable id a named room carries (empty
-    // for a matchmaking room); the Match keeps it so its Welcomes can report it.
-    // Must be called with rooms_mutex_ held.
+    // Creates a fresh room (a Match registered with scheduler_), inserts it,
+    // and returns it with its new id. room_name is the displayable id a named
+    // room carries (empty for a matchmaking room); the Match keeps it so its
+    // Welcomes can report it. Must be called with rooms_mutex_ held.
     Room& open_room(RoomId& id_out, std::string room_name = {});
 
     // A short, unique, say-it-out-loud room id -- the creator has to read it to
@@ -201,17 +207,52 @@ private:
     // with rooms_mutex_ held (it reads named_rooms_).
     std::string generate_room_id();
 
+    // The closest entry in waiting_by_rating_ to rating, if any is within
+    // kMatchmakingRatingGap -- see join_any and the class comment on
+    // waiting_by_rating_. Must be called with rooms_mutex_ held.
+    [[nodiscard]] std::optional<RoomId> closest_waiting_room(int rating) const;
+
+    // Records/forgets that a matchmaking room is the one currently waiting
+    // for an opponent, at this rating. A no-op if id isn't actually in the
+    // index (unmark_waiting only), which is what makes it safe to call from
+    // every reaping path unconditionally rather than needing each call site
+    // to first work out whether this particular room was ever in it (a named
+    // room, for instance, never is). Both must be called with rooms_mutex_
+    // held.
+    void mark_waiting(RoomId id, int rating);
+    void unmark_waiting(RoomId id, int rating);
+
     std::function<kfc::model::Board()> board_factory_;
     kfc::protocol::FileLogger& logger_;
     kfc::protocol::GameplayConfig config_;
     ResultCallback on_result_;
     int disconnect_grace_ms_;
 
+    // Ticks every room's Match -- see match_scheduler.hpp. A pointer (not a
+    // plain member) so stop_all() can actually tear it down and join its
+    // worker threads instead of merely emptying it; scheduler_ is null after
+    // that, which is what makes a second stop_all() call a no-op.
+    std::unique_ptr<MatchScheduler> scheduler_ = std::make_unique<MatchScheduler>();
+
     mutable std::mutex rooms_mutex_;
     std::map<RoomId, Room> rooms_;
     // Name -> room id, for the named Room feature (a room's name is its
     // identity, so it can't collide). Play (join_any) rooms are not named.
     std::map<std::string, RoomId> named_rooms_;
+    // Matchmaking rooms with exactly one seat filled, ordered by that seat's
+    // rating -- every Play-button room join_any might pair a newcomer with,
+    // and nothing else: a named (Create/Join) room never enters this index,
+    // and a matchmaking room leaves it the instant it pairs. join_any used to
+    // find a compatible opponent by scanning every room in rooms_ -- Running,
+    // Finished, named, all of them -- to filter down to the handful actually
+    // waiting; at the five-million-room scale Server_Design.md targets, that
+    // scan (and the single rooms_mutex_ every enqueue() also needs) is
+    // exactly the lock cost this index exists to avoid. Sorted by rating, the
+    // closest match to any newcomer is always one of the two entries
+    // adjacent to lower_bound -- see closest_waiting_room -- so a lookup here
+    // costs O(log w + 1) in the number of rooms actually waiting, never O(all
+    // rooms).
+    std::multimap<int, RoomId> waiting_by_rating_;
     RoomId next_room_id_ = 1;
 };
 

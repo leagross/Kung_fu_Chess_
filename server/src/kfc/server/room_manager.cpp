@@ -1,9 +1,9 @@
 #include "kfc/server/room_manager.hpp"
 
 #include <cstdlib>
+#include <iterator>
 #include <random>
 #include <string>
-#include <vector>
 #include <utility>
 
 #include "kfc/protocol/file_logger.hpp"
@@ -38,21 +38,12 @@ RoomManager::~RoomManager() {
 }
 
 void RoomManager::stop_all() {
-    // The matches are collected under the lock and stopped outside it: stop()
-    // joins a tick thread, and that thread may be part-way through a broadcast
-    // that wants this same table. Holding rooms_mutex_ across the join would be
-    // the deadlock this method exists to avoid, in miniature.
-    std::vector<std::shared_ptr<Match>> live;
-    {
-        std::lock_guard<std::mutex> guard(rooms_mutex_);
-        live.reserve(rooms_.size());
-        for (auto& [id, room] : rooms_) {
-            live.push_back(room.match);
-        }
-    }
-    for (const std::shared_ptr<Match>& match : live) {
-        match->stop();
-    }
+    // Destroying the scheduler joins every one of its worker threads, so this
+    // does not return until nothing is mid-tick anywhere -- no rooms_mutex_
+    // needed for that part, unlike the old per-Match stop(). reset() on an
+    // already-null scheduler_ (a second call) is simply a no-op, which is what
+    // makes this idempotent.
+    scheduler_.reset();
 }
 
 RoomManager::Room& RoomManager::open_room(RoomId& id_out, std::string room_name) {
@@ -61,7 +52,16 @@ RoomManager::Room& RoomManager::open_room(RoomId& id_out, std::string room_name)
     room.match = std::make_shared<Match>(board_factory_(), logger_, config_, on_result_, disconnect_grace_ms_,
                                           kDefaultReleaseDelayMs, room_name);
     room.name = std::move(room_name);
-    room.match->start();
+    // weak_ptr, not shared_ptr: the hook lives inside the Match it wakes, so a
+    // captured shared_ptr would keep it alive forever, itself, via its own
+    // wake hook -- a Match that could never be destroyed.
+    std::weak_ptr<Match> weak_match = room.match;
+    room.match->set_wake_hook([this, weak_match] {
+        if (std::shared_ptr<Match> match = weak_match.lock()) {
+            scheduler_->wake(match);
+        }
+    });
+    scheduler_->add(room.match);
     return rooms_.emplace(id_out, std::move(room)).first->second;
 }
 
@@ -111,6 +111,49 @@ std::string RoomManager::generate_room_id() {
     }
 }
 
+std::optional<RoomId> RoomManager::closest_waiting_room(int rating) const {
+    // Sorted by rating, so nothing farther out in either direction can beat
+    // the two entries immediately adjacent to lower_bound(rating) -- one
+    // lookup and at most two comparisons, whatever w (rooms actually waiting)
+    // is. Ties favour whichever of the two this happens to check first; both
+    // are an equally valid "closest match" (see join_any's own doc comment,
+    // which only promises closest by gap, not a tie-break).
+    std::optional<std::pair<int, RoomId>> best;  // {gap, room}
+    auto consider = [&](std::multimap<int, RoomId>::const_iterator it) {
+        if (it == waiting_by_rating_.end()) {
+            return;
+        }
+        int gap = std::abs(it->first - rating);
+        if (gap <= kfc::database::kMatchmakingRatingGap && (!best.has_value() || gap < best->first)) {
+            best = std::make_pair(gap, it->second);
+        }
+    };
+
+    auto lower = waiting_by_rating_.lower_bound(rating);
+    consider(lower);
+    if (lower != waiting_by_rating_.begin()) {
+        consider(std::prev(lower));
+    }
+    if (!best.has_value()) {
+        return std::nullopt;
+    }
+    return best->second;
+}
+
+void RoomManager::mark_waiting(RoomId id, int rating) {
+    waiting_by_rating_.emplace(rating, id);
+}
+
+void RoomManager::unmark_waiting(RoomId id, int rating) {
+    auto [begin, end] = waiting_by_rating_.equal_range(rating);
+    for (auto it = begin; it != end; ++it) {
+        if (it->second == id) {
+            waiting_by_rating_.erase(it);
+            return;
+        }
+    }
+}
+
 std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& username, int rating, SendFn send,
                                                         CloseFn close) {
     RoomId room_id = 0;
@@ -118,26 +161,20 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
 
-        // Find the waiting room whose lone player is closest in rating and
-        // within the matchmaking gap. A room with two seats already taken is a
-        // game in progress, never a match candidate.
+        std::optional<RoomId> found = closest_waiting_room(rating);
         Room* target = nullptr;
-        int best_gap = kfc::database::kMatchmakingRatingGap + 1;
-        for (auto& [id, room] : rooms_) {
-            if (room.seats_taken != 1) {
-                continue;
-            }
-            int gap = std::abs(room.waiting_rating - rating);
-            if (gap <= kfc::database::kMatchmakingRatingGap && gap < best_gap) {
-                best_gap = gap;
-                target = &room;
-                room_id = id;
-            }
-        }
-        if (target == nullptr) {
+        if (found.has_value()) {
+            room_id = *found;
+            target = &rooms_.at(room_id);
+            // No longer anyone's to be matched with, the instant it's chosen --
+            // whether or not the join below actually succeeds (see the "cannot
+            // happen" undo path further down, which puts it back if it doesn't).
+            unmark_waiting(room_id, target->waiting_rating);
+        } else {
             // No compatible opponent waiting -- open a new room and wait there.
             target = &open_room(room_id);
             target->waiting_rating = rating;
+            mark_waiting(room_id, rating);
             logger_.log("RoomManager: opened room " + std::to_string(room_id) + " (rating " +
                         std::to_string(rating) + " waiting)");
         }
@@ -165,13 +202,19 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
             if (it != rooms_.end()) {
                 --it->second.seats_taken;
                 if (--it->second.connected <= 0) {
+                    unmark_waiting(room_id, it->second.waiting_rating);
                     reaped = std::move(it->second.match);
                     rooms_.erase(it);
+                } else if (it->second.seats_taken == 1) {
+                    // This was the pairing target above, taken out of
+                    // waiting_by_rating_ before the join that just failed --
+                    // still one connected player, so it goes back to waiting.
+                    mark_waiting(room_id, it->second.waiting_rating);
                 }
             }
         }
         if (reaped) {
-            reaped->stop();
+            scheduler_->remove(reaped);
         }
         return std::nullopt;
     }
@@ -293,11 +336,24 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
 }
 
 void RoomManager::enqueue(RoomId room, kfc::model::PieceColor from, kfc::protocol::ClientMessage message) {
-    std::lock_guard<std::mutex> guard(rooms_mutex_);
-    auto it = rooms_.find(room);
-    if (it != rooms_.end()) {
-        it->second.match->enqueue(from, std::move(message));
+    // The busiest call in the whole server -- every command, from every
+    // player, in every room -- so rooms_mutex_ covers only the lookup. Match's
+    // own enqueue() is fast (no I/O), but it now also runs the wake hook,
+    // which reaches into MatchScheduler's own locks (see match_scheduler.hpp);
+    // holding a single mutex shared by every room across that nested locking
+    // would have serialized move routing for the entire server behind it,
+    // exactly the same reason join_any/on_disconnect already release this
+    // lock before touching a Match at all.
+    std::shared_ptr<Match> match;
+    {
+        std::lock_guard<std::mutex> guard(rooms_mutex_);
+        auto it = rooms_.find(room);
+        if (it == rooms_.end()) {
+            return;
+        }
+        match = it->second.match;
     }
+    match->enqueue(from, std::move(message));
 }
 
 void RoomManager::on_disconnect(const Seat& seat) {
@@ -323,8 +379,9 @@ void RoomManager::on_disconnect(const Seat& seat) {
         match->on_disconnect(seat.color);
     }
 
-    // Reap the room if that was its last live connection. The Match is stopped
-    // (which joins its tick thread) only after rooms_mutex_ is released.
+    // Reap the room if that was its last live connection. The Match is
+    // unregistered from the scheduler (never joining anything -- see
+    // MatchScheduler::remove) only after rooms_mutex_ is released.
     std::shared_ptr<Match> reaped;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
@@ -334,13 +391,16 @@ void RoomManager::on_disconnect(const Seat& seat) {
             if (!it->second.name.empty()) {
                 named_rooms_.erase(it->second.name);
             }
+            // Harmless if this room was never in the index (a named room, or
+            // one already paired) -- see unmark_waiting's own doc comment.
+            unmark_waiting(room, it->second.waiting_rating);
             reaped = std::move(it->second.match);
             rooms_.erase(it);
             logger_.log("RoomManager: closed room " + std::to_string(room));
         }
     }
     if (reaped) {
-        reaped->stop();
+        scheduler_->remove(reaped);
     }
 }
 

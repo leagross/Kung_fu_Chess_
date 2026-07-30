@@ -160,7 +160,7 @@ if (KFC_HAVE_OPENCV)
   message(STATUS "OpenCV found -- building the GUI client as well")
 else()
   message(STATUS "OpenCV not found -- building the backend, server and tests only "
-                 "(kfc_gui_app and kfc_mouse_demo are skipped)")
+                 "(kfc_gui_app is skipped)")
 endif()
 
 # Backend: the headless, OpenCV-free business logic (model/rules/realtime/
@@ -429,22 +429,5 @@ if (KFC_HAVE_OPENCV)
       $<TARGET_FILE_DIR:kfc_gui_app>
   )
   endif()
-
-  # Standalone mouse-coordinate verification tool -- not part of the real game,
-  # the debugging step the graphics lecture recommended before wiring pixel
-  # clicks into Controller for real.
-  add_executable(kfc_mouse_demo
-    ui/apps/kfc_mouse_demo/main.cpp
-  )
-  target_link_libraries(kfc_mouse_demo PRIVATE kfc_graphics)
-
-  if (WIN32)
-  add_custom_command(TARGET kfc_mouse_demo POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      $<TARGET_FILE:opencv_world451>
-      $<TARGET_FILE_DIR:kfc_mouse_demo>
-  )
-  endif()
-
 
 endif()

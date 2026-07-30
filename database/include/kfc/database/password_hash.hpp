@@ -46,13 +46,6 @@ inline constexpr unsigned int kParallelism = 1;  // see ARGON2_NO_THREADS in CMa
 /// credential must never authenticate anyone.
 [[nodiscard]] bool verify_password(const std::string& password, const std::string& stored);
 
-/// Whether stored was produced by hash_password rather than being one of the
-/// old salted-SHA-256 credentials. Lets the account store keep verifying
-/// accounts created before this existed, and quietly upgrade each one the next
-/// time its owner proves they know the password -- so nobody is locked out and
-/// nothing has to be migrated in a batch.
-[[nodiscard]] bool is_argon2(const std::string& stored);
-
 }  // namespace password_hash
 
 }  // namespace kfc::database

@@ -15,7 +15,6 @@ SQLite for something else would touch nothing outside this folder.
 | `user_store` | **`IUserStore`** — what everything above sees: authenticate, read a rating, re-rate atomically. Which database is behind it is not visible from here. |
 | `user_repository` | The SQLite implementation of it. Registers a username on first sight, verifies the password on every visit after that, and reads/writes ratings. Internally synchronized — the server calls it from several connection threads at once. |
 | `password_hash` | Argon2id hashing and verification — what a stored credential is, and how one is checked. |
-| `sha256` | A self-contained SHA-256. No longer the password hash; kept to verify (and upgrade) accounts created before Argon2. |
 | `elo` | The rating maths and its constants: starting rating 1200, K-factor 32, ±100 matchmaking window, and the flat 10-point forfeit penalty. |
 | `rating_service` | Applies a finished game's outcome to the stored ratings — the normal ELO exchange for a decisive result or a draw, the flat penalty for a disconnect. |
 
@@ -45,14 +44,6 @@ takes cannot reveal how much of a guess was right.
 
 The cost is deliberate and visible: the test suite went from 13 to 27 seconds
 when this landed. That is the feature working.
-
-### Accounts made before this
-
-They still hold a salted SHA-256, and are still verified that way — otherwise a
-better hash would have locked every existing player out of their own account.
-Each one is **upgraded in place on the next successful login**, which is the only
-moment the plaintext is ever in hand. No batch migration, no downtime; the weak
-hashes drain away as people come back. `sha256.cpp` stays for exactly this.
 
 ## The database file
 
@@ -105,7 +96,6 @@ dependency visible.
 ## Tests
 
 `tests/unit/` covers the repository (registration, wrong password, rating
-persistence, account isolation), SHA-256 against known vectors, the ELO curve
-against the spec's own worked examples, and the rating service end to end. Each
-test builds a throwaway database in a temp directory, so they never touch the
-real one.
+persistence, account isolation), the ELO curve against the spec's own worked
+examples, and the rating service end to end. Each test builds a throwaway
+database in a temp directory, so they never touch the real one.

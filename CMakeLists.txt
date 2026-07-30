@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-# C as well as C++: the vendored Argon2 (third_party/argon2) is C.
+# C as well as C++: Argon2 (fetched below) is C.
 project(kfc LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -51,27 +51,35 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SQLiteCpp)
 
-# Argon2 -- the password hash (see database/README.md for why a single SHA-256
-# is not one). Committed under third_party/ rather than downloaded: upstream
-# ships a Makefile and no CMake build, so the target has to be declared by hand
-# either way, and a build that cannot produce the credential-hashing code
-# because a download failed is not an acceptable failure mode. It is 126 KB.
+# Argon2 -- the password hash (see database/README.md for why not a plain
+# SHA-256). Fetched like every other dependency here; it just has no CMake
+# build of its own (upstream ships a Makefile), so the library is declared by
+# hand below, pointed at argon2_SOURCE_DIR instead of a downloaded
+# CMakeLists.txt. SOURCE_SUBDIR names a directory that does not exist, the same
+# guard miniaudio uses below -- there is nothing to add_subdirectory here, only
+# source to compile ourselves.
 #
 # ref.c, not opt.c: the portable compression function, so there is no
 # architecture detection to get wrong. ARGON2_NO_THREADS because we hash with
 # parallelism 1 -- the threading support would only add a pthread dependency for
 # code that never runs.
-set(ARGON2_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/argon2)
-add_library(kfc_argon2 STATIC
-  ${ARGON2_ROOT}/src/argon2.c
-  ${ARGON2_ROOT}/src/core.c
-  ${ARGON2_ROOT}/src/encoding.c
-  ${ARGON2_ROOT}/src/ref.c
-  ${ARGON2_ROOT}/src/blake2/blake2b.c
-  ${ARGON2_ROOT}/src/thread.c
+FetchContent_Declare(
+  argon2
+  URL https://github.com/P-H-C/phc-winner-argon2/archive/refs/tags/20190702.zip
+  SOURCE_SUBDIR do-not-configure
 )
-target_include_directories(kfc_argon2 PUBLIC ${ARGON2_ROOT}/include)
-target_include_directories(kfc_argon2 PRIVATE ${ARGON2_ROOT}/src)
+FetchContent_MakeAvailable(argon2)
+
+add_library(kfc_argon2 STATIC
+  ${argon2_SOURCE_DIR}/src/argon2.c
+  ${argon2_SOURCE_DIR}/src/core.c
+  ${argon2_SOURCE_DIR}/src/encoding.c
+  ${argon2_SOURCE_DIR}/src/ref.c
+  ${argon2_SOURCE_DIR}/src/blake2/blake2b.c
+  ${argon2_SOURCE_DIR}/src/thread.c
+)
+target_include_directories(kfc_argon2 PUBLIC ${argon2_SOURCE_DIR}/include)
+target_include_directories(kfc_argon2 PRIVATE ${argon2_SOURCE_DIR}/src)
 target_compile_definitions(kfc_argon2 PRIVATE ARGON2_NO_THREADS)
 if (MSVC)
   # Upstream C, built as-is: its warnings are not ours to fix, and treating them
@@ -259,7 +267,6 @@ add_executable(kfc_tests
   ui/tests/unit/test_match_overlay.cpp
   ui/src/kfc/graphics/app/match_overlay.cpp
   database/tests/unit/test_elo.cpp
-  database/tests/unit/test_sha256.cpp
   database/tests/unit/test_user_repository.cpp
   database/tests/unit/test_rating_service.cpp
   server/src/kfc/server/match.cpp
@@ -271,7 +278,6 @@ add_executable(kfc_tests
   server/src/kfc/server/websocket_game_server.cpp
   server/src/kfc/server/disconnect_watch.cpp
   database/src/kfc/database/elo.cpp
-  database/src/kfc/database/sha256.cpp
   database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
   database/src/kfc/database/rating_service.cpp
@@ -321,7 +327,6 @@ add_executable(kfc_server
   server/src/kfc/server/disconnect_watch.cpp
   server/src/kfc/server/websocket_game_server.cpp
   database/src/kfc/database/elo.cpp
-  database/src/kfc/database/sha256.cpp
   database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
   database/src/kfc/database/rating_service.cpp

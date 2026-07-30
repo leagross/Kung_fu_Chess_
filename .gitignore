@@ -44,15 +44,7 @@ CMakeUserPresets.json
 # the OpenCV section of CMakeLists.txt); every other platform uses
 # find_package(OpenCV) against a system install and needs none of it.
 #
-# Written as third_party/* rather than third_party/, because git will not look
-# inside an excluded *directory* -- so with the latter the re-inclusion below
-# could never match.
 third_party/*
-
-# ...except Argon2, which *is* committed: 126 KB of portable C, and the password
-# hash must not be the thing a build cannot produce because a download failed.
-# See third_party/argon2/README.md.
-!third_party/argon2/
 
 # Generated reference and test reports -- rebuilt from the source, not source.
 docs/

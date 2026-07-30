@@ -38,6 +38,13 @@ std::vector<std::uint8_t> random_salt() {
     return salt;
 }
 
+// Guards verify_password against anything that isn't one of hash_password's
+// own PHC strings, so a corrupt or unrecognised `stored` value fails closed
+// (never authenticated) instead of being handed to argon2id_verify.
+bool is_argon2(const std::string& stored) {
+    return stored.rfind("$argon2id$", 0) == 0;
+}
+
 }  // namespace
 
 std::string hash_password(const std::string& password) {
@@ -71,10 +78,6 @@ bool verify_password(const std::string& password, const std::string& stored) {
     // of `stored`, and compares in constant time, so a wrong guess cannot be
     // narrowed down by how long the answer took.
     return argon2id_verify(stored.c_str(), password.data(), password.size()) == ARGON2_OK;
-}
-
-bool is_argon2(const std::string& stored) {
-    return stored.rfind("$argon2id$", 0) == 0;
 }
 
 }  // namespace password_hash

@@ -7,7 +7,6 @@
 
 #include "kfc/database/elo.hpp"
 #include "kfc/database/password_hash.hpp"
-#include "kfc/database/sha256.hpp"
 
 namespace kfc::database {
 
@@ -26,32 +25,15 @@ UserRepository::~UserRepository() = default;
 
 UserRepository::AuthOutcome UserRepository::authenticate(const std::string& username, const std::string& password) {
     std::lock_guard<std::mutex> guard(mutex_);
-    SQLite::Statement lookup(*db_, "SELECT salt, password_hash, rating FROM users WHERE username = ?");
+    SQLite::Statement lookup(*db_, "SELECT password_hash, rating FROM users WHERE username = ?");
     lookup.bind(1, username);
 
     if (lookup.executeStep()) {
-        std::string salt = lookup.getColumn(0).getString();
-        std::string stored = lookup.getColumn(1).getString();
-        int rating = lookup.getColumn(2).getInt();
+        std::string stored = lookup.getColumn(0).getString();
+        int rating = lookup.getColumn(1).getInt();
 
-        // An account created before Argon2 still holds a salted SHA-256, and is
-        // checked the old way -- otherwise adding a better hash would lock every
-        // existing player out of their own account.
-        bool legacy = !password_hash::is_argon2(stored);
-        bool correct = legacy ? sha256_hex(salt + password) == stored
-                              : password_hash::verify_password(password, stored);
-        if (!correct) {
+        if (!password_hash::verify_password(password, stored)) {
             return AuthOutcome{false, "wrong_password", 0, false};
-        }
-        if (legacy) {
-            // Upgraded here because this is the only moment the plaintext is
-            // ever in hand. Per successful login rather than as a batch
-            // migration: nobody is locked out, nothing needs downtime, and the
-            // weak hashes simply drain away as people come back.
-            SQLite::Statement upgrade(*db_, "UPDATE users SET salt = '', password_hash = ? WHERE username = ?");
-            upgrade.bind(1, password_hash::hash_password(password));
-            upgrade.bind(2, username);
-            upgrade.exec();
         }
         return AuthOutcome{true, "", rating, false};
     }

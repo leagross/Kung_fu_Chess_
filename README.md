@@ -25,7 +25,6 @@ rooms and spectators.
 | `ui/` | OpenCV rendering, sprite animation, mouse input, and the networked client. | [ui/README.md](ui/README.md) |
 | `assets/` | Piece sprites, board and background images, sound effects. | [assets/README.md](assets/README.md) |
 | `config/` | `gameplay.json` — the speeds, cooldowns and piece values both sides read. | — |
-| `third_party/argon2/` | The vendored Argon2 reference implementation — the password hash. | [third_party/argon2/README.md](third_party/argon2/README.md) |
 
 **[Server_Design.md](Server_Design.md)** — how this server would have to change
 to carry 100 M registered players and 10 M concurrent ones: which database,

@@ -4,6 +4,7 @@
 // runs it. Everything about *how* players connect lives in WebSocketGameServer,
 // *which game* a player is in lives in RoomManager, and *what the game does*
 // lives in Match.
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -17,6 +18,7 @@
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/protocol/gameplay_config.hpp"
 #include "kfc/database/rating_service.hpp"
+#include "kfc/server/http_api.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/database/user_repository.hpp"
 #include "kfc/server/session_registry.hpp"
@@ -25,6 +27,7 @@
 namespace {
 
 constexpr std::string_view kLogLevelFlag = "--log-level=";
+constexpr std::string_view kHttpPortFlag = "--http-port=";
 
 // A port number, or std::nullopt if the argument is not one. Written out rather
 // than calling std::stoi directly, which throws on anything unparsable and
@@ -60,6 +63,9 @@ std::vector<std::string> read_board_lines(const std::string& path) {
 
 int main(int argc, char** argv) {
     int port = 8080;
+    // The register/login/history HTTP API's port -- a second listening socket
+    // (see http_api.hpp for why it can't share the WebSocket port).
+    int http_port = 8081;
     // Everything by default, including the message-by-message traffic the spec
     // asks to be able to read afterwards. --log-level=info turns that traffic
     // off and leaves the events, for a long-running server where the dump is
@@ -79,11 +85,21 @@ int main(int argc, char** argv) {
             log_level = *parsed;
             continue;
         }
+        if (arg.rfind(kHttpPortFlag, 0) == 0) {
+            std::optional<int> parsed_http_port = parse_port(arg.substr(kHttpPortFlag.size()));
+            if (!parsed_http_port.has_value()) {
+                std::cerr << "Invalid --http-port value '" << arg.substr(kHttpPortFlag.size()) << "'\n";
+                return 1;
+            }
+            http_port = *parsed_http_port;
+            continue;
+        }
         // The only positional argument. Rejected explicitly rather than left to
         // std::stoi, which would throw out of main on a typo.
         std::optional<int> parsed_port = parse_port(arg);
         if (!parsed_port.has_value()) {
-            std::cerr << "Usage: kfc_server [port] [--log-level=debug|info|warning|error]\n";
+            std::cerr << "Usage: kfc_server [port] [--http-port=8081] "
+                         "[--log-level=debug|info|warning|error]\n";
             return 1;
         }
         port = *parsed_port;
@@ -111,7 +127,8 @@ int main(int argc, char** argv) {
         // match's tick thread -- UserRepository is internally synchronized).
         kfc::database::UserRepository users("kfc_users.db");
         auto on_result = [&users](kfc::server::GameEndReason reason, std::optional<kfc::model::PieceColor> winner,
-                                  const std::string& white, const std::string& black) {
+                                  const std::string& white, const std::string& black,
+                                  std::chrono::system_clock::time_point started_at) {
             if (reason == kfc::server::GameEndReason::Disconnect) {
                 // The winner is the opponent, so the loser (who dropped) is the
                 // other colour -- dock them the flat forfeit penalty.
@@ -120,6 +137,16 @@ int main(int argc, char** argv) {
             } else {
                 kfc::database::apply_game_result(users, winner, white, black);
             }
+
+            std::optional<std::string> winner_username;
+            if (winner.has_value()) {
+                winner_username = *winner == kfc::model::PieceColor::White ? white : black;
+            }
+            const char* end_reason = reason == kfc::server::GameEndReason::Decisive  ? "decisive"
+                                     : reason == kfc::server::GameEndReason::Draw    ? "draw"
+                                                                                     : "disconnect";
+            users.record_game(white, black, winner_username, end_reason, started_at,
+                              std::chrono::system_clock::now());
         };
 
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result);
@@ -133,8 +160,18 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        // Register/login/history -- a second, independent listening socket; see
+        // http_api.hpp for why it can't share the WebSocket server's port.
+        kfc::server::HttpApiServer http_server(http_port, users, logger);
+        if (!http_server.listen()) {
+            std::cerr << "Failed to listen on HTTP port " << http_port << " (see kfc_server.log)\n";
+            return 1;
+        }
+
         server.start();
-        std::cout << "kfc_server listening on ws://localhost:" << port << "\n";
+        http_server.start();
+        std::cout << "kfc_server listening on ws://localhost:" << port << ", http://localhost:" << http_port
+                  << "\n";
         server.wait();
 
         // Shutdown order matters, and it is the opposite of the declaration
@@ -143,7 +180,9 @@ int main(int argc, char** argv) {
         // broadcasting a disconnect countdown into the very sockets being closed
         // underneath it, and the process can hang with every game already over.
         // Rooms go quiet first; the socket layer comes down after, as this scope
-        // exits. See RoomManager::stop_all.
+        // exits. See RoomManager::stop_all. http_server has no match threads
+        // behind it, so its own stop order is not load-bearing the same way.
+        http_server.stop();
         rooms.stop_all();
     } catch (const std::exception& e) {
         logger.log(kfc::protocol::LogLevel::Error, std::string("Fatal: ") + e.what());

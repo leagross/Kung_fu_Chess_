@@ -34,6 +34,7 @@ Match::Match(kfc::model::Board board, kfc::protocol::FileLogger& logger, kfc::pr
       core_(std::move(board), standard_policy_, jump_policy_, speed_provider_, config_.meters_per_cell),
       logger_(logger),
       on_result_(std::move(on_result)),
+      started_at_(std::chrono::system_clock::now()),
       release_delay_ms_(release_delay_ms),
       room_name_(std::move(room_name)),
       disconnect_watch_(disconnect_grace_ms) {}
@@ -464,7 +465,7 @@ void Match::report_result(GameEndReason reason, std::optional<kfc::model::PieceC
     }
     result_reported_ = true;
     on_result_(reason, winner, audience_.username_of(kfc::model::PieceColor::White),
-               audience_.username_of(kfc::model::PieceColor::Black));
+               audience_.username_of(kfc::model::PieceColor::Black), started_at_);
 }
 
 void Match::broadcast_and_log(const kfc::protocol::ServerMessage& message) {

@@ -263,6 +263,7 @@ add_executable(kfc_tests
   server/tests/unit/test_match_audience.cpp
   server/tests/unit/test_client_session.cpp
   server/tests/unit/test_session_registry.cpp
+  server/tests/unit/test_http_api.cpp
   server/tests/integration/test_websocket_end_to_end.cpp
   ui/tests/unit/test_match_overlay.cpp
   ui/src/kfc/graphics/app/match_overlay.cpp
@@ -277,6 +278,7 @@ add_executable(kfc_tests
   server/src/kfc/server/session_registry.cpp
   server/src/kfc/server/websocket_game_server.cpp
   server/src/kfc/server/disconnect_watch.cpp
+  server/src/kfc/server/http_api.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
@@ -326,6 +328,7 @@ add_executable(kfc_server
   server/src/kfc/server/session_registry.cpp
   server/src/kfc/server/disconnect_watch.cpp
   server/src/kfc/server/websocket_game_server.cpp
+  server/src/kfc/server/http_api.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp

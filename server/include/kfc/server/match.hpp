@@ -34,12 +34,14 @@ namespace kfc::server {
 enum class GameEndReason { Decisive, Draw, Disconnect };
 
 /// Called exactly once when a match is decided: how it ended, the winner
-/// (std::nullopt for a draw), and both players' usernames. This is the hook
-/// RoomManager uses to apply the rating change (ELO or forfeit penalty); Match
-/// itself stays rating-agnostic, so a Match built without one (tests,
-/// local-only play) simply reports nothing.
+/// (std::nullopt for a draw), both players' usernames, and when the match
+/// started (so a caller can persist game history, not just adjust ratings).
+/// This is the hook RoomManager uses to apply the rating change (ELO or
+/// forfeit penalty); Match itself stays rating-agnostic, so a Match built
+/// without one (tests, local-only play) simply reports nothing.
 using ResultCallback = std::function<void(GameEndReason reason, std::optional<kfc::model::PieceColor> winner,
-                                          const std::string& white_username, const std::string& black_username)>;
+                                          const std::string& white_username, const std::string& black_username,
+                                          std::chrono::system_clock::time_point started_at)>;
 
 /// What a match is doing right now, and therefore what is allowed.
 ///
@@ -343,6 +345,11 @@ private:
     // even though game-over is latched on the tick thread. tick-thread-only.
     ResultCallback on_result_;
     bool result_reported_ = false;
+
+    // Wall-clock time this Match was constructed, i.e. when the room's game
+    // began -- handed to on_result_ so a caller can record a game's duration,
+    // not just its outcome. Set once at construction, never written again.
+    std::chrono::system_clock::time_point started_at_;
 
     // How long after the match is decided every participant is released.
     int release_delay_ms_;

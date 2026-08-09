@@ -53,6 +53,11 @@ docs/
 # the game actually plays. Kept locally as spares, not worth versioning.
 assets/sounds/moresound/
 
+# Local environment overrides, if any get added later. Nothing in compose.yaml
+# reads one today (kfc_server takes its config from CLI args), but committing
+# one by accident is the kind of mistake worth guarding against regardless.
+.env
+
 # ---------------------------------------------------------------------------
 # Editors / IDEs / OS clutter
 # ---------------------------------------------------------------------------

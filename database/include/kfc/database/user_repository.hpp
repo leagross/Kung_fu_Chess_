@@ -1,11 +1,13 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "kfc/database/user_store.hpp"
 
@@ -14,6 +16,20 @@ class Database;
 }
 
 namespace kfc::database {
+
+/// One finished game, as recorded for GET /api/history/{username}. Lives
+/// alongside UserRepository rather than on IUserStore: history is a concrete,
+/// SQLite-specific extra the HTTP API needs, not part of the narrow
+/// authenticate/rate contract every account-store implementation must offer.
+struct GameRecord {
+    long long id = 0;
+    std::string white_username;
+    std::string black_username;
+    std::optional<std::string> winner_username;  // nullopt = draw
+    std::string end_reason;                       // "decisive" | "draw" | "disconnect"
+    std::string started_at;                       // ISO-8601 UTC, ready for JSON
+    std::string ended_at;                          // ISO-8601 UTC, ready for JSON
+};
 
 /// Server-side account store, backed by a single SQLite file (the CTD SERVER
 /// spec's "SQLI Database ... קובץ בודד, לא צריך התקנות"). One row per user: a
@@ -74,6 +90,22 @@ public:
     /// The one-player form of rerate_pair, for an adjustment that depends on
     /// the player's current rating (a forfeit penalty). False if unknown.
     [[nodiscard]] bool rerate(const std::string& username, const std::function<int(int)>& compute) override;
+
+    /// True if username has an account. Unlike authenticate(), never creates
+    /// one -- this is what lets the HTTP API's register/login tell "no such
+    /// user" apart from "wrong password" without changing authenticate()'s
+    /// own auto-register behaviour, which the WebSocket login flow relies on.
+    [[nodiscard]] bool user_exists(const std::string& username);
+
+    /// Persists one finished game. winner_username is std::nullopt for a draw.
+    void record_game(const std::string& white_username, const std::string& black_username,
+                     std::optional<std::string> winner_username, const std::string& end_reason,
+                     std::chrono::system_clock::time_point started_at,
+                     std::chrono::system_clock::time_point ended_at);
+
+    /// Every game username played as either colour, newest ended_at first.
+    /// Empty (not an error) for an unknown username.
+    [[nodiscard]] std::vector<GameRecord> history_for(const std::string& username);
 
 private:
     // Both assume mutex_ is already held: the compound operations above must do

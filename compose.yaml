@@ -1,20 +1,24 @@
-# One service today. The point of writing it now, before there is anything to
-# orchestrate, is that "how do I run this?" becomes one command -- and that when
-# Server_Design.md's split into gateway / game server / matchmaker happens, the
-# shape to add them to already exists.
+# kfc_server, one binary, one SQLite file. register/login/history is served
+# from the same process as the WebSocket game protocol (see
+# server/include/kfc/server/http_api.hpp) -- there used to be a second,
+# Java/Spring Boot "api-gateway" service with its own PostgreSQL here (see
+# Microservices_Design.md's history), folded back in on purpose so there is
+# exactly one account store, not two.
 
 services:
   server:
     build: .
     image: kfc-server
     ports:
-      # host:container. The server takes its port as argv[1] (see CMD), so
+      # host:container. The server takes its ports from argv (see CMD), so
       # changing the container side means changing both.
-      - "8080:8080"
+      - "8080:8080"  # WebSocket game protocol
+      - "8081:8081"  # register/login/history (HTTP+JSON)
     volumes:
-      # Accounts, ratings and the log. Without this every `docker compose up`
-      # would start from an empty user table -- the container filesystem does
-      # not survive being replaced, and replacing containers is the whole idea.
+      # Accounts, ratings, game history and the log. Without this every
+      # `docker compose up` would start from an empty database -- the
+      # container filesystem does not survive being replaced, and replacing
+      # containers is the whole idea.
       - kfc-data:/data
     restart: unless-stopped
 

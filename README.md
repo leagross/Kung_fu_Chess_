@@ -8,7 +8,8 @@ board only changes at the instant it arrives. Capturing a king ends the game.
 Built in modern **C++20** with a test-first (TDD) workflow, and split into
 layers that each build and test on their own. Play is local (one keyboard) or
 networked through a WebSocket server with accounts, ELO matchmaking, named
-rooms and spectators.
+rooms and spectators. Register/login/match-history is a plain HTTP+JSON API
+served from the same process, alongside the WebSocket game protocol.
 
 **398 tests** cover the logic, protocol, database and server.
 
@@ -30,6 +31,13 @@ rooms and spectators.
 to carry 100 M registered players and 10 M concurrent ones: which database,
 how the work splits across containers, what the traffic actually comes to, and
 what a 60-second game does to a deployment.
+
+**[Microservices_Design.md](Microservices_Design.md)** — the finer split of
+that design into six named components (API Gateway, WebSocket Gateway,
+Matchmaker, Game Allocator, Game Server Shards, Observability), one language
+per component and why, and an honest line between what's built (register/
+login/history folded into `kfc_server` itself, over HTTP+JSON) and what's
+still only a design.
 
 Dependencies point one way only: `ui` and `server` depend on `protocol` and
 `logic`; `server` depends on `database`; `logic` depends on nothing. That is why
@@ -104,8 +112,10 @@ but Docker itself:
 docker compose up
 ```
 
-That builds a Release image and serves `ws://localhost:8080`. Accounts, ratings
-and the log live in a named volume, so they survive the container being replaced
+That builds a Release image and serves `ws://localhost:8080` (the game
+protocol) and `http://localhost:8081` (register/login/history — see
+`server/include/kfc/server/http_api.hpp`). Accounts, ratings, game history and
+the log live in a named volume, so they survive the container being replaced
 — which is the point, since replacing containers is how a deploy works.
 
 The runtime image carries the server, two data files and libstdc++, and nothing
@@ -130,7 +140,7 @@ It logs every protocol message to `kfc_server.log`. For a long run where that
 dump is more disk than it is worth, keep the events and drop the traffic:
 
 ```sh
-./build/Debug/kfc_server 8080 --log-level=info
+./build/Debug/kfc_server 8080 --http-port=8081 --log-level=info
 ```
 
 Then launch a client per player, **each with its own username**. The username and

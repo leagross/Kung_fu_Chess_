@@ -650,7 +650,7 @@ TEST(MatchDisconnectTest, ForfeitReportsTheDisconnectReasonToTheResultHook) {
     kfc::server::GameEndReason reason = kfc::server::GameEndReason::Draw;
     std::optional<PieceColor> winner;
     auto on_result = [&](kfc::server::GameEndReason r, std::optional<PieceColor> w, const std::string&,
-                         const std::string&) {
+                         const std::string&, std::chrono::system_clock::time_point) {
         std::lock_guard<std::mutex> guard(result_mutex);
         reason = r;
         winner = w;

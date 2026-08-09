@@ -55,4 +55,5 @@ RUN chown kfc:kfc /data
 USER kfc
 
 EXPOSE 8080
-CMD ["kfc_server", "8080"]
+EXPOSE 8081
+CMD ["kfc_server", "8080", "--http-port=8081"]

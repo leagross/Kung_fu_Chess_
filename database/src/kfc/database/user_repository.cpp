@@ -1,6 +1,8 @@
 #include "kfc/database/user_repository.hpp"
 
 
+#include <format>
+
 #include <SQLiteCpp/Database.h>
 #include <SQLiteCpp/Statement.h>
 #include <SQLiteCpp/Transaction.h>
@@ -9,6 +11,16 @@
 #include "kfc/database/password_hash.hpp"
 
 namespace kfc::database {
+
+namespace {
+
+// UTC, second precision -- e.g. "2026-08-09T14:03:21Z". Matches what the Java
+// api-gateway this replaces serialized java.time.Instant as.
+std::string to_iso8601(std::chrono::system_clock::time_point tp) {
+    return std::format("{:%Y-%m-%dT%H:%M:%SZ}", std::chrono::floor<std::chrono::seconds>(tp));
+}
+
+}  // namespace
 
 UserRepository::UserRepository(const std::string& db_path)
     : db_(std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)) {
@@ -19,6 +31,18 @@ UserRepository::UserRepository(const std::string& db_path)
         "  password_hash TEXT NOT NULL,"
         "  rating INTEGER NOT NULL"
         ")");
+    db_->exec(
+        "CREATE TABLE IF NOT EXISTS games ("
+        "  id              INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  white_username  TEXT NOT NULL,"
+        "  black_username  TEXT NOT NULL,"
+        "  winner_username TEXT,"
+        "  end_reason      TEXT NOT NULL,"
+        "  started_at      TEXT NOT NULL,"
+        "  ended_at        TEXT NOT NULL"
+        ")");
+    db_->exec("CREATE INDEX IF NOT EXISTS idx_games_white ON games(white_username)");
+    db_->exec("CREATE INDEX IF NOT EXISTS idx_games_black ON games(black_username)");
 }
 
 UserRepository::~UserRepository() = default;
@@ -111,6 +135,61 @@ bool UserRepository::rerate(const std::string& username, const std::function<int
     write_rating(username, compute(*before));
     transaction.commit();
     return true;
+}
+
+bool UserRepository::user_exists(const std::string& username) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    SQLite::Statement query(*db_, "SELECT 1 FROM users WHERE username = ? LIMIT 1");
+    query.bind(1, username);
+    return query.executeStep();
+}
+
+void UserRepository::record_game(const std::string& white_username, const std::string& black_username,
+                                 std::optional<std::string> winner_username, const std::string& end_reason,
+                                 std::chrono::system_clock::time_point started_at,
+                                 std::chrono::system_clock::time_point ended_at) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    SQLite::Statement insert(*db_,
+                             "INSERT INTO games (white_username, black_username, winner_username, end_reason, "
+                             "started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)");
+    insert.bind(1, white_username);
+    insert.bind(2, black_username);
+    if (winner_username.has_value()) {
+        insert.bind(3, *winner_username);
+    } else {
+        insert.bind(3);  // NULL -- a draw
+    }
+    insert.bind(4, end_reason);
+    insert.bind(5, to_iso8601(started_at));
+    insert.bind(6, to_iso8601(ended_at));
+    insert.exec();
+}
+
+std::vector<GameRecord> UserRepository::history_for(const std::string& username) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    SQLite::Statement query(*db_,
+                            "SELECT id, white_username, black_username, winner_username, end_reason, "
+                            "started_at, ended_at FROM games "
+                            "WHERE white_username = ? OR black_username = ? "
+                            "ORDER BY ended_at DESC");
+    query.bind(1, username);
+    query.bind(2, username);
+
+    std::vector<GameRecord> games;
+    while (query.executeStep()) {
+        GameRecord game;
+        game.id = query.getColumn(0).getInt64();
+        game.white_username = query.getColumn(1).getString();
+        game.black_username = query.getColumn(2).getString();
+        if (!query.getColumn(3).isNull()) {
+            game.winner_username = query.getColumn(3).getString();
+        }
+        game.end_reason = query.getColumn(4).getString();
+        game.started_at = query.getColumn(5).getString();
+        game.ended_at = query.getColumn(6).getString();
+        games.push_back(std::move(game));
+    }
+    return games;
 }
 
 }  // namespace kfc::database

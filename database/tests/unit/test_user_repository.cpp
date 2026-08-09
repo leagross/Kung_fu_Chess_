@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -138,4 +140,47 @@ TEST(UserRepositoryTest, AccountsAreIndependent) {
     EXPECT_FALSE(repo.authenticate("alice", "bpw").ok);
     repo.set_rating("alice", 1300);
     EXPECT_EQ(*repo.rating_of("bob"), kStartingRating);
+}
+
+TEST(UserRepositoryTest, UserExistsIsFalseUntilRegisteredAndDoesNotRegister) {
+    UserRepository repo(fresh_db_path());
+
+    EXPECT_FALSE(repo.user_exists("alice"));
+    EXPECT_FALSE(repo.rating_of("alice").has_value())
+        << "user_exists must not have side-effected a registration, unlike authenticate()";
+
+    repo.authenticate("alice", "hunter2");
+    EXPECT_TRUE(repo.user_exists("alice"));
+}
+
+TEST(UserRepositoryTest, HistoryForUnknownUserIsEmptyNotAnError) {
+    UserRepository repo(fresh_db_path());
+    EXPECT_TRUE(repo.history_for("nobody").empty());
+}
+
+TEST(UserRepositoryTest, RecordGameShowsUpForBothPlayersNewestFirst) {
+    using namespace std::chrono;
+
+    UserRepository repo(fresh_db_path());
+    auto t0 = system_clock::now();
+
+    repo.record_game("alice", "bob", "alice", "decisive", t0, t0 + seconds(30));
+    repo.record_game("alice", "carol", std::nullopt, "draw", t0 + seconds(60), t0 + seconds(90));
+
+    std::vector<kfc::database::GameRecord> alice_games = repo.history_for("alice");
+    ASSERT_EQ(alice_games.size(), 2u);
+    // Newest ended_at first.
+    EXPECT_EQ(alice_games[0].black_username, "carol");
+    EXPECT_FALSE(alice_games[0].winner_username.has_value()) << "a draw must serialize winner as absent";
+    EXPECT_EQ(alice_games[0].end_reason, "draw");
+    EXPECT_EQ(alice_games[1].black_username, "bob");
+    ASSERT_TRUE(alice_games[1].winner_username.has_value());
+    EXPECT_EQ(*alice_games[1].winner_username, "alice");
+    EXPECT_EQ(alice_games[1].end_reason, "decisive");
+
+    // bob only played one of the two games -- found via black_username, same
+    // as alice was found via white_username above.
+    std::vector<kfc::database::GameRecord> bob_games = repo.history_for("bob");
+    ASSERT_EQ(bob_games.size(), 1u);
+    EXPECT_EQ(bob_games[0].white_username, "alice");
 }

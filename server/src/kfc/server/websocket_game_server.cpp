@@ -30,6 +30,13 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
             return;
         }
 
+        // Off by default in IXWebSocket -- turned on here so a connection
+        // that sends nothing at all (never logs in, or hangs mid-handshake
+        // from the client's side) is eventually closed instead of held open
+        // forever. This is independent of ClientSession's own message-rate
+        // limit, which bounds a connection sending *too much*, not too little.
+        socket->setPingInterval(kIdlePingIntervalSecs);
+
         // Everything a connection does lives in its ClientSession; all this
         // callback owns is the socket underneath it. The session is reached
         // only through these two lambdas, which is what keeps IXWebSocket out

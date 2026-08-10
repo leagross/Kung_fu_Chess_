@@ -169,6 +169,75 @@ TEST(FileLoggerTest, AppendsRatherThanTruncatingAnExistingLog) {
     EXPECT_NE(contents.find("from the second run"), std::string::npos);
 }
 
+// --- Rotation ---
+
+TEST(FileLoggerTest, RotatesToDotOneOncePastTheSizeCapAndStartsFresh) {
+    std::filesystem::path path = fresh_log_path();
+    std::filesystem::path rotated = path;
+    rotated += ".1";
+    std::filesystem::remove(rotated);
+
+    // Each formatted line here is ~37 bytes -- one alone stays under 50, two
+    // together push the file over it.
+    FileLogger logger(path, LogLevel::Debug, /*max_bytes=*/50);
+    logger.log("one");
+    logger.log("two");    // pushes the file over the cap -- rotates after this write
+    logger.log("three");  // lands in the fresh file
+
+    std::string old_contents = read_all(rotated);
+    EXPECT_NE(old_contents.find("one"), std::string::npos);
+    EXPECT_NE(old_contents.find("two"), std::string::npos);
+
+    std::string current_contents = read_all(path);
+    EXPECT_EQ(current_contents.find("one"), std::string::npos)
+        << "the current file must start fresh after rotation, not carry old content forward";
+    EXPECT_EQ(current_contents.find("two"), std::string::npos);
+    EXPECT_NE(current_contents.find("three"), std::string::npos);
+}
+
+TEST(FileLoggerTest, RotationReplacesAnyPreviousDotOneRatherThanAccumulating) {
+    std::filesystem::path path = fresh_log_path();
+    std::filesystem::path rotated = path;
+    rotated += ".1";
+    std::filesystem::remove(rotated);
+
+    FileLogger logger(path, LogLevel::Debug, /*max_bytes=*/50);
+    logger.log("gen-one-a");
+    logger.log("gen-one-b");  // rotates -- .1 now holds this generation
+    logger.log("gen-two-a");
+    logger.log("gen-two-b");  // rotates again -- .1 must hold only this one now
+
+    std::string contents = read_all(rotated);
+    EXPECT_EQ(contents.find("gen-one"), std::string::npos)
+        << "an older generation must not still be sitting in .1 after a later rotation";
+    EXPECT_NE(contents.find("gen-two"), std::string::npos);
+}
+
+TEST(FileLoggerTest, RestartingAnAlreadyLargeLogCountsItsExistingSizeTowardTheCap) {
+    std::filesystem::path path = fresh_log_path();
+    std::filesystem::path rotated = path;
+    rotated += ".1";
+    std::filesystem::remove(rotated);
+
+    // Written directly, not through a FileLogger -- going through one with a
+    // small cap would just rotate mid-setup instead of producing the "already
+    // large from a previous run" file this test needs to start from.
+    {
+        std::ofstream preexisting(path);
+        preexisting << std::string(1000, 'x');
+    }
+    ASSERT_GE(std::filesystem::file_size(path), 1000u) << "test setup: the file must already be over the cap";
+
+    // A fresh FileLogger over that file, with a cap of 1000, must rotate on
+    // its very first line -- not silently allow another 1000 bytes just
+    // because bytes_written_ starts at zero in a new object.
+    FileLogger logger(path, LogLevel::Debug, /*max_bytes=*/1000);
+    logger.log("first line after restart");
+
+    EXPECT_TRUE(std::filesystem::exists(rotated))
+        << "a restart must not forget how large the file already was";
+}
+
 TEST(FileLoggerTest, ThrowsWhenTheLogFileCannotBeOpened) {
     // A directory is never openable as a file, on any platform.
     std::filesystem::path directory = std::filesystem::temp_directory_path() / "kfc_logger_not_a_file";

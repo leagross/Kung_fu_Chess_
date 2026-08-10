@@ -4,6 +4,13 @@
 #include <stdexcept>
 #include <string>
 
+#if defined(_WIN32)
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
+
 #include "kfc/graphics/constants.hpp"
 #include "kfc/graphics/io/board_file_loader.hpp"
 #include "kfc/io/board_parser.hpp"
@@ -13,8 +20,9 @@ namespace kfc::graphics::app {
 
 namespace {
 
-// Minimal "--name=value" parsing -- only two flags exist, not worth a
-// library. Returns std::nullopt if flag_name isn't present at all.
+// Minimal "--name=value" parsing -- only one flag needs this now
+// (--username; --server is the other caller of it below), not worth a
+// library.  Returns std::nullopt if flag_name isn't present at all.
 std::optional<std::string> find_flag(int argc, char** argv, const std::string& flag_name) {
     std::string prefix = flag_name + "=";
     for (int i = 1; i < argc; ++i) {
@@ -24,6 +32,38 @@ std::optional<std::string> find_flag(int argc, char** argv, const std::string& f
         }
     }
     return std::nullopt;
+}
+
+// Reads one line from the terminal without echoing it back -- used only for
+// the server password, which must never sit in shell history, a process
+// listing, or a screen recording the way a typed --password=... argument, or
+// visibly-echoed input, would.
+std::string read_password_masked(const std::string& prompt) {
+    std::cout << prompt << std::flush;
+    std::string password;
+#if defined(_WIN32)
+    for (int ch = _getch(); ch != '\r' && ch != '\n'; ch = _getch()) {
+        if (ch == '\b') {
+            if (!password.empty()) {
+                password.pop_back();
+            }
+            continue;
+        }
+        password.push_back(static_cast<char>(ch));
+    }
+#else
+    termios original{};
+    tcgetattr(STDIN_FILENO, &original);
+    termios no_echo = original;
+    no_echo.c_lflag &= ~static_cast<tcflag_t>(ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &no_echo);
+
+    std::getline(std::cin, password);
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &original);
+#endif
+    std::cout << "\n";
+    return password;
 }
 
 }  // namespace
@@ -37,13 +77,12 @@ GameSession::GameSession(int argc, char** argv)
     // --server=ws://host:port switches this app from local single-player to
     // a thin networked client -- see ServerLink's own class doc for why
     // board mutation is authoritative-server-driven and what that costs
-    // visually in this phase. --username / --password are the shell login the
-    // CTD SERVER spec asks for (entered on the command line, not through the
-    // GUI): the server registers the pair on first use and requires a match
-    // afterwards. Both default to "player" for a quick unattended local run.
+    // visually in this phase. --username is the shell login the CTD SERVER
+    // spec asks for; the password is never a CLI argument (see
+    // read_password_masked above) -- it is prompted for just below, only
+    // when --server is actually present, since local play never uses it.
     std::optional<std::string> server_url = find_flag(argc, argv, "--server");
     username_ = find_flag(argc, argv, "--username").value_or("player");
-    password_ = find_flag(argc, argv, "--password").value_or("player");
 
     // The board is read from the default file in both modes: locally it's the
     // game board; for networked play it's discarded after providing the
@@ -58,6 +97,7 @@ GameSession::GameSession(int argc, char** argv)
     if (server_url.has_value()) {
         networked_ = true;
         server_url_ = *server_url;
+        password_ = read_password_masked("Password for '" + username_ + "': ");
         return;  // connect() dials out later, from the Play button
     }
 

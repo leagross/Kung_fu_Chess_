@@ -126,6 +126,14 @@ TEST_F(HttpApiFixture, MalformedRegisterBodyReturns400) {
     EXPECT_EQ(response->statusCode, 400);
 }
 
+TEST_F(HttpApiFixture, HealthReturns200WithStatusOk) {
+    ix::HttpResponsePtr response = get("/health");
+
+    ASSERT_EQ(response->statusCode, 200);
+    json body = json::parse(response->body);
+    EXPECT_EQ(body.at("status").get<std::string>(), "ok");
+}
+
 TEST_F(HttpApiFixture, UnknownRouteReturns404) {
     ix::HttpResponsePtr response = get("/api/nope");
 

@@ -21,6 +21,14 @@ namespace kfc::server {
 class RoomManager;
 class SessionRegistry;
 
+/// How often an idle connection is pinged, in seconds. IXWebSocket closes a
+/// connection with "Ping timeout" if a pong does not come back before the
+/// *next* interval elapses (see IXWebSocketTransport::poll), so this bounds
+/// an unresponsive or never-logged-in connection to roughly twice its value
+/// before it is dropped -- a connection actually playing sends real traffic
+/// far more often than this and is never affected by it.
+inline constexpr int kIdlePingIntervalSecs = 30;
+
 /// Owns the WebSocket transport for one kfc_server: the IXWebSocket network
 /// system's lifetime, the server socket itself, and all per-connection
 /// handling -- logging opens/closes, turning the first Login into a room+colour

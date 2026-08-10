@@ -9,6 +9,7 @@
 #include <ctime>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 
 namespace kfc::protocol {
 
@@ -51,11 +52,18 @@ void write_timestamp(std::array<char, 32>& out) {
 
 }  // namespace
 
-FileLogger::FileLogger(const std::filesystem::path& log_path, LogLevel minimum)
-    : minimum_(minimum), file_(log_path, std::ios::app) {
+FileLogger::FileLogger(const std::filesystem::path& log_path, LogLevel minimum, std::uintmax_t max_bytes)
+    : minimum_(minimum), log_path_(log_path), max_bytes_(max_bytes), file_(log_path, std::ios::app) {
     if (!file_) {
         throw std::runtime_error("FileLogger: cannot open log file: " + log_path.string());
     }
+    // Appending to a file that already had content from a previous run --
+    // the common case for a restarted server -- starts the byte count from
+    // where that content left off, so rotation still triggers at max_bytes_
+    // total rather than resetting the clock on every restart.
+    std::error_code ec;
+    std::uintmax_t existing_size = std::filesystem::file_size(log_path, ec);
+    bytes_written_ = ec ? 0 : existing_size;
 }
 
 FileLogger::~FileLogger() {
@@ -84,24 +92,57 @@ void FileLogger::log(LogLevel level, const std::string& line) {
 
     // Both done before the lock: the timestamp because formatting it is the
     // most expensive part of writing a line, and the tag because looking it up
-    // is a table walk. Neither touches the file.
+    // is a table walk. Neither touches the file. Built into one string rather
+    // than streamed piece by piece so its size is known for bytes_written_
+    // without a tellp() call.
     std::array<char, 32> timestamp{};
     write_timestamp(timestamp);
     std::string_view tag = kLevelNames.name_of(level);
 
+    std::string formatted;
+    formatted.reserve(timestamp.size() + tag.size() + line.size() + 8);
+    formatted.push_back('[');
+    formatted.append(timestamp.data());
+    formatted.append("] [");
+    formatted.append(tag);
+    formatted.append("] ");
+    formatted.append(line);
+    formatted.push_back('\n');
+
     std::lock_guard<std::mutex> guard(mutex_);
-    file_ << '[' << timestamp.data() << "] [" << tag << "] " << line << '\n';
+    file_ << formatted;
+    bytes_written_ += formatted.size();
     if (level > LogLevel::Debug) {
         // Rare by construction -- one line per event -- so paying for the write
         // here buys crash-visibility for everything that matters, without the
         // per-message traffic paying for it too. See the header.
         file_.flush();
     }
+    if (bytes_written_ >= max_bytes_) {
+        rotate();
+    }
 }
 
 void FileLogger::flush() {
     std::lock_guard<std::mutex> guard(mutex_);
     file_.flush();
+}
+
+void FileLogger::rotate() {
+    file_.close();
+
+    std::error_code ec;
+    std::filesystem::path rotated = log_path_;
+    rotated += ".1";
+    std::filesystem::remove(rotated, ec);      // fine if there wasn't one yet
+    std::filesystem::rename(log_path_, rotated, ec);  // best-effort: logging
+                                                       // must never be why the
+                                                       // server crashes
+
+    file_.open(log_path_, std::ios::app);
+    bytes_written_ = 0;
+    // Not reported through log() -- the file that would receive it is the one
+    // that just changed underneath this call.
 }
 
 }  // namespace kfc::protocol

@@ -232,6 +232,23 @@ private:
     // plain member) so stop_all() can actually tear it down and join its
     // worker threads instead of merely emptying it; scheduler_ is null after
     // that, which is what makes a second stop_all() call a no-op.
+    //
+    // Guarded by scheduler_mutex_, not just checked for null: a bare null
+    // check (what this used to be) is not enough, because "the pointer is
+    // non-null" and "the MatchScheduler it points to is not currently being
+    // destroyed" are different facts. unique_ptr::reset() runs the pointee's
+    // destructor -- which joins every worker thread, taking real time --
+    // *before* it stores nullptr into scheduler_, so a connection thread
+    // reading scheduler_ as non-null during that window can still call into a
+    // MatchScheduler that is mid-teardown on another thread. Found by
+    // AddressSanitizer as a second, later crash at the exact same call site
+    // this file's stop_all()/on_disconnect race already had one fix for: the
+    // null check stopped the *already-null* case but not this one. The mutex
+    // makes "take scheduler_ out and destroy it" and "look up scheduler_ and
+    // call into it" mutually exclusive; the actual worker-thread joins still
+    // happen with the mutex released (see stop_all()), so a slow teardown
+    // never blocks the hot path this guards.
+    std::mutex scheduler_mutex_;
     std::unique_ptr<MatchScheduler> scheduler_ = std::make_unique<MatchScheduler>();
 
     mutable std::mutex rooms_mutex_;

@@ -30,26 +30,25 @@ namespace kfc::server {
 /// definition already gone from here, and their name is free to log in with
 /// again. The two mechanisms cannot fight.
 ///
-/// **Known limitation: a connection that vanishes without a closing handshake.**
-/// A crash, a closed laptop or lost wi-fi leaves the server holding a socket it
-/// does not yet know is dead, so the name stays claimed until TCP eventually
-/// gives up -- and the player is told "already_logged_in" if they come back
-/// before then.
+/// **A connection that vanishes without a closing handshake** (a crash, a
+/// closed laptop, lost wi-fi) used to leave the server holding a socket it
+/// did not know was dead, so the name stayed claimed until TCP eventually gave
+/// up, and a returning player was told "already_logged_in". That was a
+/// symptom of the same missing dead-peer detection that also broke the
+/// 20-second disconnect grace: nothing started the countdown either, so the
+/// opponent saw no timer and the seat was never made reclaimable.
 ///
-/// This is a symptom, not the disease. The same missing dead-peer detection
-/// already breaks the 20-second grace itself: nothing starts the countdown
-/// either, so the opponent sees no timer and the seat is never made reclaimable.
-/// Before this class existed the returning player was silently seated as a
-/// *spectator of their own game*, which is the same failure with no explanation
-/// attached. The refusal at least says what happened.
-///
-/// The real fix is server-side ping, and it is not available here: IXWebSocket
-/// 11.4.5's WebSocketTransport sets `_pongReceived = false` when a connection
-/// opens and then closes any connection whose first ping interval elapses with
-/// that flag still false -- before it has ever sent a ping. Enabling
-/// setPingInterval therefore disconnects every healthy client after exactly one
-/// interval, which was measured, not guessed. Fixing this needs a newer
-/// IXWebSocket or an application-level heartbeat in our own protocol.
+/// **This is fixed now.** `WebSocketGameServer` calls `setPingInterval` on
+/// every connection (see kIdlePingIntervalSecs's own doc comment), so
+/// IXWebSocket itself closes a socket that stops answering pings, which
+/// reaches `on_close` exactly like any other disconnect -- the name here is
+/// released and the 20-second grace starts normally. This doc used to say
+/// IXWebSocket 11.4.5 disconnected every *healthy* client after one interval
+/// regardless of whether it answered; that was true when this class was
+/// written but no longer reflects the code -- confirmed by an idle,
+/// healthy connection surviving multiple ping intervals in practice. Verify
+/// against the current ping wiring before trusting this paragraph, the same
+/// way its predecessor should have been re-checked.
 ///
 /// Threading: internally synchronized. Logins arrive on many IXWebSocket
 /// connection threads at once, and two simultaneous logins for the same name

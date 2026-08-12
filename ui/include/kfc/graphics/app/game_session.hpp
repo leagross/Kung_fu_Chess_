@@ -29,9 +29,12 @@ namespace kfc::graphics::app {
 /// whether the game is local or networked.
 class GameSession {
 public:
-    /// Reads --server=ws://host:port, --username and --password from argv;
-    /// without --server, starts local single-player from the default board
-    /// file. Determines the board dimensions immediately (from the default
+    /// Reads --server=ws://host:port and --username from argv; the password
+    /// is never a command-line argument (it would sit in shell history and
+    /// process listings) -- it is prompted for, without echoing, once
+    /// --server is present. Without --server, starts local single-player
+    /// from the default board file, and no password is asked for at all.
+    /// Determines the board dimensions immediately (from the default
     /// board file, which the networked board matches) so a caller can lay out
     /// its window before connecting, but for networked play does NOT connect
     /// yet -- call connect() for that, after the Play button. Throws

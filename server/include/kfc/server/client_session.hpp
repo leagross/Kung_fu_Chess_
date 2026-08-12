@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <optional>
 #include <string>
 
@@ -17,6 +18,14 @@ class IUserStore;
 }
 
 namespace kfc::server {
+
+/// The most inbound WebSocket frames one connection may send in any one
+/// second before it is dropped. Generous on purpose, for the same reason as
+/// kMaxQueuedCommands (see match.hpp): a legitimate client cannot usefully
+/// move faster than pieces come off cooldown, so reaching even a fraction of
+/// this means something is sending far faster than it can play -- most likely
+/// a hostile or badly-looping client, not a real burst of catch-up traffic.
+inline constexpr int kMaxMessagesPerSecond = 50;
 
 /// One connected client, and everything that happens to it between connecting
 /// and going away: authenticating, being seated, and having its gameplay
@@ -112,6 +121,13 @@ private:
     std::optional<SessionRegistry::Lease> username_lease_;
     std::optional<AuthedUser> pending_;
     std::optional<RoomManager::Seat> seat_;
+
+    // Messages accepted so far in the current one-second window, and when
+    // that window started. Reset lazily -- on the first message past its end
+    // -- rather than by a timer; see on_text. Zero-initialized time_point is
+    // the epoch, so the very first message always starts a fresh window.
+    std::chrono::steady_clock::time_point rate_window_start_;
+    int messages_in_window_ = 0;
 };
 
 }  // namespace kfc::server

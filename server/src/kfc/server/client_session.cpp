@@ -1,5 +1,6 @@
 #include "kfc/server/client_session.hpp"
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <utility>
@@ -54,6 +55,20 @@ void ClientSession::on_text(const std::string& text) {
     // length, never by content: the content is what we declined to handle.
     if (text.size() > kfc::protocol::kMaxMessageBytes) {
         drop("message of " + std::to_string(text.size()) + " bytes exceeds the limit");
+        return;
+    }
+
+    // A flood of otherwise-valid frames is refused the same way an oversized
+    // one is: before it is logged or parsed. Windows are one second wide and
+    // reset lazily -- there is no timer here, just a comparison against the
+    // clock on the next message to arrive.
+    auto now = std::chrono::steady_clock::now();
+    if (now - rate_window_start_ >= std::chrono::seconds(1)) {
+        rate_window_start_ = now;
+        messages_in_window_ = 0;
+    }
+    if (++messages_in_window_ > kMaxMessagesPerSecond) {
+        drop("more than " + std::to_string(kMaxMessagesPerSecond) + " messages in one second");
         return;
     }
 

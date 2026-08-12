@@ -279,6 +279,23 @@ TEST(ClientSessionTest, AnOversizedFrameClosesTheConnectionWithoutBeingParsed) {
     EXPECT_FALSE(session.authenticated());
 }
 
+TEST(ClientSessionTest, MoreThanTheRateLimitInOneSecondClosesTheConnection) {
+    Fixture fixture;
+    FakeSocket socket;
+    ClientSession session = fixture.session(socket);
+
+    // Garbled frames still count toward the rate -- the limit is checked
+    // before decoding, same as the size cap above.
+    for (int i = 0; i < kfc::server::kMaxMessagesPerSecond; ++i) {
+        session.on_text("not json at all");
+    }
+    EXPECT_EQ(socket.closes, 0) << "exactly the limit must still be allowed through";
+
+    session.on_text("not json at all");
+
+    EXPECT_EQ(socket.closes, 1) << "one more than the limit in the same window must be dropped";
+}
+
 TEST(ClientSessionTest, AnUndecodableFrameIsDroppedButTheConnectionSurvives) {
     Fixture fixture;
     FakeSocket socket;

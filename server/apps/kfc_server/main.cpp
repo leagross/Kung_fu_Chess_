@@ -4,12 +4,15 @@
 // runs it. Everything about *how* players connect lives in WebSocketGameServer,
 // *which game* a player is in lives in RoomManager, and *what the game does*
 // lives in Match.
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "kfc/io/board_parser.hpp"
@@ -42,6 +45,17 @@ std::optional<int> parse_port(const std::string& text) {
     } catch (const std::exception&) {
         return std::nullopt;  // out of int range
     }
+}
+
+// Set from a signal handler, so it must stay to what an atomic store can do
+// -- no logging, no mutex, nothing that could deadlock if the signal lands
+// mid-way through the very code it would need to call. main() polls this
+// from an ordinary thread instead, which is where the actual shutdown runs
+// (see the wait-then-stop loop below).
+std::atomic<bool> g_shutdown_requested{false};
+
+void request_shutdown(int /*signal*/) {
+    g_shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
 std::vector<std::string> read_board_lines(const std::string& path) {
@@ -168,11 +182,28 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        // Ctrl+C (SIGINT) and `docker stop` (SIGTERM) both used to hard-kill
+        // the process -- nothing called server.stop(), so server.wait() below
+        // never returned and the orderly teardown after it never ran. A
+        // signal handler cannot safely do that stopping itself (it can only
+        // set an atomic flag; server.stop() takes a mutex), so a small thread
+        // polls the flag and does the actual stopping on our own time.
+        std::signal(SIGINT, request_shutdown);
+        std::signal(SIGTERM, request_shutdown);
+        std::thread shutdown_watcher([&server] {
+            while (!g_shutdown_requested.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+            server.stop();  // unblocks server.wait() below
+        });
+
         server.start();
         http_server.start();
         std::cout << "kfc_server listening on ws://localhost:" << port << ", http://localhost:" << http_port
                   << "\n";
         server.wait();
+        shutdown_watcher.join();
+        logger.log("kfc_server shutting down");
 
         // Shutdown order matters, and it is the opposite of the declaration
         // order, so it has to be spelled out rather than left to destructors.

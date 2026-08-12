@@ -145,11 +145,14 @@ dump is more disk than it is worth, keep the events and drop the traffic:
 
 Then launch a client per player, **each with its own username**. The username and
 password are the shell login the spec asks for; the account is registered on
-first use and the password must match afterwards.
+first use and the password must match afterwards. The password is never a
+command-line argument -- each client prompts for it, without echoing it back:
 
 ```sh
-./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=alice --password=pw1
-./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=bob   --password=pw2
+./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=alice
+Password for 'alice':
+./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=bob
+Password for 'bob':
 ```
 
 To play across machines, replace `localhost` with the server's LAN address and

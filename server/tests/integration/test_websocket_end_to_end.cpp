@@ -39,42 +39,48 @@
 // between our code and someone else's library.
 
 // ===========================================================================
-// DISABLED, and this is the interesting part.
+// History: these were DISABLED for a long time. Two real bugs, found here.
 // ===========================================================================
 //
-// Every test below passes on its own, and passes when repeated. Run together,
-// the process hangs in roughly one run in three -- **after every assertion has
-// already passed**, during teardown of the two-player test. So the tests are
-// not wrong: they found a real intermittent deadlock in the shutdown path, in
-// production code, that nothing else in the suite could see.
+// Every test below passed on its own, and passed when repeated -- but run
+// together, the process hung intermittently, after every assertion had already
+// passed, during teardown. The tests were never wrong: they found real bugs in
+// the shutdown path that nothing else in the suite could see, because nothing
+// else opens a real socket (see the class comment above).
 //
-// What is understood so far. Closing a client socket makes IXWebSocket call
-// ClientSession::on_close on a connection thread, which reaches
-// RoomManager::on_disconnect, which reaps the now-empty room by calling
-// Match::stop() -- and stop() **joins the tick thread**. Meanwhile that tick
-// thread may be inside MatchAudience::broadcast, calling send() on IXWebSocket
-// sockets that are being closed underneath it. A join, taken from inside a
-// callback of the very library whose sockets the joined thread is using, is the
-// shape of the bug.
+// Bug 1 (fixed): a documented, then-real deadlock, when Match still owned a
+// thread of its own -- reaping a room joined that thread from inside an
+// IXWebSocket connection callback, while the joined thread could be mid-send on
+// the very socket being closed. MatchScheduler replaced the per-Match thread
+// specifically to remove this (see match_scheduler.hpp's class comment); by the
+// time these tests were revisited, `Match::stop()` no longer existed at all.
 //
-// One real mistake has been fixed already: shutdown stopped the transport before
-// the rooms, so a frozen match kept broadcasting a countdown into sockets that
-// were closing. RoomManager::stop_all now exists and is called first, in both
-// this fixture and kfc_server's main. That took the hang from four runs in six
-// down to three in ten -- an improvement, and proof the ordering was genuinely
-// wrong, but not the whole cause.
+// Bug 2 (fixed): AddressSanitizer, run against these tests directly, found what
+// replaced it -- RoomManager::stop_all() resets scheduler_ to null, but
+// unique_ptr::reset() runs ~MatchScheduler() (joining every worker thread)
+// *before* it stores nullptr, so a connection thread's on_disconnect arriving in
+// that window could still read scheduler_ as non-null and call into an object
+// mid-destruction on another thread. scheduler_mutex_ (see room_manager.hpp)
+// makes "take scheduler_ out to destroy it" and "look up scheduler_ and call
+// into it" mutually exclusive, with the actual (slow) teardown done outside the
+// lock so it never blocks the hot path.
 //
-// What is left is to stop joining a tick thread from inside a network callback
-// at all: the reaped Match needs to be stopped somewhere other than the
-// connection thread that noticed the room was empty.
+// Bug 3 (mitigated, not ours to fully fix): a several-second stall, not a true
+// hang, traced to IXWebSocketTransport::poll() in the vendored ixwebsocket
+// library -- it computes how long to block on a socket from the ping interval
+// even while a connection is CLOSING, overwriting its own 300 ms close-handshake
+// timeout. With this server's old 30-second idle-ping interval, a connection
+// mid-close-handshake during shutdown could block for up to 30 seconds before
+// WebSocketServer::stop() (which waits for every connection thread) returned.
+// See kIdlePingIntervalSecs's own doc comment for the fix: lowering that
+// interval shrinks the same worst case proportionally, at no cost to a real
+// player (a live client answers a ping automatically, regardless of how often
+// they move).
 //
-// Disabled rather than deleted, and rather than committed green, because a suite
-// that hangs a third of the time is worse than no suite -- it would wedge CI with
-// no output. Disabled rather than removed from the build, so it keeps compiling
-// and cannot rot. Run it deliberately:
-//
-//     kfc_tests --gtest_also_run_disabled_tests --gtest_filter=*WebSocketEndToEnd*
-//
+// Confirmed via repeated local runs (dozens of consecutive passes, no hang or
+// crash) before re-enabling. If this suite ever wedges CI again, that is new
+// information, not this history repeating -- capture what actually happened
+// rather than assuming it is bug 1, 2, or 3 again.
 // ===========================================================================
 
 using namespace kfc::protocol;
@@ -242,7 +248,7 @@ const ::testing::Environment* kNetSystem = ::testing::AddGlobalTestEnvironment(n
 
 }  // namespace
 
-TEST(DISABLED_WebSocketEndToEndTest, ARealClientLogsInCreatesARoomAndIsToldItsId) {
+TEST(WebSocketEndToEndTest, ARealClientLogsInCreatesARoomAndIsToldItsId) {
     ServerFixture server;
     ASSERT_TRUE(server.listening()) << "could not bind the port";
 
@@ -260,7 +266,7 @@ TEST(DISABLED_WebSocketEndToEndTest, ARealClientLogsInCreatesARoomAndIsToldItsId
     EXPECT_FALSE(welcome->board.pieces.empty());
 }
 
-TEST(DISABLED_WebSocketEndToEndTest, TwoRealClientsMeetInARoomAndSeeAMoveTravelBetweenThem) {
+TEST(WebSocketEndToEndTest, TwoRealClientsMeetInARoomAndSeeAMoveTravelBetweenThem) {
     ServerFixture server;
     ASSERT_TRUE(server.listening());
 
@@ -294,7 +300,7 @@ TEST(DISABLED_WebSocketEndToEndTest, TwoRealClientsMeetInARoomAndSeeAMoveTravelB
     EXPECT_TRUE(black.wait_for<BoardUpdate>().has_value()) << "the opponent never saw it arrive";
 }
 
-TEST(DISABLED_WebSocketEndToEndTest, AThirdClientWatchesAndItsCommandsChangeNothing) {
+TEST(WebSocketEndToEndTest, AThirdClientWatchesAndItsCommandsChangeNothing) {
     ServerFixture server;
     ASSERT_TRUE(server.listening());
 
@@ -326,7 +332,7 @@ TEST(DISABLED_WebSocketEndToEndTest, AThirdClientWatchesAndItsCommandsChangeNoth
     EXPECT_TRUE(white.never_receives<GameOver>()) << "a viewer resigned someone else's game";
 }
 
-TEST(DISABLED_WebSocketEndToEndTest, AWrongPasswordIsExplainedOverTheWireBeforeTheSocketCloses) {
+TEST(WebSocketEndToEndTest, AWrongPasswordIsExplainedOverTheWireBeforeTheSocketCloses) {
     ServerFixture server;
     ASSERT_TRUE(server.listening());
 
@@ -345,7 +351,7 @@ TEST(DISABLED_WebSocketEndToEndTest, AWrongPasswordIsExplainedOverTheWireBeforeT
     EXPECT_EQ(failure->reason, "wrong_password");
 }
 
-TEST(DISABLED_WebSocketEndToEndTest, JoiningARoomThatDoesNotExistComesBackWithAReason) {
+TEST(WebSocketEndToEndTest, JoiningARoomThatDoesNotExistComesBackWithAReason) {
     ServerFixture server;
     ASSERT_TRUE(server.listening());
 
@@ -363,7 +369,7 @@ TEST(DISABLED_WebSocketEndToEndTest, JoiningARoomThatDoesNotExistComesBackWithAR
 // websocket_game_server.cpp: a Close has to reach the session, which reaches
 // RoomManager, which starts the countdown. Nothing else in the suite exercises
 // that chain through an actual socket closing.
-TEST(DISABLED_WebSocketEndToEndTest, ADroppedSocketStartsTheOpponentsCountdown) {
+TEST(WebSocketEndToEndTest, ADroppedSocketStartsTheOpponentsCountdown) {
     ServerFixture server;
     ASSERT_TRUE(server.listening());
 

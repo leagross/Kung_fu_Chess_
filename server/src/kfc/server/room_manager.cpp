@@ -43,7 +43,21 @@ void RoomManager::stop_all() {
     // needed for that part, unlike the old per-Match stop(). reset() on an
     // already-null scheduler_ (a second call) is simply a no-op, which is what
     // makes this idempotent.
-    scheduler_.reset();
+    //
+    // Taken out under scheduler_mutex_ so a concurrent on_disconnect/enqueue
+    // either finishes its call into the scheduler before this runs, or sees
+    // scheduler_ already null and skips it -- never a call into an object
+    // that is mid-destruction (see scheduler_'s own doc comment; found by
+    // AddressSanitizer). Destroyed *outside* the lock: joining every worker
+    // thread is real time, and holding scheduler_mutex_ across it would stall
+    // every connection thread's on_disconnect/enqueue for as long as that
+    // takes, on the hot path.
+    std::unique_ptr<MatchScheduler> to_destroy;
+    {
+        std::lock_guard<std::mutex> guard(scheduler_mutex_);
+        to_destroy = std::move(scheduler_);
+    }
+    to_destroy.reset();
 }
 
 RoomManager::Room& RoomManager::open_room(RoomId& id_out, std::string room_name) {
@@ -58,10 +72,22 @@ RoomManager::Room& RoomManager::open_room(RoomId& id_out, std::string room_name)
     std::weak_ptr<Match> weak_match = room.match;
     room.match->set_wake_hook([this, weak_match] {
         if (std::shared_ptr<Match> match = weak_match.lock()) {
-            scheduler_->wake(match);
+            // scheduler_mutex_ makes this mutually exclusive with stop_all()
+            // taking scheduler_ out to destroy it -- see scheduler_'s own doc
+            // comment for why a bare null check was not enough. A wake with
+            // nothing left to schedule is simply a no-op.
+            std::lock_guard<std::mutex> guard(scheduler_mutex_);
+            if (scheduler_) {
+                scheduler_->wake(match);
+            }
         }
     });
-    scheduler_->add(room.match);
+    {
+        std::lock_guard<std::mutex> guard(scheduler_mutex_);
+        if (scheduler_) {
+            scheduler_->add(room.match);
+        }
+    }
     return rooms_.emplace(id_out, std::move(room)).first->second;
 }
 
@@ -214,7 +240,12 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
             }
         }
         if (reaped) {
-            scheduler_->remove(reaped);
+            // scheduler_mutex_, not a bare null check -- see scheduler_'s own
+            // doc comment.
+            std::lock_guard<std::mutex> guard(scheduler_mutex_);
+            if (scheduler_) {
+                scheduler_->remove(reaped);
+            }
         }
         return std::nullopt;
     }
@@ -400,7 +431,24 @@ void RoomManager::on_disconnect(const Seat& seat) {
         }
     }
     if (reaped) {
-        scheduler_->remove(reaped);
+        // scheduler_ can be null here, or -- the case a bare null check
+        // missed -- non-null but *mid-destruction* on the thread running
+        // stop_all(): unique_ptr::reset() runs ~MatchScheduler() (which joins
+        // every worker thread, taking real time) before it stores nullptr,
+        // so a connection thread arriving in that window could still read a
+        // non-null pointer and call into an object being torn down
+        // underneath it. AddressSanitizer caught both shapes of this at this
+        // exact call site. scheduler_mutex_ makes "take scheduler_ out to
+        // destroy it" and "look up scheduler_ and call into it" mutually
+        // exclusive -- either this call happens before stop_all() starts
+        // tearing the scheduler down, or scheduler_ is already null here and
+        // there is nothing to unregister from, which is simply skipped
+        // rather than crashing (the Match this reaped shared_ptr holds is
+        // still cleaned up normally when it goes out of scope).
+        std::lock_guard<std::mutex> guard(scheduler_mutex_);
+        if (scheduler_) {
+            scheduler_->remove(reaped);
+        }
     }
 }
 

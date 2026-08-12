@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -14,6 +15,11 @@ namespace kfc::protocol {
 ///
 /// Ordered, and compared as such -- a logger set to Info writes Info, Warning
 /// and Error, and drops Debug.
+/// The default size at which FileLogger rotates -- past this, kfc_server.log
+/// would otherwise grow forever on a long-running server (see FileLogger's
+/// own class comment on why that used to be an accepted trade-off).
+inline constexpr std::uintmax_t kDefaultMaxLogBytes = 50 * 1024 * 1024;
+
 enum class LogLevel {
     /// Every protocol message sent and received, in full. The CTD SERVER
     /// lecture asks for exactly this ("שנוכל מתוך הלוגים להבין מה התקלקל"), so
@@ -33,8 +39,10 @@ enum class LogLevel {
 /// A timestamped line-appender, used by both kfc_server and kfc_gui_app's
 /// networked ServerLink to log protocol traffic and events -- the primary
 /// debugging tool the CTD SERVER lecture explicitly asked for. Deliberately
-/// minimal: no rotation, no external logging library -- a single append-only
-/// file is exactly what "read it after something breaks" needs at this scale.
+/// minimal: no external logging library, and rotation is a single-generation
+/// size cap (kfc_server.log -> kfc_server.log.1, the previous .1 discarded)
+/// rather than anything date-based or multi-generation -- a long-running
+/// server just needs *not to fill the disk*, not an archive.
 ///
 /// Thread-safe (one mutex): the server's per-match tick thread and its
 /// IXWebSocket I/O threads can all log without external synchronization.
@@ -59,7 +67,11 @@ public:
     ///
     /// minimum is the least severe level that will be written; the default
     /// keeps every message, which is what the spec asks of the server.
-    explicit FileLogger(const std::filesystem::path& log_path, LogLevel minimum = LogLevel::Debug);
+    /// max_bytes is the size past which the file rotates -- see the class
+    /// comment; a test wanting to exercise rotation without writing 50 MB
+    /// passes a small value here instead of using the default.
+    explicit FileLogger(const std::filesystem::path& log_path, LogLevel minimum = LogLevel::Debug,
+                        std::uintmax_t max_bytes = kDefaultMaxLogBytes);
 
     /// Flushes anything still buffered.
     ~FileLogger();
@@ -91,7 +103,15 @@ public:
     [[nodiscard]] static std::optional<LogLevel> level_from_name(std::string_view name);
 
 private:
+    // Closes, renames the current file to log_path_ + ".1" (replacing any
+    // previous one), and reopens a fresh empty file at log_path_. Called with
+    // mutex_ already held, from log().
+    void rotate();
+
     LogLevel minimum_;
+    std::filesystem::path log_path_;
+    std::uintmax_t max_bytes_;
+    std::uintmax_t bytes_written_ = 0;
     std::mutex mutex_;
     std::ofstream file_;
 };

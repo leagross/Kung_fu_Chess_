@@ -36,6 +36,8 @@ std::string reason_phrase(int status) {
             return "Not Found";
         case 409:
             return "Conflict";
+        case 503:
+            return "Service Unavailable";
         default:
             return "";
     }
@@ -101,8 +103,25 @@ ix::HttpResponsePtr handle_history(kfc::database::UserRepository& users, const s
     return json_response(200, games);  // 200 [] for an unknown username too -- not a 404.
 }
 
+// A liveness/readiness check for a load balancer or `docker compose`
+// healthcheck: not just "the process exists", but "the account store this
+// process holds a connection to is actually answering queries". The
+// placeholder username is never expected to exist; only whether the query
+// itself succeeds is being checked.
+ix::HttpResponsePtr handle_health(kfc::database::UserRepository& users) {
+    try {
+        (void)users.rating_of("__kfc_health_check__");
+    } catch (const std::exception&) {
+        return empty_response(503);
+    }
+    return json_response(200, json{{"status", "ok"}});
+}
+
 ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, const ix::HttpRequestPtr& request) {
     try {
+        if (request->method == "GET" && request->uri == "/health") {
+            return handle_health(users);
+        }
         if (request->method == "POST" && request->uri == "/api/auth/register") {
             return handle_register(users, json::parse(request->body));
         }

@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "kfc/server/auth_token_store.hpp"
+
 namespace ix {
 class HttpServer;
 }
@@ -28,6 +30,12 @@ namespace kfc::server {
 /// port with another WebSocketServer instance. Lifecycle mirrors
 /// WebSocketGameServer's exactly (listen/start/wait/stop) on purpose, so
 /// main() wires the two up the same way.
+///
+/// Register and login each return a bearer token (see AuthTokenStore) along
+/// with the username and rating; GET /api/history/{username} requires that
+/// token in an `Authorization: Bearer <token>` header and refuses to serve
+/// anyone else's history with it, even to another real account -- it used to
+/// be open to anyone who knew or guessed a username.
 class HttpApiServer {
 public:
     /// users and logger must outlive this server. Brings up the network
@@ -54,6 +62,10 @@ private:
     int port_;
     kfc::database::UserRepository& users_;
     kfc::protocol::FileLogger& logger_;
+    // Owned here, not injected: issuing and checking bearer tokens is this
+    // layer's own implementation detail, not something main() or any other
+    // caller needs to see or share.
+    AuthTokenStore tokens_;
     std::unique_ptr<ix::HttpServer> server_;
 };
 

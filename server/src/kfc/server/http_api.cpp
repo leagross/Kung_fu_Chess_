@@ -1,5 +1,6 @@
 #include "kfc/server/http_api.hpp"
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -10,6 +11,7 @@
 
 #include "kfc/database/user_repository.hpp"
 #include "kfc/protocol/file_logger.hpp"
+#include "kfc/server/auth_token_store.hpp"
 
 namespace kfc::server {
 
@@ -32,6 +34,8 @@ std::string reason_phrase(int status) {
             return "Bad Request";
         case 401:
             return "Unauthorized";
+        case 403:
+            return "Forbidden";
         case 404:
             return "Not Found";
         case 409:
@@ -57,11 +61,12 @@ ix::HttpResponsePtr empty_response(int status) {
                                               std::string());
 }
 
-json auth_body(const std::string& username, int rating) {
-    return json{{"username", username}, {"rating", rating}};
+json auth_body(const std::string& username, int rating, const std::string& token) {
+    return json{{"username", username}, {"rating", rating}, {"token", token}};
 }
 
-ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, const json& request) {
+ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, AuthTokenStore& tokens,
+                                    const json& request) {
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
     // A single call, not user_exists() followed by authenticate(): those are
@@ -80,10 +85,10 @@ ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, const 
     if (!auth.newly_registered) {
         return empty_response(409);
     }
-    return json_response(201, auth_body(username, auth.rating));
+    return json_response(201, auth_body(username, auth.rating, tokens.issue(username)));
 }
 
-ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, const json& request) {
+ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, AuthTokenStore& tokens, const json& request) {
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
     if (!users.user_exists(username)) {
@@ -95,10 +100,39 @@ ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, const jso
     if (!auth.ok) {
         return empty_response(401);
     }
-    return json_response(200, auth_body(username, auth.rating));
+    return json_response(200, auth_body(username, auth.rating, tokens.issue(username)));
 }
 
-ix::HttpResponsePtr handle_history(kfc::database::UserRepository& users, const std::string& username) {
+// "Bearer <token>", case-sensitively per RFC 6750 -- std::nullopt if the
+// header is absent or does not have that shape (no header at all, wrong
+// scheme, or nothing after it).
+std::optional<std::string> bearer_token(const ix::HttpRequestPtr& request) {
+    constexpr std::string_view kPrefix = "Bearer ";
+    auto it = request->headers.find("Authorization");
+    if (it == request->headers.end() || it->second.rfind(kPrefix, 0) != 0) {
+        return std::nullopt;
+    }
+    std::string token = it->second.substr(kPrefix.size());
+    return token.empty() ? std::nullopt : std::optional<std::string>(std::move(token));
+}
+
+ix::HttpResponsePtr handle_history(kfc::database::UserRepository& users, AuthTokenStore& tokens,
+                                   const ix::HttpRequestPtr& request, const std::string& username) {
+    std::optional<std::string> token = bearer_token(request);
+    if (!token.has_value()) {
+        return empty_response(401);  // no credentials at all
+    }
+    std::optional<std::string> owner = tokens.username_for(*token);
+    if (!owner.has_value()) {
+        return empty_response(401);  // credentials, but not ones anyone issued
+    }
+    if (*owner != username) {
+        // A real account, just not this one's -- a stranger with a valid
+        // token of their own still cannot read someone else's history by
+        // guessing a username in the URL.
+        return empty_response(403);
+    }
+
     json games = json::array();
     for (const kfc::database::GameRecord& game : users.history_for(username)) {
         games.push_back(json{
@@ -128,19 +162,20 @@ ix::HttpResponsePtr handle_health(kfc::database::UserRepository& users) {
     return json_response(200, json{{"status", "ok"}});
 }
 
-ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, const ix::HttpRequestPtr& request) {
+ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, AuthTokenStore& tokens,
+                             const ix::HttpRequestPtr& request) {
     try {
         if (request->method == "GET" && request->uri == "/health") {
             return handle_health(users);
         }
         if (request->method == "POST" && request->uri == "/api/auth/register") {
-            return handle_register(users, json::parse(request->body));
+            return handle_register(users, tokens, json::parse(request->body));
         }
         if (request->method == "POST" && request->uri == "/api/auth/login") {
-            return handle_login(users, json::parse(request->body));
+            return handle_login(users, tokens, json::parse(request->body));
         }
         if (request->method == "GET" && request->uri.rfind(kHistoryPrefix, 0) == 0) {
-            return handle_history(users, request->uri.substr(kHistoryPrefix.size()));
+            return handle_history(users, tokens, request, request->uri.substr(kHistoryPrefix.size()));
         }
     } catch (const json::exception&) {
         return empty_response(400);  // malformed body, or a required field missing
@@ -160,7 +195,7 @@ HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, kfc
 
     server_->setOnConnectionCallback(
         [this](ix::HttpRequestPtr request, const std::shared_ptr<ix::ConnectionState>&) -> ix::HttpResponsePtr {
-            return dispatch(users_, request);
+            return dispatch(users_, tokens_, request);
         });
 }
 

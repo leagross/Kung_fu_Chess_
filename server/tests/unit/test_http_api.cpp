@@ -69,6 +69,22 @@ protected:
         return client.get(base_url_ + path, client.createRequest());
     }
 
+    // history is the one route that requires a bearer token -- see
+    // http_api.hpp's own doc comment.
+    ix::HttpResponsePtr get_authed(const std::string& path, const std::string& token) {
+        ix::HttpClient client;
+        ix::HttpRequestArgsPtr args = client.createRequest();
+        args->extraHeaders["Authorization"] = "Bearer " + token;
+        return client.get(base_url_ + path, args);
+    }
+
+    // Registers a fresh account and returns the token it was issued, for
+    // tests that only care about reaching history as *some* real user.
+    std::string register_and_get_token(const std::string& username) {
+        ix::HttpResponsePtr response = post("/api/auth/register", json{{"username", username}, {"password", "hunter2"}}.dump());
+        return json::parse(response->body).at("token").get<std::string>();
+    }
+
     kfc::protocol::FileLogger logger_{std::filesystem::temp_directory_path() / "kfc_http_api_test.log"};
     int port_ = 0;
     std::string base_url_;
@@ -78,13 +94,14 @@ protected:
 
 }  // namespace
 
-TEST_F(HttpApiFixture, RegisterNewUserReturns201WithUsernameAndStartingRating) {
+TEST_F(HttpApiFixture, RegisterNewUserReturns201WithUsernameRatingAndAToken) {
     ix::HttpResponsePtr response = post("/api/auth/register", json{{"username", "alice"}, {"password", "hunter2"}}.dump());
 
     ASSERT_EQ(response->statusCode, 201);
     json body = json::parse(response->body);
     EXPECT_EQ(body.at("username").get<std::string>(), "alice");
     EXPECT_EQ(body.at("rating").get<int>(), 1200);
+    EXPECT_FALSE(body.at("token").get<std::string>().empty());
 }
 
 TEST_F(HttpApiFixture, RegisterAnExistingUsernameReturns409) {
@@ -95,7 +112,7 @@ TEST_F(HttpApiFixture, RegisterAnExistingUsernameReturns409) {
     EXPECT_EQ(response->statusCode, 409);
 }
 
-TEST_F(HttpApiFixture, LoginWithTheRightPasswordReturns200) {
+TEST_F(HttpApiFixture, LoginWithTheRightPasswordReturns200AndAToken) {
     post("/api/auth/register", json{{"username", "alice"}, {"password", "hunter2"}}.dump());
 
     ix::HttpResponsePtr response = post("/api/auth/login", json{{"username", "alice"}, {"password", "hunter2"}}.dump());
@@ -103,6 +120,7 @@ TEST_F(HttpApiFixture, LoginWithTheRightPasswordReturns200) {
     ASSERT_EQ(response->statusCode, 200);
     json body = json::parse(response->body);
     EXPECT_EQ(body.at("username").get<std::string>(), "alice");
+    EXPECT_FALSE(body.at("token").get<std::string>().empty());
 }
 
 TEST_F(HttpApiFixture, LoginWithTheWrongPasswordReturns401) {
@@ -141,7 +159,12 @@ TEST_F(HttpApiFixture, UnknownRouteReturns404) {
 }
 
 TEST_F(HttpApiFixture, HistoryForAnUnknownUsernameIs200WithAnEmptyArray) {
-    ix::HttpResponsePtr response = get("/api/history/nobody");
+    // "Unknown username" and "not the caller's own username" are different
+    // things -- register as nobody itself so the token really is the right
+    // one, rather than accidentally exercising the 403 path below.
+    std::string token = register_and_get_token("nobody");
+
+    ix::HttpResponsePtr response = get_authed("/api/history/nobody", token);
 
     ASSERT_EQ(response->statusCode, 200);
     json body = json::parse(response->body);
@@ -153,8 +176,9 @@ TEST_F(HttpApiFixture, HistoryReflectsAGameRecordedDirectlyThroughUserRepository
     using namespace std::chrono;
     auto started = system_clock::now();
     users_->record_game("alice", "bob", "alice", "decisive", started, started + seconds(45));
+    std::string bobs_token = register_and_get_token("bob");
 
-    ix::HttpResponsePtr response = get("/api/history/bob");
+    ix::HttpResponsePtr response = get_authed("/api/history/bob", bobs_token);
 
     ASSERT_EQ(response->statusCode, 200);
     json games = json::parse(response->body);
@@ -171,11 +195,37 @@ TEST_F(HttpApiFixture, ADrawSerializesWinnerUsernameAsNull) {
     using namespace std::chrono;
     auto started = system_clock::now();
     users_->record_game("alice", "bob", std::nullopt, "draw", started, started + seconds(20));
+    std::string alices_token = register_and_get_token("alice");
 
-    ix::HttpResponsePtr response = get("/api/history/alice");
+    ix::HttpResponsePtr response = get_authed("/api/history/alice", alices_token);
 
     ASSERT_EQ(response->statusCode, 200);
     json games = json::parse(response->body);
     ASSERT_EQ(games.size(), 1u);
     EXPECT_TRUE(games[0].at("winnerUsername").is_null());
+}
+
+TEST_F(HttpApiFixture, HistoryWithNoTokenAtAllReturns401) {
+    ix::HttpResponsePtr response = get("/api/history/alice");  // no Authorization header
+
+    EXPECT_EQ(response->statusCode, 401);
+}
+
+TEST_F(HttpApiFixture, HistoryWithAMadeUpTokenReturns401) {
+    ix::HttpResponsePtr response = get_authed("/api/history/alice", "not-a-real-token");
+
+    EXPECT_EQ(response->statusCode, 401);
+}
+
+TEST_F(HttpApiFixture, HistoryWithAnotherRealAccountsTokenReturns403) {
+    // A stranger who has a perfectly valid token -- just not for the account
+    // whose history they are asking for -- must still be refused. This is
+    // the whole point of the fix: a real account is not a master key to
+    // every other account's history.
+    register_and_get_token("alice");
+    std::string bobs_token = register_and_get_token("bob");
+
+    ix::HttpResponsePtr response = get_authed("/api/history/alice", bobs_token);
+
+    EXPECT_EQ(response->statusCode, 403);
 }

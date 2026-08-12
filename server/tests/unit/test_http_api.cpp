@@ -138,6 +138,22 @@ TEST_F(HttpApiFixture, LoginAsAnUnknownUserReturns401AndDoesNotRegisterThem) {
     EXPECT_FALSE(users_->user_exists("ghost")) << "login must never silently register an unknown username";
 }
 
+TEST_F(HttpApiFixture, TheEleventhAuthAttemptInAMinuteFromOneIpReturns429) {
+    // register and login share one budget (see HttpApiServer's own doc
+    // comment) -- 10 register calls exhaust it, so the very next request to
+    // either endpoint, from the same client, must be refused.
+    for (int i = 0; i < 10; ++i) {
+        ix::HttpResponsePtr response =
+            post("/api/auth/register", json{{"username", "user" + std::to_string(i)}, {"password", "hunter2"}}.dump());
+        ASSERT_EQ(response->statusCode, 201) << "attempt " << i << " should still be within budget";
+    }
+
+    ix::HttpResponsePtr eleventh =
+        post("/api/auth/login", json{{"username", "user0"}, {"password", "hunter2"}}.dump());
+
+    EXPECT_EQ(eleventh->statusCode, 429);
+}
+
 TEST_F(HttpApiFixture, MalformedRegisterBodyReturns400) {
     ix::HttpResponsePtr response = post("/api/auth/register", "not json");
 

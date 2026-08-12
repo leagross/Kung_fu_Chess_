@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <SQLiteCpp/Database.h>
@@ -39,6 +41,47 @@ TEST(UserRepositoryTest, FirstLoginRegistersAtStartingRating) {
     EXPECT_TRUE(outcome.ok);
     EXPECT_TRUE(outcome.newly_registered);
     EXPECT_EQ(outcome.rating, kStartingRating);
+}
+
+// http_api.cpp's handle_register used to be user_exists() followed by a
+// separate authenticate() call -- two locked operations with a window between
+// them where two concurrent registrations of the same brand-new username
+// could both see user_exists() == false, then both reach authenticate()'s
+// insert; the second would throw on username's PRIMARY KEY constraint,
+// uncaught, on an HTTP connection thread. The fix was to call authenticate()
+// alone and branch on newly_registered, relying on it being one atomic,
+// locked lookup-or-insert. This is what actually proves that: many distinct
+// usernames, each raced by two threads at once, must produce exactly one
+// newly_registered == true per username and never throw.
+TEST(UserRepositoryTest, ConcurrentAuthenticateForTheSameNewUsernameRegistersExactlyOnce) {
+    UserRepository repo(fresh_db_path());
+    constexpr int kUsernames = 40;
+
+    std::vector<std::thread> threads;
+    threads.reserve(kUsernames * 2);
+    std::vector<std::atomic<int>> created_counts(kUsernames);
+    for (auto& count : created_counts) {
+        count = 0;
+    }
+
+    for (int i = 0; i < kUsernames; ++i) {
+        std::string username = "racer" + std::to_string(i);
+        for (int copy = 0; copy < 2; ++copy) {
+            threads.emplace_back([&repo, &created_counts, i, username] {
+                UserRepository::AuthOutcome outcome = repo.authenticate(username, "hunter2");
+                if (outcome.newly_registered) {
+                    created_counts[i].fetch_add(1);
+                }
+            });
+        }
+    }
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+
+    for (int i = 0; i < kUsernames; ++i) {
+        EXPECT_EQ(created_counts[i].load(), 1) << "username racer" << i;
+    }
 }
 
 TEST(UserRepositoryTest, ReturningWithTheCorrectPasswordSucceeds) {

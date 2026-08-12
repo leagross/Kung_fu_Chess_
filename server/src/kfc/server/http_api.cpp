@@ -64,11 +64,22 @@ json auth_body(const std::string& username, int rating) {
 ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, const json& request) {
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
-    if (users.user_exists(username)) {
+    // A single call, not user_exists() followed by authenticate(): those are
+    // two separate locked operations with a window between them where two
+    // concurrent registrations of the same brand-new username could both see
+    // user_exists() == false, then both reach authenticate()'s insert -- the
+    // second hits username's PRIMARY KEY constraint and throws, uncaught,
+    // straight out of an HTTP connection thread. authenticate() is one
+    // atomic, locked lookup-or-insert (see UserRepository), so there is no
+    // window between "does it exist" and "create it" to race into.
+    // newly_registered tells "this call just created the account" apart from
+    // "the account already existed" without a second round trip -- and a
+    // password that happens to match an existing account is still a 409
+    // here, deliberately: register is not a backdoor login.
+    kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
+    if (!auth.newly_registered) {
         return empty_response(409);
     }
-    // Unseen username: authenticate() registers it (see UserRepository).
-    kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
     return json_response(201, auth_body(username, auth.rating));
 }
 

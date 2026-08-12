@@ -1,5 +1,6 @@
 #include "kfc/server/http_api.hpp"
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,6 +13,7 @@
 #include "kfc/database/user_repository.hpp"
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/server/auth_token_store.hpp"
+#include "kfc/server/rate_limiter.hpp"
 
 namespace kfc::server {
 
@@ -40,6 +42,8 @@ std::string reason_phrase(int status) {
             return "Not Found";
         case 409:
             return "Conflict";
+        case 429:
+            return "Too Many Requests";
         case 503:
             return "Service Unavailable";
         default:
@@ -162,17 +166,24 @@ ix::HttpResponsePtr handle_health(kfc::database::UserRepository& users) {
     return json_response(200, json{{"status", "ok"}});
 }
 
-ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, AuthTokenStore& tokens,
-                             const ix::HttpRequestPtr& request) {
+ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, AuthTokenStore& tokens, RateLimiter& auth_limiter,
+                             const std::string& remote_ip, const ix::HttpRequestPtr& request) {
     try {
         if (request->method == "GET" && request->uri == "/health") {
             return handle_health(users);
         }
-        if (request->method == "POST" && request->uri == "/api/auth/register") {
-            return handle_register(users, tokens, json::parse(request->body));
-        }
-        if (request->method == "POST" && request->uri == "/api/auth/login") {
-            return handle_login(users, tokens, json::parse(request->body));
+        bool is_register = request->method == "POST" && request->uri == "/api/auth/register";
+        bool is_login = request->method == "POST" && request->uri == "/api/auth/login";
+        if (is_register || is_login) {
+            // Checked before the body is even parsed -- a flood of malformed
+            // JSON is exactly as much of an attack as a flood of well-formed
+            // guesses, and both endpoints share one IP-keyed budget so
+            // splitting an attack across the two does not double it.
+            if (!auth_limiter.allow(remote_ip, std::chrono::steady_clock::now())) {
+                return empty_response(429);
+            }
+            return is_register ? handle_register(users, tokens, json::parse(request->body))
+                               : handle_login(users, tokens, json::parse(request->body));
         }
         if (request->method == "GET" && request->uri.rfind(kHistoryPrefix, 0) == 0) {
             return handle_history(users, tokens, request, request->uri.substr(kHistoryPrefix.size()));
@@ -186,17 +197,26 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, AuthTokenStor
 }  // namespace
 
 HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, kfc::protocol::FileLogger& logger)
-    : port_(port), users_(users), logger_(logger) {
+    : port_(port),
+      users_(users),
+      logger_(logger),
+      // At most 10 register/login attempts per IP per minute -- generous for
+      // a real player who fat-fingers a password a few times, a real
+      // deterrent against a script trying passwords or spinning up accounts
+      // as fast as the network allows. See RateLimiter's own doc comment for
+      // why a fixed window rather than something more precise.
+      login_and_register_limiter_(10, std::chrono::minutes(1)) {
     // Paired with uninitNetSystem() in the destructor, exactly like
     // WebSocketGameServer -- ix's own init/uninit are reference-counted, so
     // two servers in one process each doing this is the normal pattern.
     ix::initNetSystem();
     server_ = std::make_unique<ix::HttpServer>(port_, "0.0.0.0");
 
-    server_->setOnConnectionCallback(
-        [this](ix::HttpRequestPtr request, const std::shared_ptr<ix::ConnectionState>&) -> ix::HttpResponsePtr {
-            return dispatch(users_, tokens_, request);
-        });
+    server_->setOnConnectionCallback([this](ix::HttpRequestPtr request,
+                                            const std::shared_ptr<ix::ConnectionState>& connection_state)
+                                         -> ix::HttpResponsePtr {
+        return dispatch(users_, tokens_, login_and_register_limiter_, connection_state->getRemoteIp(), request);
+    });
 }
 
 HttpApiServer::~HttpApiServer() {

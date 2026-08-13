@@ -29,8 +29,8 @@ std::string fresh_db_path() {
 
 TEST(RatingServiceTest, WhiteWinTakesPointsFromBlackAtEqualRatings) {
     UserRepository users(fresh_db_path());
-    users.authenticate("white", "pw");  // both start at 1200
-    users.authenticate("black", "pw");
+    users.authenticate("white", "hunter2");  // both start at 1200
+    users.authenticate("black", "hunter2");
 
     apply_game_result(users, PieceColor::White, "white", "black");
 
@@ -41,8 +41,8 @@ TEST(RatingServiceTest, WhiteWinTakesPointsFromBlackAtEqualRatings) {
 
 TEST(RatingServiceTest, BlackWinIsTheMirror) {
     UserRepository users(fresh_db_path());
-    users.authenticate("white", "pw");
-    users.authenticate("black", "pw");
+    users.authenticate("white", "hunter2");
+    users.authenticate("black", "hunter2");
 
     apply_game_result(users, PieceColor::Black, "white", "black");
 
@@ -52,8 +52,8 @@ TEST(RatingServiceTest, BlackWinIsTheMirror) {
 
 TEST(RatingServiceTest, ADrawLeavesEqualRatingsUnchanged) {
     UserRepository users(fresh_db_path());
-    users.authenticate("white", "pw");
-    users.authenticate("black", "pw");
+    users.authenticate("white", "hunter2");
+    users.authenticate("black", "hunter2");
 
     apply_game_result(users, std::nullopt, "white", "black");
 
@@ -63,7 +63,7 @@ TEST(RatingServiceTest, ADrawLeavesEqualRatingsUnchanged) {
 
 TEST(RatingServiceTest, UnknownPlayerIsANoOp) {
     UserRepository users(fresh_db_path());
-    users.authenticate("white", "pw");  // black never registered
+    users.authenticate("white", "hunter2");  // black never registered
 
     apply_game_result(users, PieceColor::White, "white", "ghost");
 
@@ -73,7 +73,7 @@ TEST(RatingServiceTest, UnknownPlayerIsANoOp) {
 
 TEST(RatingServiceTest, ForfeitDocksTheFlatDisconnectPenalty) {
     UserRepository users(fresh_db_path());
-    users.authenticate("quitter", "pw");
+    users.authenticate("quitter", "hunter2");
 
     apply_forfeit(users, "quitter");
 
@@ -100,8 +100,8 @@ TEST(RatingServiceTest, ForfeitOfAnUnknownPlayerIsANoOp) {
 // particular final rating.
 TEST(RatingServiceTest, ConcurrentResultsForTheSamePairConserveTheirTotal) {
     UserRepository users(fresh_db_path());
-    (void)users.authenticate("white", "pw");
-    (void)users.authenticate("black", "pw");
+    (void)users.authenticate("white", "hunter2");
+    (void)users.authenticate("black", "hunter2");
     const int total_before = *users.rating_of("white") + *users.rating_of("black");
 
     constexpr int kThreads = 4;
@@ -127,7 +127,7 @@ TEST(RatingServiceTest, ConcurrentResultsForTheSamePairConserveTheirTotal) {
 
 TEST(RatingServiceTest, ConcurrentForfeitsAreAllCharged) {
     UserRepository users(fresh_db_path());
-    (void)users.authenticate("quitter", "pw");
+    (void)users.authenticate("quitter", "hunter2");
 
     constexpr int kThreads = 4;
     constexpr int kForfeitsPerThread = 25;

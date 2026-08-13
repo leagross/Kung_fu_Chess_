@@ -69,6 +69,14 @@ json auth_body(const std::string& username, int rating, const std::string& token
     return json{{"username", username}, {"rating", rating}, {"token", token}};
 }
 
+// A body worth having for a 400: unlike "409, no body" (the username was
+// simply taken -- nothing more to say) or "401, no body" (wrong credentials
+// -- deliberately unspecific), a rejected new username/password is a client
+// bug the caller can actually fix once told which rule it broke.
+ix::HttpResponsePtr reason_response(int status, const std::string& reason) {
+    return json_response(status, json{{"reason", reason}});
+}
+
 ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, AuthTokenStore& tokens,
                                     const json& request) {
     std::string username = request.at("username").get<std::string>();
@@ -86,10 +94,18 @@ ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, AuthTo
     // password that happens to match an existing account is still a 409
     // here, deliberately: register is not a backdoor login.
     kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
-    if (!auth.newly_registered) {
-        return empty_response(409);
+    if (auth.newly_registered) {
+        return json_response(201, auth_body(username, auth.rating, tokens.issue(username)));
     }
-    return json_response(201, auth_body(username, auth.rating, tokens.issue(username)));
+    // Two different reasons an unregistered call can fail, told apart by
+    // auth.reason -- see UserRepository::authenticate's own doc comment.
+    // invalid_username/weak_password mean nothing was created (this
+    // username is still free); anything else (in practice, the username
+    // already existed) is the 409 this always used to return.
+    if (auth.reason == "invalid_username" || auth.reason == "weak_password") {
+        return reason_response(400, auth.reason);
+    }
+    return empty_response(409);
 }
 
 ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, AuthTokenStore& tokens, const json& request) {

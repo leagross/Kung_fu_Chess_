@@ -43,6 +43,12 @@ namespace kfc::server {
 /// per-connection message-rate limiting in ClientSession from early on;
 /// these two endpoints had nothing until now, which made either one a bare
 /// script away from a credential-stuffing or account-creation flood.
+///
+/// A brand-new username/password pair is also checked against
+/// UserRepository's length and character rules before the account is
+/// created; register reports which one failed (400, `{"reason": ...}`) so a
+/// real client can show something the user can act on, rather than a bare
+/// 409 that reads the same as "someone already has that name."
 class HttpApiServer {
 public:
     /// users and logger must outlive this server. Brings up the network

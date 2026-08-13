@@ -255,7 +255,7 @@ TEST(WebSocketEndToEndTest, ARealClientLogsInCreatesARoomAndIsToldItsId) {
     TestClient client(server.url());
     ASSERT_TRUE(client.wait_until_open());
 
-    client.send(ClientMessage{Login{"alice", "pw"}});
+    client.send(ClientMessage{Login{"alice", "hunter2"}});
     client.send(ClientMessage{CreateRoom{}});
 
     std::optional<Welcome> welcome = client.wait_for<Welcome>();
@@ -272,14 +272,14 @@ TEST(WebSocketEndToEndTest, TwoRealClientsMeetInARoomAndSeeAMoveTravelBetweenThe
 
     TestClient white(server.url());
     ASSERT_TRUE(white.wait_until_open());
-    white.send(ClientMessage{Login{"alice", "pw"}});
+    white.send(ClientMessage{Login{"alice", "hunter2"}});
     white.send(ClientMessage{CreateRoom{}});
     std::optional<Welcome> white_welcome = white.wait_for<Welcome>();
     ASSERT_TRUE(white_welcome.has_value());
 
     TestClient black(server.url());
     ASSERT_TRUE(black.wait_until_open());
-    black.send(ClientMessage{Login{"bob", "pw"}});
+    black.send(ClientMessage{Login{"bob", "hunter2"}});
     black.send(ClientMessage{JoinRoom{white_welcome->room}});
 
     std::optional<Welcome> black_welcome = black.wait_for<Welcome>();
@@ -306,20 +306,20 @@ TEST(WebSocketEndToEndTest, AThirdClientWatchesAndItsCommandsChangeNothing) {
 
     TestClient white(server.url());
     ASSERT_TRUE(white.wait_until_open());
-    white.send(ClientMessage{Login{"alice", "pw"}});
+    white.send(ClientMessage{Login{"alice", "hunter2"}});
     white.send(ClientMessage{CreateRoom{}});
     std::optional<Welcome> white_welcome = white.wait_for<Welcome>();
     ASSERT_TRUE(white_welcome.has_value());
 
     TestClient black(server.url());
     ASSERT_TRUE(black.wait_until_open());
-    black.send(ClientMessage{Login{"bob", "pw"}});
+    black.send(ClientMessage{Login{"bob", "hunter2"}});
     black.send(ClientMessage{JoinRoom{white_welcome->room}});
     ASSERT_TRUE(black.wait_for<Welcome>().has_value());
 
     TestClient viewer(server.url());
     ASSERT_TRUE(viewer.wait_until_open());
-    viewer.send(ClientMessage{Login{"carol", "pw"}});
+    viewer.send(ClientMessage{Login{"carol", "hunter2"}});
     viewer.send(ClientMessage{JoinRoom{white_welcome->room}});
 
     std::optional<Welcome> viewer_welcome = viewer.wait_for<Welcome>();
@@ -357,7 +357,7 @@ TEST(WebSocketEndToEndTest, JoiningARoomThatDoesNotExistComesBackWithAReason) {
 
     TestClient client(server.url());
     ASSERT_TRUE(client.wait_until_open());
-    client.send(ClientMessage{Login{"alice", "pw"}});
+    client.send(ClientMessage{Login{"alice", "hunter2"}});
     client.send(ClientMessage{JoinRoom{"NOSUCH"}});
 
     std::optional<JoinFailed> failure = client.wait_for<JoinFailed>();
@@ -375,14 +375,14 @@ TEST(WebSocketEndToEndTest, ADroppedSocketStartsTheOpponentsCountdown) {
 
     TestClient white(server.url());
     ASSERT_TRUE(white.wait_until_open());
-    white.send(ClientMessage{Login{"alice", "pw"}});
+    white.send(ClientMessage{Login{"alice", "hunter2"}});
     white.send(ClientMessage{CreateRoom{}});
     std::optional<Welcome> welcome = white.wait_for<Welcome>();
     ASSERT_TRUE(welcome.has_value());
 
     auto black = std::make_unique<TestClient>(server.url());
     ASSERT_TRUE(black->wait_until_open());
-    black->send(ClientMessage{Login{"bob", "pw"}});
+    black->send(ClientMessage{Login{"bob", "hunter2"}});
     black->send(ClientMessage{JoinRoom{welcome->room}});
     ASSERT_TRUE(black->wait_for<Welcome>().has_value());
     ASSERT_TRUE(white.wait_for<MatchStart>().has_value());

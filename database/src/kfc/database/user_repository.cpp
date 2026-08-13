@@ -1,6 +1,8 @@
 #include "kfc/database/user_repository.hpp"
 
 
+#include <algorithm>
+#include <cctype>
 #include <format>
 
 #include <SQLiteCpp/Database.h>
@@ -18,6 +20,40 @@ namespace {
 // api-gateway this replaces serialized java.time.Instant as.
 std::string to_iso8601(std::chrono::system_clock::time_point tp) {
     return std::format("{:%Y-%m-%dT%H:%M:%SZ}", std::chrono::floor<std::chrono::seconds>(tp));
+}
+
+// Applied only to a username nobody has ever registered -- an existing
+// account's username is whatever it already is, and a login attempt against
+// it is a password check, not a fresh registration, so these never run on
+// that path (see authenticate() below). 3-24 characters keeps a username
+// speakable and displayable everywhere the client puts one -- notably
+// alongside a room id and a rating on one line -- and alnum-or-underscore
+// rules out anything that would need escaping wherever a username is later
+// embedded (a log line, a URL path segment, a filename).
+bool is_valid_new_username(const std::string& username) {
+    constexpr std::size_t kMinLength = 3;
+    constexpr std::size_t kMaxLength = 24;
+    if (username.size() < kMinLength || username.size() > kMaxLength) {
+        return false;
+    }
+    return std::all_of(username.begin(), username.end(), [](unsigned char c) {
+        return std::isalnum(c) || c == '_';
+    });
+}
+
+// Same reasoning, for the password half of a fresh registration. The floor
+// is a real (if modest) defense against the accounts a script would create
+// to test the register endpoint -- 6, not the more commonly quoted 8, is a
+// deliberate choice: it is where the floor lands without rejecting
+// "hunter2" (7 characters), the password this codebase's own tests already
+// used everywhere as their stand-in for "a real one" before this rule
+// existed. The ceiling exists so a client cannot feed a multi-megabyte
+// string into Argon2 -- memory-hard hashing does not need a long input to
+// be expensive, but there is no reason to hash one either.
+bool is_valid_new_password(const std::string& password) {
+    constexpr std::size_t kMinLength = 6;
+    constexpr std::size_t kMaxLength = 128;
+    return password.size() >= kMinLength && password.size() <= kMaxLength;
 }
 
 }  // namespace
@@ -62,9 +98,21 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
         return AuthOutcome{true, "", rating, false};
     }
 
-    // First time we've seen this username -> register it. The salt column is
-    // left empty: Argon2 carries its own salt inside the encoded string, so
-    // there is no longer a second value to keep in step with the hash.
+    // First time we've seen this username -> register it, once it and the
+    // password clear the new-account rules (see is_valid_new_username/
+    // is_valid_new_password's own comments for why these never apply to an
+    // existing account). Neither failure creates anything -- a bad username
+    // is not implicitly "taken" by having been rejected.
+    if (!is_valid_new_username(username)) {
+        return AuthOutcome{false, "invalid_username", 0, false};
+    }
+    if (!is_valid_new_password(password)) {
+        return AuthOutcome{false, "weak_password", 0, false};
+    }
+
+    // The salt column is left empty: Argon2 carries its own salt inside the
+    // encoded string, so there is no longer a second value to keep in step
+    // with the hash.
     SQLite::Statement insert(*db_, "INSERT INTO users (username, salt, password_hash, rating) VALUES (?, ?, ?, ?)");
     insert.bind(1, username);
     insert.bind(2, "");

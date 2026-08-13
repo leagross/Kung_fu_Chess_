@@ -8,7 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 FetchContent_Declare(
   googletest
-  URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG v1.15.2
 )
 FetchContent_MakeAvailable(googletest)
 
@@ -17,7 +18,8 @@ FetchContent_MakeAvailable(googletest)
 # OpenCV-free).
 FetchContent_Declare(
   nlohmann_json
-  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
@@ -31,7 +33,8 @@ set(USE_TLS OFF CACHE BOOL "" FORCE)
 set(USE_ZLIB OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
   ixwebsocket
-  URL https://github.com/machinezone/IXWebSocket/archive/refs/tags/v11.4.5.zip
+  GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
+  GIT_TAG v11.4.5
 )
 FetchContent_MakeAvailable(ixwebsocket)
 
@@ -47,7 +50,8 @@ set(SQLITECPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
   SQLiteCpp
-  URL https://github.com/SRombauts/SQLiteCpp/archive/refs/tags/3.3.2.zip
+  GIT_REPOSITORY https://github.com/SRombauts/SQLiteCpp.git
+  GIT_TAG 3.3.2
 )
 FetchContent_MakeAvailable(SQLiteCpp)
 
@@ -65,7 +69,8 @@ FetchContent_MakeAvailable(SQLiteCpp)
 # code that never runs.
 FetchContent_Declare(
   argon2
-  URL https://github.com/P-H-C/phc-winner-argon2/archive/refs/tags/20190702.zip
+  GIT_REPOSITORY https://github.com/P-H-C/phc-winner-argon2.git
+  GIT_TAG 20190702
   SOURCE_SUBDIR do-not-configure
 )
 FetchContent_MakeAvailable(argon2)
@@ -101,7 +106,8 @@ endif()
 if (NOT WIN32)
   FetchContent_Declare(
     miniaudio
-    URL https://github.com/mackron/miniaudio/archive/refs/tags/0.11.21.tar.gz
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG 0.11.21
     SOURCE_SUBDIR do-not-configure
   )
   FetchContent_MakeAvailable(miniaudio)

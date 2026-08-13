@@ -43,6 +43,62 @@ TEST(UserRepositoryTest, FirstLoginRegistersAtStartingRating) {
     EXPECT_EQ(outcome.rating, kStartingRating);
 }
 
+TEST(UserRepositoryTest, ATooShortNewUsernameIsRejectedAndNothingIsCreated) {
+    UserRepository repo(fresh_db_path());
+
+    UserRepository::AuthOutcome outcome = repo.authenticate("ab", "hunter2");
+
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_FALSE(outcome.newly_registered);
+    EXPECT_EQ(outcome.reason, "invalid_username");
+    EXPECT_FALSE(repo.user_exists("ab"));
+}
+
+TEST(UserRepositoryTest, ANewUsernameWithASpaceIsRejected) {
+    UserRepository repo(fresh_db_path());
+
+    UserRepository::AuthOutcome outcome = repo.authenticate("bad name", "hunter2");
+
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_EQ(outcome.reason, "invalid_username");
+}
+
+TEST(UserRepositoryTest, ATooShortNewPasswordIsRejectedAndTheAccountIsNotCreated) {
+    UserRepository repo(fresh_db_path());
+
+    UserRepository::AuthOutcome outcome = repo.authenticate("alice", "short");
+
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_FALSE(outcome.newly_registered);
+    EXPECT_EQ(outcome.reason, "weak_password");
+    EXPECT_FALSE(repo.user_exists("alice"))
+        << "a rejected registration must not leave the username claimed";
+}
+
+TEST(UserRepositoryTest, RejectingANewAccountLeavesTheUsernameFreeToTryAgain) {
+    UserRepository repo(fresh_db_path());
+    repo.authenticate("alice", "short");  // rejected -- see the test above
+
+    UserRepository::AuthOutcome retry = repo.authenticate("alice", "a-real-password");
+
+    EXPECT_TRUE(retry.ok);
+    EXPECT_TRUE(retry.newly_registered);
+}
+
+TEST(UserRepositoryTest, UsernameAndPasswordRulesDoNotApplyToAnExistingAccounts) {
+    // The rules only gate creating a *new* account. A username or password
+    // that predates them (or a login attempt with the wrong password, which
+    // happens to be short) must keep working exactly as it always did.
+    UserRepository repo(fresh_db_path());
+    repo.authenticate("alice", "hunter2");
+
+    UserRepository::AuthOutcome outcome = repo.authenticate("alice", "x");
+
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_EQ(outcome.reason, "wrong_password") << "a short guess is still just a wrong password here, "
+                                                   "not a rejected registration";
+}
+
 // http_api.cpp's handle_register used to be user_exists() followed by a
 // separate authenticate() call -- two locked operations with a window between
 // them where two concurrent registrations of the same brand-new username
@@ -176,11 +232,11 @@ TEST(UserRepositoryTest, SetRatingPersistsAndShowsUpOnNextLogin) {
 
 TEST(UserRepositoryTest, AccountsAreIndependent) {
     UserRepository repo(fresh_db_path());
-    repo.authenticate("alice", "apw");
-    repo.authenticate("bob", "bpw");
+    repo.authenticate("alice", "apassword");
+    repo.authenticate("bob", "bpassword");
 
     // Cross passwords are rejected; each keeps its own rating.
-    EXPECT_FALSE(repo.authenticate("alice", "bpw").ok);
+    EXPECT_FALSE(repo.authenticate("alice", "bpassword").ok);
     repo.set_rating("alice", 1300);
     EXPECT_EQ(*repo.rating_of("bob"), kStartingRating);
 }

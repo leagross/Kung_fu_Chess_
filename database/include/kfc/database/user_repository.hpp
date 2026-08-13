@@ -33,11 +33,16 @@ struct GameRecord {
 
 /// Server-side account store, backed by a single SQLite file (the CTD SERVER
 /// spec's "SQLI Database ... קובץ בודד, לא צריך התקנות"). One row per user: a
-/// per-user random salt, the salted SHA-256 of their password (never the
-/// plaintext -- see sha256.hpp), and their ELO rating.
+/// username, the Argon2id hash of their password (never the plaintext -- see
+/// password_hash.hpp; the salt column exists but is left empty, since Argon2
+/// carries its own salt inside the encoded hash string), and their ELO
+/// rating.
 ///
-/// Password policy is exactly the spec's: the first time a username is seen its
-/// password is registered; every later login must match it. Rating starts at
+/// Password policy is close to the spec's, with one addition: the first time
+/// a username is seen, it and the password are checked against
+/// is_valid_new_username/is_valid_new_password's rules (length and
+/// character set) before the account is created; every later login must
+/// match the password that passed that check. Rating starts at
 /// kStartingRating (see elo.hpp) and is nudged by ELO after each game.
 ///
 /// This is the SQLite implementation of IUserStore. It is the right one for a
@@ -56,7 +61,10 @@ public:
     /// Registers username with password on first sight (rating =
     /// kStartingRating), or verifies password against the stored hash on a
     /// return visit. reason is "wrong_password" when an existing user's
-    /// password does not match.
+    /// password does not match; for a username nobody has registered yet,
+    /// it is "invalid_username" or "weak_password" if the new account would
+    /// not meet the length/character rules -- in which case, like a wrong
+    /// password, nothing is created.
     [[nodiscard]] AuthOutcome authenticate(const std::string& username, const std::string& password) override;
 
     /// The user's current rating, or std::nullopt if there is no such user.

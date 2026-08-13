@@ -112,6 +112,22 @@ TEST_F(HttpApiFixture, RegisterAnExistingUsernameReturns409) {
     EXPECT_EQ(response->statusCode, 409);
 }
 
+TEST_F(HttpApiFixture, RegisterWithATooShortUsernameReturns400WithAReason) {
+    ix::HttpResponsePtr response = post("/api/auth/register", json{{"username", "ab"}, {"password", "hunter2"}}.dump());
+
+    ASSERT_EQ(response->statusCode, 400);
+    EXPECT_EQ(json::parse(response->body).at("reason").get<std::string>(), "invalid_username");
+    EXPECT_FALSE(users_->user_exists("ab"));
+}
+
+TEST_F(HttpApiFixture, RegisterWithATooShortPasswordReturns400WithAReasonAndCreatesNoAccount) {
+    ix::HttpResponsePtr response = post("/api/auth/register", json{{"username", "alice"}, {"password", "short"}}.dump());
+
+    ASSERT_EQ(response->statusCode, 400);
+    EXPECT_EQ(json::parse(response->body).at("reason").get<std::string>(), "weak_password");
+    EXPECT_FALSE(users_->user_exists("alice")) << "the username must still be free to register with a real password";
+}
+
 TEST_F(HttpApiFixture, LoginWithTheRightPasswordReturns200AndAToken) {
     post("/api/auth/register", json{{"username", "alice"}, {"password", "hunter2"}}.dump());
 

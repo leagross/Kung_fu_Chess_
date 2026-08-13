@@ -112,7 +112,7 @@ TEST(ClientSessionTest, AMoveBeforeBeingSeatedIsIgnored) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_text(encode(ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}}));
 
     EXPECT_TRUE(session.authenticated());
@@ -127,7 +127,7 @@ TEST(ClientSessionTest, AFirstLoginRegistersTheAccountAndSaysNothingBack) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
 
     EXPECT_TRUE(session.authenticated());
     EXPECT_TRUE(socket.sent.empty()) << "success is silent; the client waits for a Welcome after it asks to be seated";
@@ -158,8 +158,8 @@ TEST(ClientSessionTest, ASecondLoginOnTheSameConnectionChangesNothing) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
-    session.on_text(login_text("mallory", "pw"));  // cannot become someone else
+    session.on_text(login_text("alice", "hunter2"));
+    session.on_text(login_text("mallory", "hunter2"));  // cannot become someone else
 
     session.on_text(encode(ClientMessage{CreateRoom{}}));
     std::optional<Welcome> welcome = socket.first_of<Welcome>();
@@ -174,7 +174,7 @@ TEST(ClientSessionTest, CreateSeatsTheClientAsWhiteAndSendsAWelcome) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_text(encode(ClientMessage{CreateRoom{}}));
 
     ASSERT_TRUE(session.seat().has_value());
@@ -191,7 +191,7 @@ TEST(ClientSessionTest, JoiningARoomThatDoesNotExistIsExplainedThenClosed) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_text(encode(ClientMessage{JoinRoom{"NOPE"}}));
 
     std::optional<JoinFailed> failure = socket.first_of<JoinFailed>();
@@ -208,7 +208,7 @@ TEST(ClientSessionTest, JoiningWithAnEmptyRoomNameIsRefusedWithAReason) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_text(encode(ClientMessage{JoinRoom{""}}));
 
     std::optional<JoinFailed> failure = socket.first_of<JoinFailed>();
@@ -222,7 +222,7 @@ TEST(ClientSessionTest, ASecondSeatingRequestIsIgnoredRatherThanTakingAnotherSea
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_text(encode(ClientMessage{CreateRoom{}}));
     ASSERT_TRUE(session.seat().has_value());
     kfc::server::RoomId first_room = session.seat()->room;
@@ -240,7 +240,7 @@ TEST(ClientSessionTest, AViewersGameplayMessagesAreDroppedRatherThanRouted) {
     FakeSocket white_socket, black_socket, viewer_socket;
 
     ClientSession white = fixture.session(white_socket, "conn-white");
-    white.on_text(login_text("alice", "pw"));
+    white.on_text(login_text("alice", "hunter2"));
     white.on_text(encode(ClientMessage{CreateRoom{}}));
     ASSERT_TRUE(white.seat().has_value());
     std::optional<Welcome> welcome = white_socket.first_of<Welcome>();
@@ -248,12 +248,12 @@ TEST(ClientSessionTest, AViewersGameplayMessagesAreDroppedRatherThanRouted) {
     const std::string room = welcome->room;
 
     ClientSession black = fixture.session(black_socket, "conn-black");
-    black.on_text(login_text("bob", "pw"));
+    black.on_text(login_text("bob", "hunter2"));
     black.on_text(encode(ClientMessage{JoinRoom{room}}));
     ASSERT_TRUE(black.seat().has_value());
 
     ClientSession viewer = fixture.session(viewer_socket, "conn-viewer");
-    viewer.on_text(login_text("carol", "pw"));
+    viewer.on_text(login_text("carol", "hunter2"));
     viewer.on_text(encode(ClientMessage{JoinRoom{room}}));
     ASSERT_TRUE(viewer.seat().has_value());
     ASSERT_TRUE(viewer.seat()->spectator) << "precondition: the third joiner watches";
@@ -306,7 +306,7 @@ TEST(ClientSessionTest, AnUndecodableFrameIsDroppedButTheConnectionSurvives) {
 
     EXPECT_EQ(socket.closes, 0) << "a garbled frame is not grounds for hanging up";
     // ...and the connection still works afterwards.
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     EXPECT_TRUE(session.authenticated());
 }
 
@@ -317,7 +317,7 @@ TEST(ClientSessionTest, ClosingBeforeBeingSeatedEndsNothing) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_close();
 
     EXPECT_EQ(fixture.rooms.room_count(), 0u);
@@ -328,7 +328,7 @@ TEST(ClientSessionTest, ClosingAfterBeingSeatedReleasesTheRoom) {
     FakeSocket socket;
     ClientSession session = fixture.session(socket);
 
-    session.on_text(login_text("alice", "pw"));
+    session.on_text(login_text("alice", "hunter2"));
     session.on_text(encode(ClientMessage{CreateRoom{}}));
     ASSERT_EQ(fixture.rooms.room_count(), 1u);
 
@@ -343,12 +343,12 @@ TEST(ClientSessionTest, ASecondConnectionForALoggedInAccountIsRefused) {
     Fixture fixture;
     FakeSocket first_socket;
     ClientSession first = fixture.session(first_socket, "conn-1");
-    first.on_text(login_text("alice", "pw"));
+    first.on_text(login_text("alice", "hunter2"));
     ASSERT_TRUE(first.authenticated());
 
     FakeSocket second_socket;
     ClientSession second = fixture.session(second_socket, "conn-2");
-    second.on_text(login_text("alice", "pw"));  // right password, wrong moment
+    second.on_text(login_text("alice", "hunter2"));  // right password, wrong moment
 
     std::optional<LoginFailed> failure = second_socket.first_of<LoginFailed>();
     ASSERT_TRUE(failure.has_value()) << "the duplicate was hung up on without being told why";
@@ -362,13 +362,13 @@ TEST(ClientSessionTest, TheDuplicateIsRefusedRatherThanTheOriginalBeingKicked) {
     Fixture fixture;
     FakeSocket first_socket;
     ClientSession first = fixture.session(first_socket, "conn-1");
-    first.on_text(login_text("alice", "pw"));
+    first.on_text(login_text("alice", "hunter2"));
     first.on_text(encode(ClientMessage{CreateRoom{}}));
     ASSERT_TRUE(first.seat().has_value());
 
     FakeSocket second_socket;
     ClientSession second = fixture.session(second_socket, "conn-2");
-    second.on_text(login_text("alice", "pw"));
+    second.on_text(login_text("alice", "hunter2"));
 
     // Kicking the first is the other plausible policy, and it is the wrong one:
     // its close arrives asynchronously and would report a disconnect against a
@@ -389,7 +389,7 @@ TEST(ClientSessionTest, ClosingAConnectionFreesTheNameForTheSameAccountToReturn)
     {
         FakeSocket socket;
         ClientSession dropped = fixture.session(socket, "conn-1");
-        dropped.on_text(login_text("alice", "pw"));
+        dropped.on_text(login_text("alice", "hunter2"));
         dropped.on_text(encode(ClientMessage{CreateRoom{}}));
         std::optional<Welcome> welcome = socket.first_of<Welcome>();
         ASSERT_TRUE(welcome.has_value());
@@ -401,7 +401,7 @@ TEST(ClientSessionTest, ClosingAConnectionFreesTheNameForTheSameAccountToReturn)
 
     FakeSocket returning_socket;
     ClientSession returning = fixture.session(returning_socket, "conn-2");
-    returning.on_text(login_text("alice", "pw"));
+    returning.on_text(login_text("alice", "hunter2"));
 
     EXPECT_TRUE(returning.authenticated()) << "a returning player was locked out by their own old session";
     EXPECT_TRUE(returning_socket.first_of<LoginFailed>() == std::nullopt);
@@ -434,7 +434,7 @@ TEST(ClientSessionTest, DestroyingASessionWithoutACloseStillFreesTheName) {
     {
         FakeSocket socket;
         ClientSession abandoned = fixture.session(socket);
-        abandoned.on_text(login_text("alice", "pw"));
+        abandoned.on_text(login_text("alice", "hunter2"));
         ASSERT_EQ(fixture.sessions.live_count(), 1u);
     }
     // The lease is RAII precisely so a path that forgets to close cannot lock an
@@ -448,8 +448,8 @@ TEST(ClientSessionTest, DifferentAccountsAreUnaffectedByEachOther) {
     ClientSession alice = fixture.session(alice_socket, "conn-1");
     ClientSession bob = fixture.session(bob_socket, "conn-2");
 
-    alice.on_text(login_text("alice", "pw"));
-    bob.on_text(login_text("bob", "pw"));
+    alice.on_text(login_text("alice", "hunter2"));
+    bob.on_text(login_text("bob", "hunter2"));
 
     EXPECT_TRUE(alice.authenticated());
     EXPECT_TRUE(bob.authenticated());

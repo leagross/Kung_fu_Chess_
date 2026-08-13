@@ -58,6 +58,16 @@ TEST(ProtocolJsonTest, MatchStartRoundTrips) {
     EXPECT_TRUE(std::holds_alternative<MatchStart>(*decoded));
 }
 
+TEST(ProtocolJsonTest, JoinRedirectRoundTripsTheUrl) {
+    ServerMessage message = JoinRedirect{"ws://localhost:8082"};
+
+    std::optional<ServerMessage> decoded = decode_server_message(encode(message));
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<JoinRedirect>(*decoded));
+    EXPECT_EQ(std::get<JoinRedirect>(*decoded).url, "ws://localhost:8082");
+}
+
 TEST(ProtocolJsonTest, OpponentDisconnectedRoundTripsSecondsRemaining) {
     ServerMessage message = OpponentDisconnected{17};
 

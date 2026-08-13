@@ -163,6 +163,12 @@ private:
     void apply_board_update(const kfc::protocol::BoardUpdate& update);
     void handle_motion_started(const kfc::protocol::MotionStarted& started);
     void send(const kfc::protocol::ClientMessage& message);
+    // Builds socket_ against url, wires its callback, and starts it -- what
+    // the constructor originally did inline. Pulled out so wait_for_welcome()
+    // can call it a second time when redirected to a different worker (see
+    // JoinRedirect); the old socket must already be stopped by the caller
+    // first.
+    void connect_to(const std::string& url);
 
     std::string username_;
     std::string password_;
@@ -179,6 +185,9 @@ private:
     // The other way that same wait can end: the server refused to seat us and
     // said why. Guarded by welcome_mutex_ alongside pending_welcome_.
     std::optional<std::string> join_failure_;
+    // A third way: the room is real, just on a different worker. Guarded by
+    // welcome_mutex_ the same way -- see on_message and wait_for_welcome.
+    std::optional<std::string> pending_redirect_url_;
 
     // main-thread-only from here on (see wait())
     std::optional<kfc::model::Board> board_;

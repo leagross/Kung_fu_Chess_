@@ -100,9 +100,14 @@ private:
 
     // Asks RoomManager for a seat, whichever of the three ways was requested.
     // failure_reason is filled with a kfc::protocol::join_reasons string when
-    // no seat comes back, so the client can be told which thing went wrong.
+    // no seat comes back, so the client can be told which thing went wrong --
+    // unless redirect_url ends up non-empty instead, which means the room is
+    // real but lives on a different worker (JoinRoom only; see
+    // RoomManager::join_room), and the caller should send a JoinRedirect
+    // rather than a JoinFailed.
     [[nodiscard]] std::optional<RoomManager::Seat> seat_for(const kfc::protocol::ClientMessage& message,
-                                                            const AuthedUser& user, std::string& failure_reason);
+                                                            const AuthedUser& user, std::string& failure_reason,
+                                                            std::string& redirect_url);
 
     // Logs why, then closes the connection. The reason is always sent to the
     // client first, by the caller -- see the class comment.

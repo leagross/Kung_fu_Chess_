@@ -133,7 +133,8 @@ bool ClientSession::handle_login(const kfc::protocol::ClientMessage& message) {
 }
 
 std::optional<RoomManager::Seat> ClientSession::seat_for(const kfc::protocol::ClientMessage& message,
-                                                        const AuthedUser& user, std::string& failure_reason) {
+                                                        const AuthedUser& user, std::string& failure_reason,
+                                                        std::string& redirect_url) {
     if (std::holds_alternative<kfc::protocol::Play>(message)) {
         return rooms_.join_any(user.username, user.rating, send_, close_);
     }
@@ -148,7 +149,7 @@ std::optional<RoomManager::Seat> ClientSession::seat_for(const kfc::protocol::Cl
         failure_reason = kfc::protocol::join_reasons::kNoSuchRoom;
         return std::nullopt;
     }
-    return rooms_.join_room(room, user.username, send_, close_, &failure_reason);
+    return rooms_.join_room(room, user.username, send_, close_, &failure_reason, &redirect_url);
 }
 
 bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) {
@@ -168,11 +169,19 @@ bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) 
     }
 
     // Filled by RoomManager whenever seating fails, so the client is told
-    // *which* thing went wrong.
+    // *which* thing went wrong -- or, if redirect_url ends up non-empty
+    // instead, *where* to go instead (see seat_for's doc comment).
     std::string failure_reason;
-    std::optional<RoomManager::Seat> assigned = seat_for(message, *pending_, failure_reason);
+    std::string redirect_url;
+    std::optional<RoomManager::Seat> assigned = seat_for(message, *pending_, failure_reason, redirect_url);
     if (assigned.has_value()) {
         seat_ = assigned;
+        return true;
+    }
+
+    if (!redirect_url.empty()) {
+        send_(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::JoinRedirect{redirect_url}}));
+        drop("'" + pending_->username + "': redirected to " + redirect_url);
         return true;
     }
 

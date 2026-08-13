@@ -9,6 +9,7 @@
 #include <csignal>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,6 +23,7 @@
 #include "kfc/protocol/gameplay_config.hpp"
 #include "kfc/database/rating_service.hpp"
 #include "kfc/server/http_api.hpp"
+#include "kfc/server/redis_room_directory.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/database/user_repository.hpp"
 #include "kfc/server/session_registry.hpp"
@@ -31,6 +33,10 @@ namespace {
 
 constexpr std::string_view kLogLevelFlag = "--log-level=";
 constexpr std::string_view kHttpPortFlag = "--http-port=";
+constexpr std::string_view kRedisHostFlag = "--redis-host=";
+constexpr std::string_view kRedisPortFlag = "--redis-port=";
+constexpr std::string_view kWorkerUrlFlag = "--worker-url=";
+constexpr int kDefaultRedisPort = 6379;
 
 // A port number, or std::nullopt if the argument is not one. Written out rather
 // than calling std::stoi directly, which throws on anything unparsable and
@@ -85,6 +91,13 @@ int main(int argc, char** argv) {
     // off and leaves the events, for a long-running server where the dump is
     // more disk than it is worth.
     kfc::protocol::LogLevel log_level = kfc::protocol::LogLevel::Debug;
+    // Unset (the default) means single-worker mode: RoomManager gets no
+    // IRoomDirectory and behaves exactly as it always has. Set, together with
+    // --worker-url, this worker registers/looks up rooms across however many
+    // others share the same Redis -- see Roadmap.md's stage 2.
+    std::string redis_host;
+    int redis_port = kDefaultRedisPort;
+    std::string worker_url;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -108,15 +121,39 @@ int main(int argc, char** argv) {
             http_port = *parsed_http_port;
             continue;
         }
+        if (arg.rfind(kRedisHostFlag, 0) == 0) {
+            redis_host = arg.substr(kRedisHostFlag.size());
+            continue;
+        }
+        if (arg.rfind(kRedisPortFlag, 0) == 0) {
+            std::optional<int> parsed_redis_port = parse_port(arg.substr(kRedisPortFlag.size()));
+            if (!parsed_redis_port.has_value()) {
+                std::cerr << "Invalid --redis-port value '" << arg.substr(kRedisPortFlag.size()) << "'\n";
+                return 1;
+            }
+            redis_port = *parsed_redis_port;
+            continue;
+        }
+        if (arg.rfind(kWorkerUrlFlag, 0) == 0) {
+            worker_url = arg.substr(kWorkerUrlFlag.size());
+            continue;
+        }
         // The only positional argument. Rejected explicitly rather than left to
         // std::stoi, which would throw out of main on a typo.
         std::optional<int> parsed_port = parse_port(arg);
         if (!parsed_port.has_value()) {
-            std::cerr << "Usage: kfc_server [port] [--http-port=8081] "
+            std::cerr << "Usage: kfc_server [port] [--http-port=8081] [--redis-host=host] "
+                         "[--redis-port=6379] [--worker-url=ws://host:port] "
                          "[--log-level=debug|info|warning|error]\n";
             return 1;
         }
         port = *parsed_port;
+    }
+
+    if (!redis_host.empty() && worker_url.empty()) {
+        std::cerr << "--redis-host requires --worker-url (this worker's own client-facing address, "
+                     "e.g. ws://localhost:8082) -- otherwise a room it creates could never be redirected to.\n";
+        return 1;
     }
 
     kfc::protocol::FileLogger logger("kfc_server.log", log_level);
@@ -163,7 +200,19 @@ int main(int argc, char** argv) {
                               std::chrono::system_clock::now());
         };
 
-        kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result);
+        // Null unless --redis-host was given -- see RoomManager's own doc
+        // comment for what that does and doesn't change. Declared here, not
+        // inside an if-block, so it outlives rooms below (RoomManager only
+        // borrows the pointer).
+        std::unique_ptr<kfc::server::RedisRoomDirectory> room_directory;
+        if (!redis_host.empty()) {
+            room_directory = std::make_unique<kfc::server::RedisRoomDirectory>(redis_host, redis_port);
+            logger.log("kfc_server: room directory at " + redis_host + ":" + std::to_string(redis_port) +
+                       ", advertising this worker as " + worker_url);
+        }
+
+        kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result,
+                                       kfc::server::kDefaultDisconnectGraceMs, room_directory.get(), worker_url);
 
         // One account, one live connection (see SessionRegistry).
         kfc::server::SessionRegistry sessions;

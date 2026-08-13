@@ -20,11 +20,8 @@ namespace kfc::graphics::net {
 
 ServerLink::ServerLink(std::string server_url, std::string username, std::string password,
                        kfc::protocol::ClientMessage seating_action, kfc::protocol::FileLogger& logger)
-    : username_(std::move(username)),
-      password_(std::move(password)),
-      seating_action_(std::move(seating_action)),
-      logger_(logger),
-      socket_(std::make_unique<ix::WebSocket>()) {
+    : username_(std::move(username)), password_(std::move(password)), seating_action_(std::move(seating_action)),
+      logger_(logger) {
     // Windows needs WSAStartup (what this wraps) called before any socket
     // use -- isolated here, not left to main(), so every current and future
     // caller of ServerLink gets it for free instead of having to remember
@@ -33,7 +30,12 @@ ServerLink::ServerLink(std::string server_url, std::string username, std::string
     // processes; each pairs with its own uninitNetSystem() in the
     // destructor.
     ix::initNetSystem();
-    socket_->setUrl(server_url);
+    connect_to(server_url);
+}
+
+void ServerLink::connect_to(const std::string& url) {
+    socket_ = std::make_unique<ix::WebSocket>();
+    socket_->setUrl(url);
     socket_->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
         if (msg->type == ix::WebSocketMessageType::Open) {
             logger_.log("ServerLink: connected, sending Login as '" + username_ + "'");
@@ -100,6 +102,18 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
+    // A third way that same wait can end: the room is real, just on a
+    // different worker. Only the flag is set here -- reconnecting means
+    // stopping this socket, which must happen from wait_for_welcome() on the
+    // main thread, never from this callback (IXWebSocket's own thread, which
+    // stopping this same socket would try to join).
+    if (std::holds_alternative<kfc::protocol::JoinRedirect>(*decoded)) {
+        std::lock_guard<std::mutex> lock(welcome_mutex_);
+        pending_redirect_url_ = std::get<kfc::protocol::JoinRedirect>(*decoded).url;
+        welcome_cv_.notify_all();
+        return;
+    }
+
     // Same slot, same reason: authentication failed, so there will never be a
     // Welcome. Prefixed so the caller can tell a rejected login apart from a
     // rejected room -- they need very different wording.
@@ -115,36 +129,65 @@ void ServerLink::on_message(const std::string& text) {
 }
 
 bool ServerLink::wait_for_welcome(int timeout_ms) {
-    std::unique_lock<std::mutex> lock(welcome_mutex_);
-    bool arrived = welcome_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] {
-        return pending_welcome_.has_value() || join_failure_.has_value();
-    });
-    // Either the server said no (join_failure_ holds why, for the caller to
-    // show) or nothing came at all within the timeout.
-    if (!arrived || join_failure_.has_value()) {
-        return false;
+    // At most two passes: the original attempt, and one retry if it was
+    // redirected to a different worker. A second redirect inside that retry
+    // is treated as a failure rather than followed again, so a misconfigured
+    // deployment (or a bug in the room directory) cannot loop this forever --
+    // one hop is all a correct one-worker-owns-each-room setup ever needs.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        std::unique_lock<std::mutex> lock(welcome_mutex_);
+        bool arrived = welcome_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] {
+            return pending_welcome_.has_value() || join_failure_.has_value() || pending_redirect_url_.has_value();
+        });
+        if (!arrived) {
+            return false;  // nothing answered at all -- "server unreachable"
+        }
+
+        if (pending_redirect_url_.has_value()) {
+            if (attempt == 1) {
+                return false;  // a second redirect in the same call -- see above
+            }
+            std::string redirect_url = *pending_redirect_url_;
+            pending_redirect_url_.reset();
+            // socket_->stop() must not run with welcome_mutex_ held: it joins
+            // IXWebSocket's own thread, which on_message (the only other
+            // thing that ever takes this lock) runs on.
+            lock.unlock();
+            logger_.log("ServerLink: room is on another worker, reconnecting to " + redirect_url);
+            socket_->stop();
+            connect_to(redirect_url);
+            continue;  // wait again, on the new connection
+        }
+
+        // Either the server said no (join_failure_ holds why, for the caller
+        // to show) or nothing came at all within the timeout.
+        if (join_failure_.has_value()) {
+            return false;
+        }
+
+        const kfc::protocol::Welcome& welcome = *pending_welcome_;
+        assigned_color_ = welcome.assigned_color;
+        spectator_ = welcome.spectator;
+        room_name_ = welcome.room;
+        history_ = welcome.history;
+        revision_ = welcome.revision;
+
+        kfc::model::Board board(welcome.board.width, welcome.board.height);
+        for (const kfc::model::Piece& piece : welcome.board.pieces) {
+            board.add_piece(piece);
+        }
+        board_ = std::move(board);
+        board_mapper_.emplace(board_->width(), board_->height());
+        // Restrict click-selection to this client's own color: the opponent's
+        // pieces can't be picked up locally, matching the server's own
+        // ownership check (see Match::owns_piece_at).
+        controller_.emplace(*board_, static_cast<kfc::model::IMoveRequester&>(*this), *board_mapper_,
+                            assigned_color_);
+
+        pending_welcome_.reset();
+        return true;
     }
-
-    const kfc::protocol::Welcome& welcome = *pending_welcome_;
-    assigned_color_ = welcome.assigned_color;
-    spectator_ = welcome.spectator;
-    room_name_ = welcome.room;
-    history_ = welcome.history;
-    revision_ = welcome.revision;
-
-    kfc::model::Board board(welcome.board.width, welcome.board.height);
-    for (const kfc::model::Piece& piece : welcome.board.pieces) {
-        board.add_piece(piece);
-    }
-    board_ = std::move(board);
-    board_mapper_.emplace(board_->width(), board_->height());
-    // Restrict click-selection to this client's own color: the opponent's
-    // pieces can't be picked up locally, matching the server's own ownership
-    // check (see Match::owns_piece_at).
-    controller_.emplace(*board_, static_cast<kfc::model::IMoveRequester&>(*this), *board_mapper_, assigned_color_);
-
-    pending_welcome_.reset();
-    return true;
+    return false;  // unreachable -- every path through the loop above returns
 }
 
 kfc::model::PieceColor ServerLink::assigned_color() const {

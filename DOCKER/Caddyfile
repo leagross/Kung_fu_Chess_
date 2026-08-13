@@ -1,0 +1,14 @@
+# Reverse proxy for kfc_server in production: terminates TLS, exposes only
+# 443 to the internet, and forwards to the server container over the
+# compose-internal network. Caddy gets a Let's Encrypt certificate for
+# {$DOMAIN} automatically -- no certbot, no manual renewal.
+#
+# Routing mirrors kfc_server's two ports (see server/apps/kfc_server/main.cpp):
+# the HTTP+JSON API (register/login/history) lives under /api/, everything
+# else is the WebSocket game protocol. reverse_proxy upgrades a WebSocket
+# connection transparently, so wss://{$DOMAIN}/ from the client just works.
+
+{$DOMAIN} {
+    reverse_proxy /api/* server:8081
+    reverse_proxy      * server:8080
+}

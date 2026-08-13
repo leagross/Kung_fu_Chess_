@@ -281,6 +281,8 @@ std::string encode(const ServerMessage& message) {
                 return envelope("MatchStart", json::object());
             } else if constexpr (std::is_same_v<T, JoinFailed>) {
                 return envelope("JoinFailed", json{{"reason", m.reason}});
+            } else if constexpr (std::is_same_v<T, JoinRedirect>) {
+                return envelope("JoinRedirect", json{{"url", m.url}});
             } else if constexpr (std::is_same_v<T, LoginFailed>) {
                 return envelope("LoginFailed", json{{"reason", m.reason}});
             } else if constexpr (std::is_same_v<T, OpponentReconnected>) {
@@ -454,6 +456,9 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
         }
         if (type == "JoinFailed") {
             return ServerMessage{JoinFailed{payload.at("reason").get<std::string>()}};
+        }
+        if (type == "JoinRedirect") {
+            return ServerMessage{JoinRedirect{payload.at("url").get<std::string>()}};
         }
         if (type == "LoginFailed") {
             return ServerMessage{LoginFailed{payload.at("reason").get<std::string>()}};

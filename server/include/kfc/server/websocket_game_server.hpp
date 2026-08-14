@@ -20,6 +20,7 @@ namespace kfc::server {
 
 class RoomManager;
 class SessionRegistry;
+class Metrics;
 
 /// How often an idle connection is pinged, in seconds. IXWebSocket closes a
 /// connection with "Ping timeout" if a pong does not come back before the
@@ -62,11 +63,14 @@ inline constexpr int kIdlePingIntervalSecs = 5;
 /// while what those credentials *are* lives in UserRepository.
 class WebSocketGameServer {
 public:
-    /// rooms, users, sessions and logger must outlive this server. Brings up the
-    /// network system and wires the connection handler, but does not bind the
-    /// port -- call listen() for that.
+    /// rooms, users, sessions and logger must outlive this server. metrics is
+    /// null by default (see ClientSession's own doc comment for why every
+    /// existing caller can leave it that way); handed to each connection's
+    /// ClientSession unchanged. Brings up the network system and wires the
+    /// connection handler, but does not bind the port -- call listen() for
+    /// that.
     WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
-                        SessionRegistry& sessions, kfc::protocol::FileLogger& logger);
+                        SessionRegistry& sessions, kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr);
     ~WebSocketGameServer();
 
     WebSocketGameServer(const WebSocketGameServer&) = delete;
@@ -89,6 +93,7 @@ private:
     kfc::database::IUserStore& users_;
     SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
+    Metrics* metrics_;
     std::unique_ptr<ix::WebSocketServer> server_;
 };
 

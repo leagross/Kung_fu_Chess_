@@ -6,6 +6,7 @@
 
 #include "kfc/protocol/messages.hpp"
 #include "kfc/server/connection_callbacks.hpp"
+#include "kfc/server/metrics.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/server/session_registry.hpp"
 
@@ -61,9 +62,12 @@ public:
     /// connection_id only ever appears in the log, to tell connections apart.
     /// send and close are how this one client is reached and released; rooms,
     /// users, sessions and logger are shared and must outlive the session.
+    /// metrics is null by default -- see Metrics's own doc comment; every
+    /// existing test constructs a session with no metrics object at all, and
+    /// on_text simply skips the counter bumps when it is null.
     ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                   kfc::database::IUserStore& users, SessionRegistry& sessions,
-                  kfc::protocol::FileLogger& logger);
+                  kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr);
 
     /// The socket opened. Logging only -- nothing is decided until a Login
     /// arrives.
@@ -120,6 +124,7 @@ private:
     kfc::database::IUserStore& users_;
     SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
+    Metrics* metrics_;
 
     // This connection's hold on its username, taken once the password checks
     // out and given back when the session is destroyed -- see SessionRegistry.

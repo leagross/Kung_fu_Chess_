@@ -18,6 +18,12 @@ class UserRepository;
 }
 
 namespace kfc::server {
+class RoomManager;
+class SessionRegistry;
+class Metrics;
+}  // namespace kfc::server
+
+namespace kfc::server {
 
 /// The non-realtime half of the server's public surface: register/login and
 /// match history, over plain HTTP+JSON rather than the WebSocket game
@@ -49,12 +55,22 @@ namespace kfc::server {
 /// created; register reports which one failed (400, `{"reason": ...}`) so a
 /// real client can show something the user can act on, rather than a bare
 /// 409 that reads the same as "someone already has that name."
+///
+/// GET /metrics is the third thing this socket serves, alongside auth and
+/// history: a Prometheus scrape target (see Metrics), unauthenticated like
+/// /health -- both are operational surfaces meant for infrastructure, not a
+/// player's own account.
 class HttpApiServer {
 public:
-    /// users and logger must outlive this server. Brings up the network
-    /// system and wires the request handler, but does not bind the port --
-    /// call listen() for that.
-    HttpApiServer(int port, kfc::database::UserRepository& users, kfc::protocol::FileLogger& logger);
+    /// users, rooms, sessions, metrics and logger must all outlive this
+    /// server. rooms and sessions back GET /metrics's two gauges
+    /// (kfc_active_rooms, kfc_active_connections); metrics backs its
+    /// counters -- see Metrics's own doc comment for why those two kinds of
+    /// number come from different places. Brings up the network system and
+    /// wires the request handler, but does not bind the port -- call
+    /// listen() for that.
+    HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms, SessionRegistry& sessions,
+                 Metrics& metrics, kfc::protocol::FileLogger& logger);
     ~HttpApiServer();
 
     HttpApiServer(const HttpApiServer&) = delete;
@@ -74,6 +90,9 @@ public:
 private:
     int port_;
     kfc::database::UserRepository& users_;
+    RoomManager& rooms_;
+    SessionRegistry& sessions_;
+    Metrics& metrics_;
     kfc::protocol::FileLogger& logger_;
     // Owned here, not injected: issuing and checking bearer tokens is this
     // layer's own implementation detail, not something main() or any other

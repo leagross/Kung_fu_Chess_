@@ -295,6 +295,7 @@ add_executable(kfc_tests
   server/tests/unit/test_http_api.cpp
   server/tests/unit/test_auth_token_store.cpp
   server/tests/unit/test_rate_limiter.cpp
+  server/tests/unit/test_metrics.cpp
   server/tests/integration/test_websocket_end_to_end.cpp
   ui/tests/unit/test_match_overlay.cpp
   ui/src/kfc/graphics/app/match_overlay.cpp
@@ -312,6 +313,7 @@ add_executable(kfc_tests
   server/src/kfc/server/http_api.cpp
   server/src/kfc/server/auth_token_store.cpp
   server/src/kfc/server/rate_limiter.cpp
+  server/src/kfc/server/metrics.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
@@ -364,6 +366,7 @@ add_executable(kfc_server
   server/src/kfc/server/http_api.cpp
   server/src/kfc/server/auth_token_store.cpp
   server/src/kfc/server/rate_limiter.cpp
+  server/src/kfc/server/metrics.cpp
   server/src/kfc/server/redis_room_directory.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/password_hash.cpp

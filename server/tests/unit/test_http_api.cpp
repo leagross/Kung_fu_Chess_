@@ -12,8 +12,12 @@
 #include <nlohmann/json.hpp>
 
 #include "kfc/database/user_repository.hpp"
+#include "kfc/model/board.hpp"
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/server/http_api.hpp"
+#include "kfc/server/metrics.hpp"
+#include "kfc/server/room_manager.hpp"
+#include "kfc/server/session_registry.hpp"
 
 // Binds a real port and speaks real HTTP+JSON against it, the same choice
 // test_websocket_end_to_end.cpp makes for WebSocketGameServer: HttpApiServer's
@@ -51,7 +55,7 @@ protected:
     void SetUp() override {
         port_ = next_port();
         users_ = std::make_unique<kfc::database::UserRepository>(fresh_db_path());
-        server_ = std::make_unique<kfc::server::HttpApiServer>(port_, *users_, logger_);
+        server_ = std::make_unique<kfc::server::HttpApiServer>(port_, *users_, rooms_, sessions_, metrics_, logger_);
         ASSERT_TRUE(server_->listen());
         server_->start();
         base_url_ = "http://127.0.0.1:" + std::to_string(port_);
@@ -86,6 +90,13 @@ protected:
     }
 
     kfc::protocol::FileLogger logger_{std::filesystem::temp_directory_path() / "kfc_http_api_test.log"};
+    // Real, not mocked: GET /metrics reads room_count()/live_count() straight
+    // off these, the same way HttpApiServer does in production -- see
+    // Metrics's own doc comment for why those two numbers are not counters
+    // Metrics itself tracks.
+    kfc::server::RoomManager rooms_{[] { return kfc::model::Board(1, 1); }, logger_};
+    kfc::server::SessionRegistry sessions_;
+    kfc::server::Metrics metrics_;
     int port_ = 0;
     std::string base_url_;
     std::unique_ptr<kfc::database::UserRepository> users_;
@@ -182,6 +193,25 @@ TEST_F(HttpApiFixture, HealthReturns200WithStatusOk) {
     ASSERT_EQ(response->statusCode, 200);
     json body = json::parse(response->body);
     EXPECT_EQ(body.at("status").get<std::string>(), "ok");
+}
+
+TEST_F(HttpApiFixture, MetricsReturnsPrometheusTextWithLiveGaugesAndCounters) {
+    // A room, so kfc_active_rooms is not just trivially zero.
+    kfc::server::RoomManager::Seat seat = *rooms_.create_room("alice", [](const std::string&) {});
+    (void)seat;
+    // Register bumps kfc_messages_received_total elsewhere (ClientSession),
+    // not through this HTTP-only fixture -- checked here only for the two
+    // gauges HttpApiServer itself is responsible for wiring correctly.
+
+    ix::HttpResponsePtr response = get("/metrics");
+
+    ASSERT_EQ(response->statusCode, 200);
+    EXPECT_EQ(response->headers.at("Content-Type"), "text/plain; version=0.0.4");
+    EXPECT_NE(response->body.find("kfc_active_connections 0"), std::string::npos);
+    EXPECT_NE(response->body.find("kfc_active_rooms 1"), std::string::npos);
+    EXPECT_NE(response->body.find("kfc_messages_received_total 0"), std::string::npos);
+    EXPECT_NE(response->body.find("# TYPE kfc_active_rooms gauge"), std::string::npos);
+    EXPECT_NE(response->body.find("# TYPE kfc_moves_processed_total counter"), std::string::npos);
 }
 
 TEST_F(HttpApiFixture, UnknownRouteReturns404) {

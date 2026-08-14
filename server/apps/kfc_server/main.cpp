@@ -23,6 +23,7 @@
 #include "kfc/protocol/gameplay_config.hpp"
 #include "kfc/database/rating_service.hpp"
 #include "kfc/server/http_api.hpp"
+#include "kfc/server/metrics.hpp"
 #include "kfc/server/redis_room_directory.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/database/user_repository.hpp"
@@ -217,15 +218,21 @@ int main(int argc, char** argv) {
         // One account, one live connection (see SessionRegistry).
         kfc::server::SessionRegistry sessions;
 
-        kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger);
+        // Shared between both servers below: ClientSession (via
+        // WebSocketGameServer) bumps its counters, HttpApiServer's own
+        // GET /metrics reads them back out -- see Metrics's own doc comment.
+        kfc::server::Metrics metrics;
+
+        kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger, &metrics);
         if (!server.listen()) {
             std::cerr << "Failed to listen on port " << port << " (see kfc_server.log)\n";
             return 1;
         }
 
-        // Register/login/history -- a second, independent listening socket; see
-        // http_api.hpp for why it can't share the WebSocket server's port.
-        kfc::server::HttpApiServer http_server(http_port, users, logger);
+        // Register/login/history/metrics -- a second, independent listening
+        // socket; see http_api.hpp for why it can't share the WebSocket
+        // server's port.
+        kfc::server::HttpApiServer http_server(http_port, users, rooms, sessions, metrics, logger);
         if (!http_server.listen()) {
             std::cerr << "Failed to listen on HTTP port " << http_port << " (see kfc_server.log)\n";
             return 1;

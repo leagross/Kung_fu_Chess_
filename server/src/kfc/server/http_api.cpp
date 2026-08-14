@@ -13,7 +13,10 @@
 #include "kfc/database/user_repository.hpp"
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/server/auth_token_store.hpp"
+#include "kfc/server/metrics.hpp"
 #include "kfc/server/rate_limiter.hpp"
+#include "kfc/server/room_manager.hpp"
+#include "kfc/server/session_registry.hpp"
 
 namespace kfc::server {
 
@@ -63,6 +66,13 @@ ix::HttpResponsePtr empty_response(int status) {
     ix::WebSocketHttpHeaders headers{{"Content-Type", "application/json"}};
     return std::make_shared<ix::HttpResponse>(status, reason_phrase(status), ix::HttpErrorCode::Ok, headers,
                                               std::string());
+}
+
+// GET /metrics's own content type -- the Prometheus text exposition format
+// Metrics::render() writes is not JSON, so this cannot reuse json_response.
+ix::HttpResponsePtr text_response(const std::string& body) {
+    ix::WebSocketHttpHeaders headers{{"Content-Type", "text/plain; version=0.0.4"}};
+    return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, headers, body);
 }
 
 json auth_body(const std::string& username, int rating, const std::string& token) {
@@ -182,11 +192,15 @@ ix::HttpResponsePtr handle_health(kfc::database::UserRepository& users) {
     return json_response(200, json{{"status", "ok"}});
 }
 
-ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, AuthTokenStore& tokens, RateLimiter& auth_limiter,
+ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, RoomManager& rooms, SessionRegistry& sessions,
+                             Metrics& metrics, AuthTokenStore& tokens, RateLimiter& auth_limiter,
                              const std::string& remote_ip, const ix::HttpRequestPtr& request) {
     try {
         if (request->method == "GET" && request->uri == "/health") {
             return handle_health(users);
+        }
+        if (request->method == "GET" && request->uri == "/metrics") {
+            return text_response(metrics.render(sessions.live_count(), rooms.room_count()));
         }
         bool is_register = request->method == "POST" && request->uri == "/api/auth/register";
         bool is_login = request->method == "POST" && request->uri == "/api/auth/login";
@@ -212,9 +226,13 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, AuthTokenStor
 
 }  // namespace
 
-HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, kfc::protocol::FileLogger& logger)
+HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms,
+                             SessionRegistry& sessions, Metrics& metrics, kfc::protocol::FileLogger& logger)
     : port_(port),
       users_(users),
+      rooms_(rooms),
+      sessions_(sessions),
+      metrics_(metrics),
       logger_(logger),
       // At most 10 register/login attempts per IP per minute -- generous for
       // a real player who fat-fingers a password a few times, a real
@@ -231,7 +249,8 @@ HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, kfc
     server_->setOnConnectionCallback([this](ix::HttpRequestPtr request,
                                             const std::shared_ptr<ix::ConnectionState>& connection_state)
                                          -> ix::HttpResponsePtr {
-        return dispatch(users_, tokens_, login_and_register_limiter_, connection_state->getRemoteIp(), request);
+        return dispatch(users_, rooms_, sessions_, metrics_, tokens_, login_and_register_limiter_,
+                        connection_state->getRemoteIp(), request);
     });
 }
 

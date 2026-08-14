@@ -14,14 +14,15 @@ namespace kfc::server {
 
 ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                              kfc::database::IUserStore& users, SessionRegistry& sessions,
-                             kfc::protocol::FileLogger& logger)
+                             kfc::protocol::FileLogger& logger, Metrics* metrics)
     : connection_id_(std::move(connection_id)),
       send_(std::move(send)),
       close_(std::move(close)),
       rooms_(rooms),
       users_(users),
       sessions_(sessions),
-      logger_(logger) {}
+      logger_(logger),
+      metrics_(metrics) {}
 
 void ClientSession::on_open() {
     logger_.log("Connection opened: " + connection_id_);
@@ -54,6 +55,9 @@ void ClientSession::on_text(const std::string& text) {
     // sending them is hung up on, so it cannot keep doing it. Reported by
     // length, never by content: the content is what we declined to handle.
     if (text.size() > kfc::protocol::kMaxMessageBytes) {
+        if (metrics_ != nullptr) {
+            metrics_->message_rejected();
+        }
         drop("message of " + std::to_string(text.size()) + " bytes exceeds the limit");
         return;
     }
@@ -68,8 +72,14 @@ void ClientSession::on_text(const std::string& text) {
         messages_in_window_ = 0;
     }
     if (++messages_in_window_ > kMaxMessagesPerSecond) {
+        if (metrics_ != nullptr) {
+            metrics_->message_rejected();
+        }
         drop("more than " + std::to_string(kMaxMessagesPerSecond) + " messages in one second");
         return;
+    }
+    if (metrics_ != nullptr) {
+        metrics_->message_received();
     }
 
     // Debug: every inbound frame, so guarded -- redact_for_log rebuilds the
@@ -82,6 +92,9 @@ void ClientSession::on_text(const std::string& text) {
 
     std::optional<kfc::protocol::ClientMessage> decoded = kfc::protocol::decode_client_message(text);
     if (!decoded.has_value()) {
+        if (metrics_ != nullptr) {
+            metrics_->message_undecodable();
+        }
         logger_.log(kfc::protocol::LogLevel::Warning, "Failed to decode message from " + connection_id_);
         return;
     }
@@ -209,6 +222,11 @@ void ClientSession::handle_gameplay(const kfc::protocol::ClientMessage& message)
         logger_.log(kfc::protocol::LogLevel::Warning,
                     "Ignoring message from " + connection_id_ + ": watching, not playing");
         return;
+    }
+    if (metrics_ != nullptr &&
+        (std::holds_alternative<kfc::protocol::MoveRequest>(message) ||
+         std::holds_alternative<kfc::protocol::JumpRequest>(message))) {
+        metrics_->move_processed();
     }
     rooms_.enqueue(seat_->room, seat_->color, message);
 }

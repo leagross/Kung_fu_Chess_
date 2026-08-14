@@ -27,14 +27,16 @@ void fail(std::string* out, const char* reason) {
 
 RoomManager::RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
                          kfc::protocol::GameplayConfig config, ResultCallback on_result, int disconnect_grace_ms,
-                         IRoomDirectory* directory, std::string self_url)
+                         IRoomDirectory* directory, std::string self_url, Metrics* metrics)
     : board_factory_(std::move(board_factory)),
       logger_(logger),
       config_(std::move(config)),
       on_result_(std::move(on_result)),
       disconnect_grace_ms_(disconnect_grace_ms),
       directory_(directory),
-      self_url_(std::move(self_url)) {}
+      self_url_(std::move(self_url)),
+      metrics_(metrics),
+      scheduler_(std::make_unique<MatchScheduler>(0, metrics_)) {}
 
 RoomManager::~RoomManager() {
     stop_all();
@@ -495,6 +497,11 @@ void RoomManager::on_disconnect(const Seat& seat) {
 std::size_t RoomManager::room_count() const {
     std::lock_guard<std::mutex> guard(rooms_mutex_);
     return rooms_.size();
+}
+
+std::size_t RoomManager::worker_count() const {
+    std::lock_guard<std::mutex> guard(scheduler_mutex_);
+    return scheduler_ ? scheduler_->worker_count() : 0;
 }
 
 }  // namespace kfc::server

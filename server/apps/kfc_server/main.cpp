@@ -212,16 +212,19 @@ int main(int argc, char** argv) {
                        ", advertising this worker as " + worker_url);
         }
 
+        // Shared by both servers below and by every MatchScheduler worker
+        // thread inside rooms: ClientSession and MatchScheduler::run bump its
+        // counters, HttpApiServer's own GET /metrics reads them back out --
+        // see Metrics's own doc comment. Declared before rooms, which borrows
+        // it for the rest of its own lifetime.
+        kfc::server::Metrics metrics;
+
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result,
-                                       kfc::server::kDefaultDisconnectGraceMs, room_directory.get(), worker_url);
+                                       kfc::server::kDefaultDisconnectGraceMs, room_directory.get(), worker_url,
+                                       &metrics);
 
         // One account, one live connection (see SessionRegistry).
         kfc::server::SessionRegistry sessions;
-
-        // Shared between both servers below: ClientSession (via
-        // WebSocketGameServer) bumps its counters, HttpApiServer's own
-        // GET /metrics reads them back out -- see Metrics's own doc comment.
-        kfc::server::Metrics metrics;
 
         kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger, &metrics);
         if (!server.listen()) {

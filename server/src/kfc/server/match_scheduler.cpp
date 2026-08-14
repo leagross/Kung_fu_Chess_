@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "kfc/server/match.hpp"
+#include "kfc/server/metrics.hpp"
 
 namespace kfc::server {
 
@@ -22,7 +23,7 @@ constexpr int kMaxTickAdvanceMs = 200;
 
 }  // namespace
 
-MatchScheduler::MatchScheduler(std::size_t worker_count) {
+MatchScheduler::MatchScheduler(std::size_t worker_count, Metrics* metrics) : metrics_(metrics) {
     if (worker_count == 0) {
         worker_count = std::thread::hardware_concurrency();
         if (worker_count == 0) {
@@ -188,8 +189,17 @@ void MatchScheduler::run(Worker& worker) {
             std::lock_guard<std::mutex> guard(worker.mutex);
             due = worker.matches;
         }
+        // The batch, not any one match's tick, is timed: that whole pass is
+        // the unit of work this worker thread actually repeats once per
+        // interval, and it is what would grow if either a single match got
+        // more expensive or this worker simply ended up holding more of them
+        // -- see Metrics::record_tick.
+        auto pass_started_at = std::chrono::steady_clock::now();
         for (const std::shared_ptr<Match>& match : due) {
             match->tick(now, elapsed_ms);
+        }
+        if (metrics_ != nullptr) {
+            metrics_->record_tick(std::chrono::steady_clock::now() - pass_started_at);
         }
     }
 }

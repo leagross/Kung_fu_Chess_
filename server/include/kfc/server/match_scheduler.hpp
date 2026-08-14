@@ -12,6 +12,7 @@
 namespace kfc::server {
 
 class Match;
+class Metrics;
 
 /// Drives many matches from a few threads.
 ///
@@ -64,8 +65,10 @@ class MatchScheduler {
 public:
     /// worker_count of 0 means "one per hardware core", which is the sizing the
     /// arithmetic above assumes. Workers start immediately and idle until a
-    /// match is added.
-    explicit MatchScheduler(std::size_t worker_count = 0);
+    /// match is added. metrics is null by default (see Metrics's own doc
+    /// comment); when given, every worker records its own tick passes into
+    /// it -- see Metrics::record_tick.
+    explicit MatchScheduler(std::size_t worker_count = 0, Metrics* metrics = nullptr);
 
     /// Stops every worker and joins them. Matches still registered are simply
     /// dropped -- stopping the scheduler is the end of all of them.
@@ -122,6 +125,7 @@ private:
 
     void run(Worker& worker);
 
+    Metrics* metrics_;
     std::atomic<bool> running_{true};
     // unique_ptr so adding a worker never moves the others: a Worker holds a
     // mutex and a thread, neither of which can be relocated.

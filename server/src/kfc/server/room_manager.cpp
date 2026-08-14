@@ -26,12 +26,15 @@ void fail(std::string* out, const char* reason) {
 }  // namespace
 
 RoomManager::RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
-                         kfc::protocol::GameplayConfig config, ResultCallback on_result, int disconnect_grace_ms)
+                         kfc::protocol::GameplayConfig config, ResultCallback on_result, int disconnect_grace_ms,
+                         IRoomDirectory* directory, std::string self_url)
     : board_factory_(std::move(board_factory)),
       logger_(logger),
       config_(std::move(config)),
       on_result_(std::move(on_result)),
-      disconnect_grace_ms_(disconnect_grace_ms) {}
+      disconnect_grace_ms_(disconnect_grace_ms),
+      directory_(directory),
+      self_url_(std::move(self_url)) {}
 
 RoomManager::~RoomManager() {
     stop_all();
@@ -280,55 +283,82 @@ std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& use
         fail(failure_reason, kfc::protocol::join_reasons::kRoomNotActive);
         return std::nullopt;
     }
+    // Outside the lock, like join() above -- a directory write is network I/O
+    // in the multi-worker case and must not hold up move routing.
+    if (directory_ != nullptr) {
+        directory_->register_room(room_key, self_url_);
+    }
     return Seat{room_id, *color};  // White
 }
 
 std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name, const std::string& username,
-                                                        SendFn send, CloseFn close, std::string* failure_reason) {
+                                                        SendFn send, CloseFn close, std::string* failure_reason,
+                                                        std::string* redirect_url) {
     RoomId room_id = 0;
     std::shared_ptr<Match> match;
     bool as_spectator = false;
+    bool found_locally = false;
     std::optional<kfc::model::PieceColor> reclaimed;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
         auto named = named_rooms_.find(name);
-        if (named == named_rooms_.end()) {
-            fail(failure_reason, kfc::protocol::join_reasons::kNoSuchRoom);
-            return std::nullopt;  // no room by that name
-        }
-        room_id = named->second;
-        auto it = rooms_.find(room_id);
-        if (it == rooms_.end()) {
-            // The name outlived its room -- reaping erases both together, so
-            // this shouldn't happen; reported rather than trusted blindly.
-            fail(failure_reason, kfc::protocol::join_reasons::kNoSuchRoom);
-            return std::nullopt;  // gone
-        }
-        match = it->second.match;
+        found_locally = named != named_rooms_.end();
+        if (found_locally) {
+            room_id = named->second;
+            auto it = rooms_.find(room_id);
+            if (it == rooms_.end()) {
+                // The name outlived its room -- reaping erases both together,
+                // so this shouldn't happen; reported rather than trusted
+                // blindly.
+                fail(failure_reason, kfc::protocol::join_reasons::kNoSuchRoom);
+                return std::nullopt;  // gone
+            }
+            match = it->second.match;
 
-        // A decided game can't be joined, played in, or usefully watched.
-        // Refused with a reason the client can actually show, rather than
-        // seating someone into a board that will never move again.
-        if (match->is_over()) {
-            fail(failure_reason, kfc::protocol::join_reasons::kRoomNotActive);
-            return std::nullopt;
-        }
+            // A decided game can't be joined, played in, or usefully watched.
+            // Refused with a reason the client can actually show, rather than
+            // seating someone into a board that will never move again.
+            if (match->is_over()) {
+                fail(failure_reason, kfc::protocol::join_reasons::kRoomNotActive);
+                return std::nullopt;
+            }
 
-        // Is this the player who just dropped, coming back mid-countdown? Then
-        // they reclaim their own seat and colour -- no new seat is taken, and
-        // the room's connection count simply returns to what it was.
-        reclaimed = match->reclaimable_seat_for(username);
-        if (!reclaimed.has_value()) {
-            // Both seats already taken -> this joiner watches instead. Viewers
-            // are unlimited, so there is no rejection path left here.
-            as_spectator = it->second.seats_taken >= 2;
-            if (!as_spectator) {
-                ++it->second.seats_taken;
+            // Is this the player who just dropped, coming back mid-countdown?
+            // Then they reclaim their own seat and colour -- no new seat is
+            // taken, and the room's connection count simply returns to what
+            // it was.
+            reclaimed = match->reclaimable_seat_for(username);
+            if (!reclaimed.has_value()) {
+                // Both seats already taken -> this joiner watches instead.
+                // Viewers are unlimited, so there is no rejection path left
+                // here.
+                as_spectator = it->second.seats_taken >= 2;
+                if (!as_spectator) {
+                    ++it->second.seats_taken;
+                }
+            }
+            // Counted for every arrival -- player, returning player or
+            // viewer: the room must not be reaped while any of them is
+            // connected to it.
+            ++it->second.connected;
+        }
+    }
+
+    if (!found_locally) {
+        // Not a room this worker knows about. Checked outside rooms_mutex_ --
+        // a directory lookup is network I/O in the multi-worker case, and
+        // must not hold up move routing for every other room while it runs.
+        if (directory_ != nullptr) {
+            std::optional<std::string> owner = directory_->owner_of(name);
+            if (owner.has_value()) {
+                if (redirect_url != nullptr) {
+                    *redirect_url = *owner;
+                }
+                return std::nullopt;  // caller sends JoinRedirect, not JoinFailed
             }
         }
-        // Counted for every arrival -- player, returning player or viewer: the
-        // room must not be reaped while any of them is connected to it.
-        ++it->second.connected;
+        fail(failure_reason, kfc::protocol::join_reasons::kNoSuchRoom);
+        return std::nullopt;  // no room by that name, anywhere this worker can tell
     }
 
     if (reclaimed.has_value()) {
@@ -414,6 +444,7 @@ void RoomManager::on_disconnect(const Seat& seat) {
     // unregistered from the scheduler (never joining anything -- see
     // MatchScheduler::remove) only after rooms_mutex_ is released.
     std::shared_ptr<Match> reaped;
+    std::string reaped_name;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
         auto it = rooms_.find(room);
@@ -421,6 +452,7 @@ void RoomManager::on_disconnect(const Seat& seat) {
             // Free the name too (if any) so it can be reused for a new room.
             if (!it->second.name.empty()) {
                 named_rooms_.erase(it->second.name);
+                reaped_name = it->second.name;
             }
             // Harmless if this room was never in the index (a named room, or
             // one already paired) -- see unmark_waiting's own doc comment.
@@ -445,9 +477,17 @@ void RoomManager::on_disconnect(const Seat& seat) {
         // there is nothing to unregister from, which is simply skipped
         // rather than crashing (the Match this reaped shared_ptr holds is
         // still cleaned up normally when it goes out of scope).
-        std::lock_guard<std::mutex> guard(scheduler_mutex_);
-        if (scheduler_) {
-            scheduler_->remove(reaped);
+        {
+            std::lock_guard<std::mutex> guard(scheduler_mutex_);
+            if (scheduler_) {
+                scheduler_->remove(reaped);
+            }
+        }
+        // Outside the lock, same reasoning as register_room -- and best-effort:
+        // the directory's own TTL (see RedisRoomDirectory) is what actually
+        // guarantees a stale entry doesn't outlive its room forever.
+        if (directory_ != nullptr && !reaped_name.empty()) {
+            directory_->forget_room(reaped_name);
         }
     }
 }

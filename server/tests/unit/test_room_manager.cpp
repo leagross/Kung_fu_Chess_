@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "fake_room_directory.hpp"
 #include "kfc/io/board_parser.hpp"
 #include "kfc/model/board.hpp"
 #include "kfc/protocol/file_logger.hpp"
@@ -18,6 +19,7 @@
 using namespace kfc::model;
 using namespace kfc::protocol;
 using kfc::server::RoomManager;
+using kfc::server::testing::FakeRoomDirectory;
 
 namespace {
 
@@ -565,4 +567,76 @@ TEST(RoomManagerTest, JoiningAtTheRatingOfAWaiterWhoAlreadyLeftOpensAFreshRoom) 
     EXPECT_NE(b->room, a->room);
     EXPECT_EQ(b->color, PieceColor::White);
     EXPECT_EQ(rooms.room_count(), 1u);
+}
+
+// --- Cross-worker room routing (IRoomDirectory) ---
+
+TEST(RoomManagerTest, CreatingARoomRegistersItInTheDirectoryUnderThisWorkersUrl) {
+    FileLogger logger(log_path());
+    FakeRoomDirectory directory;
+    RoomManager rooms(two_pawn_factory(), logger, {}, {}, kfc::server::kDefaultDisconnectGraceMs, &directory,
+                      "ws://worker-a:8080");
+
+    RecordingSink alice;
+    ASSERT_TRUE(rooms.create_room("alice", alice.as_send_fn()).has_value());
+    std::string room_id = room_id_from_welcome(alice);
+
+    std::optional<std::string> owner = directory.owner_of(room_id);
+    ASSERT_TRUE(owner.has_value());
+    EXPECT_EQ(*owner, "ws://worker-a:8080");
+}
+
+TEST(RoomManagerTest, JoiningANameTheDirectorySaysBelongsElsewhereRedirectsRatherThanFailing) {
+    FileLogger logger(log_path());
+    FakeRoomDirectory directory;
+    // Simulates a room this worker never created -- some other worker already
+    // registered it.
+    directory.register_room("REMOTE1", "ws://worker-b:8080");
+    RoomManager rooms(two_pawn_factory(), logger, {}, {}, kfc::server::kDefaultDisconnectGraceMs, &directory,
+                      "ws://worker-a:8080");
+
+    RecordingSink s1;
+    std::string failure_reason;
+    std::string redirect_url;
+    std::optional<RoomManager::Seat> seat =
+        rooms.join_room("REMOTE1", "alice", s1.as_send_fn(), {}, &failure_reason, &redirect_url);
+
+    EXPECT_FALSE(seat.has_value());
+    EXPECT_EQ(redirect_url, "ws://worker-b:8080");
+    EXPECT_TRUE(failure_reason.empty()) << "a redirect is not a JoinFailed reason";
+}
+
+TEST(RoomManagerTest, ANameNoWorkerHasEverRegisteredStillFailsWithNoSuchRoom) {
+    FileLogger logger(log_path());
+    FakeRoomDirectory directory;
+    RoomManager rooms(two_pawn_factory(), logger, {}, {}, kfc::server::kDefaultDisconnectGraceMs, &directory,
+                      "ws://worker-a:8080");
+
+    RecordingSink s1;
+    std::string failure_reason;
+    std::string redirect_url;
+    EXPECT_FALSE(rooms.join_room("ghost", "alice", s1.as_send_fn(), {}, &failure_reason, &redirect_url).has_value());
+    EXPECT_EQ(failure_reason, join_reasons::kNoSuchRoom);
+    EXPECT_TRUE(redirect_url.empty());
+}
+
+TEST(RoomManagerTest, ReapingANamedRoomForgetsItInTheDirectory) {
+    FileLogger logger(log_path());
+    FakeRoomDirectory directory;
+    RoomManager rooms(two_pawn_factory(), logger, {}, {}, kfc::server::kDefaultDisconnectGraceMs, &directory,
+                      "ws://worker-a:8080");
+
+    RecordingSink alice, bob;
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", alice.as_send_fn());
+    ASSERT_TRUE(white.has_value());
+    std::string room_id = room_id_from_welcome(alice);
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", bob.as_send_fn());
+    ASSERT_TRUE(black.has_value());
+    ASSERT_TRUE(directory.owner_of(room_id).has_value())
+        << "test setup: must be registered before it can be forgotten";
+
+    rooms.on_disconnect(*white);
+    rooms.on_disconnect(*black);
+
+    EXPECT_FALSE(directory.owner_of(room_id).has_value());
 }

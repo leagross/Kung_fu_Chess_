@@ -55,6 +55,29 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SQLiteCpp)
 
+# hiredis -- the Redis client behind RedisRoomDirectory (server/), which
+# routes a room name to whichever kfc_server worker actually owns it once
+# more than one worker exists (see Roadmap.md's stage 2). Only three
+# commands are ever issued (SET/GET/DEL), but a project whose own
+# Server_Design.md targets 10M concurrent users should get its routing
+# layer's network protocol handling from a maintained client, not a
+# hand-rolled one. Tests/examples off, same reasoning as SQLiteCpp above.
+set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
+set(ENABLE_SSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_SSL_TESTS OFF CACHE BOOL "" FORCE)
+# hiredis 1.2.0's own CMakeLists.txt asks for a CMake older than 3.5, which
+# current CMake refuses to evaluate at all -- this floor is what
+# cmake_minimum_required(VERSION 2.8) inside its CMakeLists.txt is actually
+# run as. Only relaxes the *minimum*; nothing here changes how our own
+# CMakeLists.txt (VERSION 3.20) is interpreted.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+FetchContent_Declare(
+  hiredis
+  GIT_REPOSITORY https://github.com/redis/hiredis.git
+  GIT_TAG v1.2.0
+)
+FetchContent_MakeAvailable(hiredis)
+
 # Argon2 -- the password hash (see database/README.md for why not a plain
 # SHA-256). Fetched like every other dependency here; it just has no CMake
 # build of its own (upstream ships a Makefile), so the library is declared by
@@ -341,13 +364,17 @@ add_executable(kfc_server
   server/src/kfc/server/http_api.cpp
   server/src/kfc/server/auth_token_store.cpp
   server/src/kfc/server/rate_limiter.cpp
+  server/src/kfc/server/redis_room_directory.cpp
   database/src/kfc/database/elo.cpp
   database/src/kfc/database/password_hash.cpp
   database/src/kfc/database/user_repository.cpp
   database/src/kfc/database/rating_service.cpp
 )
 target_include_directories(kfc_server PRIVATE server/include database/include)
-target_link_libraries(kfc_server PRIVATE kfc_core kfc_protocol ixwebsocket SQLiteCpp kfc_argon2)
+# hiredis is kfc_server-only -- RedisRoomDirectory is the one thing that uses
+# it, and it's deliberately not exercised by kfc_tests (see
+# fake_room_directory.hpp's own comment); the fast suite stays Redis-free.
+target_link_libraries(kfc_server PRIVATE kfc_core kfc_protocol ixwebsocket SQLiteCpp kfc_argon2 hiredis::hiredis)
 target_compile_definitions(kfc_server PRIVATE
   KFC_SERVER_DEFAULT_BOARD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/server/apps/kfc_server/default_board.txt"
 )

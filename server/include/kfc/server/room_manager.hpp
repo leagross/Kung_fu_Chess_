@@ -14,6 +14,7 @@
 #include "kfc/protocol/messages.hpp"
 #include "kfc/server/match.hpp"
 #include "kfc/server/match_scheduler.hpp"
+#include "kfc/server/room_directory.hpp"
 
 namespace kfc::protocol {
 class FileLogger;
@@ -66,9 +67,17 @@ public:
     /// player has to return before the match is forfeited. Defaults to the
     /// spec's 20 seconds; tests pass a short value so a countdown they need to
     /// see expire does not cost twenty real seconds of suite time.
+    /// directory, if given, is where this RoomManager registers rooms it
+    /// creates and looks up names it doesn't recognize -- see IRoomDirectory.
+    /// Left null (the default), a RoomManager behaves exactly as it always
+    /// has: single-worker, no redirect ever considered. self_url is this
+    /// worker's own client-facing address, registered alongside every room it
+    /// creates; required (by the caller, not enforced here) whenever
+    /// directory is non-null.
     RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
                 kfc::protocol::GameplayConfig config = {}, ResultCallback on_result = {},
-                int disconnect_grace_ms = kDefaultDisconnectGraceMs);
+                int disconnect_grace_ms = kDefaultDisconnectGraceMs, IRoomDirectory* directory = nullptr,
+                std::string self_url = {});
     ~RoomManager();
 
     RoomManager(const RoomManager&) = delete;
@@ -123,9 +132,14 @@ public:
     ///
     /// std::nullopt if no room by that name exists, or if the room's game is
     /// already decided; failure_reason (if given) receives the matching
-    /// kfc::protocol::join_reasons string.
+    /// kfc::protocol::join_reasons string. If name isn't a room this worker
+    /// knows about *and* directory_ says a different worker owns it,
+    /// redirect_url (if given) receives that worker's address instead of
+    /// failure_reason being touched at all -- the caller's cue to send a
+    /// JoinRedirect rather than a JoinFailed.
     [[nodiscard]] std::optional<Seat> join_room(const std::string& name, const std::string& username, SendFn send,
-                                                 CloseFn close = {}, std::string* failure_reason = nullptr);
+                                                 CloseFn close = {}, std::string* failure_reason = nullptr,
+                                                 std::string* redirect_url = nullptr);
 
     /// Routes one decoded client message to the given room's Match. A no-op if
     /// the room no longer exists (already torn down) -- a late frame from a
@@ -227,6 +241,12 @@ private:
     kfc::protocol::GameplayConfig config_;
     ResultCallback on_result_;
     int disconnect_grace_ms_;
+
+    // Null in the (default) single-worker case -- see the constructor's doc
+    // comment. Not owned: main() owns the concrete RedisRoomDirectory and
+    // must outlive this RoomManager, same lifetime contract as logger_.
+    IRoomDirectory* directory_;
+    std::string self_url_;
 
     // Ticks every room's Match -- see match_scheduler.hpp. A pointer (not a
     // plain member) so stop_all() can actually tear it down and join its

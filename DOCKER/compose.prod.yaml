@@ -1,0 +1,37 @@
+# Production stack: kfc_server behind Caddy. Run this on the actual cloud
+# host instead of the repo-root compose.yaml, which is for local development
+# (publishes 8080/8081 straight to localhost, no TLS, no domain).
+#
+# See README.md in this directory for the full setup.
+
+services:
+  server:
+    build: ..
+    image: kfc-server
+    volumes:
+      - kfc-data:/data
+    restart: unless-stopped
+    # No `ports:` here on purpose -- only Caddy is reachable from the
+    # internet. Caddy reaches this container over the compose network by
+    # service name (server:8080, server:8081), the same way any two
+    # containers in one compose project reach each other.
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - server
+    ports:
+      - "80:80"   # required for Let's Encrypt's HTTP-01 challenge
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in DOCKER/.env, e.g. DOMAIN=chess.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  kfc-data:
+  caddy-data:
+  caddy-config:

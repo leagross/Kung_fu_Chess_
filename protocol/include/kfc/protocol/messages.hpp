@@ -205,6 +205,17 @@ inline constexpr const char* kRoomNotActive = "room_not_active";
 inline constexpr const char* kRoomNameTaken = "room_name_taken";
 }  // namespace join_reasons
 
+/// Sent instead of Welcome or JoinFailed when JoinRoom named a room that is
+/// real but lives on a *different* kfc_server worker (see
+/// server::RoomManager's room directory) -- not "no such room", but "not
+/// here". url is that worker's own client-facing address; the client is
+/// expected to reconnect there and resend Login and the seating request that
+/// got redirected, the same way it would dial in fresh. The connection this
+/// arrived on is closed right after, exactly like JoinFailed.
+struct JoinRedirect {
+    std::string url;
+};
+
 /// Sent when Login was rejected, carrying the account store's own reason (e.g.
 /// "wrong_password"). The connection is closed right after. Without this a
 /// failed login is indistinguishable, from the client's side, from an
@@ -230,6 +241,6 @@ struct OpponentReconnected {};
 
 /// Every message shape a client ever receives.
 using ServerMessage = std::variant<Welcome, MotionStarted, BoardUpdate, MoveRejected, GameOver, OpponentDisconnected,
-                                   MatchStart, JoinFailed, LoginFailed, OpponentReconnected>;
+                                   MatchStart, JoinFailed, JoinRedirect, LoginFailed, OpponentReconnected>;
 
 }  // namespace kfc::protocol

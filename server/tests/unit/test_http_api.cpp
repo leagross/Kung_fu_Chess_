@@ -212,6 +212,10 @@ TEST_F(HttpApiFixture, MetricsReturnsPrometheusTextWithLiveGaugesAndCounters) {
     EXPECT_NE(response->body.find("kfc_messages_received_total 0"), std::string::npos);
     EXPECT_NE(response->body.find("# TYPE kfc_active_rooms gauge"), std::string::npos);
     EXPECT_NE(response->body.find("# TYPE kfc_moves_processed_total counter"), std::string::npos);
+    // Not a fixed value -- rooms_ sizes its MatchScheduler to hardware_concurrency()
+    // -- so this only checks kfc_worker_threads is actually a live number, i.e.
+    // wired to rooms_.worker_count() and not hardcoded or missing.
+    EXPECT_NE(response->body.find("kfc_worker_threads " + std::to_string(rooms_.worker_count())), std::string::npos);
 }
 
 TEST_F(HttpApiFixture, UnknownRouteReturns404) {

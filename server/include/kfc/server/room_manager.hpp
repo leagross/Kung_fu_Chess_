@@ -14,6 +14,7 @@
 #include "kfc/protocol/messages.hpp"
 #include "kfc/server/match.hpp"
 #include "kfc/server/match_scheduler.hpp"
+#include "kfc/server/metrics.hpp"
 #include "kfc/server/room_directory.hpp"
 
 namespace kfc::protocol {
@@ -73,11 +74,13 @@ public:
     /// has: single-worker, no redirect ever considered. self_url is this
     /// worker's own client-facing address, registered alongside every room it
     /// creates; required (by the caller, not enforced here) whenever
-    /// directory is non-null.
+    /// directory is non-null. metrics is null by default (see Metrics's own
+    /// doc comment); passed straight through to the MatchScheduler this
+    /// constructs, which records every worker's tick passes into it.
     RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
                 kfc::protocol::GameplayConfig config = {}, ResultCallback on_result = {},
                 int disconnect_grace_ms = kDefaultDisconnectGraceMs, IRoomDirectory* directory = nullptr,
-                std::string self_url = {});
+                std::string self_url = {}, Metrics* metrics = nullptr);
     ~RoomManager();
 
     RoomManager(const RoomManager&) = delete;
@@ -161,6 +164,11 @@ public:
 
     /// Number of rooms currently alive -- for tests and diagnostics.
     [[nodiscard]] std::size_t room_count() const;
+
+    /// How many MatchScheduler worker threads are ticking those rooms -- for
+    /// GET /metrics's kfc_worker_threads gauge. 0 once stop_all() has torn
+    /// the scheduler down, same as every other scheduler_-guarded accessor.
+    [[nodiscard]] std::size_t worker_count() const;
 
     /// Tears down the scheduler backing every room and does not return until
     /// every one of its worker threads has actually exited -- so no tick can
@@ -248,6 +256,12 @@ private:
     IRoomDirectory* directory_;
     std::string self_url_;
 
+    // Not owned, same lifetime contract as directory_ above. Handed straight
+    // through to scheduler_'s constructor below -- RoomManager itself never
+    // reads a counter or renders anything, it only carries this from main()
+    // to the one place (MatchScheduler::run) that has a tick pass to time.
+    Metrics* metrics_;
+
     // Ticks every room's Match -- see match_scheduler.hpp. A pointer (not a
     // plain member) so stop_all() can actually tear it down and join its
     // worker threads instead of merely emptying it; scheduler_ is null after
@@ -268,8 +282,8 @@ private:
     // call into it" mutually exclusive; the actual worker-thread joins still
     // happen with the mutex released (see stop_all()), so a slow teardown
     // never blocks the hot path this guards.
-    std::mutex scheduler_mutex_;
-    std::unique_ptr<MatchScheduler> scheduler_ = std::make_unique<MatchScheduler>();
+    mutable std::mutex scheduler_mutex_;
+    std::unique_ptr<MatchScheduler> scheduler_;
 
     mutable std::mutex rooms_mutex_;
     std::map<RoomId, Room> rooms_;

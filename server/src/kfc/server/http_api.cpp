@@ -200,7 +200,7 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, RoomManager& 
             return handle_health(users);
         }
         if (request->method == "GET" && request->uri == "/metrics") {
-            return text_response(metrics.render(sessions.live_count(), rooms.room_count()));
+            return text_response(metrics.render(sessions.live_count(), rooms.room_count(), rooms.worker_count()));
         }
         bool is_register = request->method == "POST" && request->uri == "/api/auth/register";
         bool is_login = request->method == "POST" && request->uri == "/api/auth/login";

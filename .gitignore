@@ -58,6 +58,10 @@ assets/sounds/moresound/
 # one by accident is the kind of mistake worth guarding against regardless.
 .env
 
+# Planning notes, not project source -- changes shape too often to be worth
+# reviewing as a diff.
+Roadmap.md
+
 # ---------------------------------------------------------------------------
 # Editors / IDEs / OS clutter
 # ---------------------------------------------------------------------------

@@ -60,6 +60,22 @@ bool is_valid_new_password(const std::string& password) {
 
 UserRepository::UserRepository(const std::string& db_path)
     : db_(std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)) {
+    // mutex_ already serializes every call into this class to one at a time
+    // (see its own doc comment) -- these two PRAGMAs are about what each of
+    // those writes costs on disk, not about concurrency this class doesn't
+    // have anyway. SQLite's default (rollback journal) fsyncs twice per
+    // write transaction; WAL fsyncs once, and lets a reader run without
+    // waiting on a writer's lock at all -- found to matter by Roadmap.md's
+    // stage-3 load test, where thousands of brand-new accounts registering
+    // at once (POST /api/auth/register -> authenticate()'s own INSERT) queued
+    // for tens of seconds behind mutex_ purely on disk I/O it did not need
+    // to spend. synchronous=NORMAL is WAL's documented pairing: still durable
+    // against an application crash (this process dying loses nothing
+    // committed), only a full OS crash at the exact wrong instant could lose
+    // the last commit -- an acceptable trade for match history and ratings,
+    // not for a payment ledger.
+    db_->exec("PRAGMA journal_mode=WAL");
+    db_->exec("PRAGMA synchronous=NORMAL");
     db_->exec(
         "CREATE TABLE IF NOT EXISTS users ("
         "  username TEXT PRIMARY KEY,"

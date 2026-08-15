@@ -44,6 +44,24 @@ class Metrics;
 /// seconds instead of up to thirty.
 inline constexpr int kIdlePingIntervalSecs = 5;
 
+/// Passed straight through to the underlying ix::SocketServer (this class
+/// and HttpApiServer both construct one). ixwebsocket's own defaults --
+/// backlog 5, maxConnections 128 -- are sized for a demo, not
+/// Server_Design.md's stated target: found by Roadmap.md's stage-3 load
+/// test, whose k6 run stopped scaling at ~128 concurrent connections with
+/// "reached max connections = 128. Not accepting connection" filling
+/// kfc_server.log, nowhere near CPU- or memory-bound. backlog is the OS-level
+/// TCP SYN queue depth (how many pending handshakes can queue before the
+/// kernel starts refusing new ones outright, invisible to this process
+/// entirely) -- 1024 is generous for a single machine without being the kind
+/// of number that needs its own justification. maxConnections is
+/// ixwebsocket's own accepted-but-not-yet-handed-off cap; 100,000 is nowhere
+/// near Server_Design.md's five-million-game target, but getting there is a
+/// multi-machine question (Roadmap.md's stage 2), not a single constant this
+/// process could raise its way out of.
+inline constexpr int kTcpBacklog = 1024;
+inline constexpr std::size_t kMaxConnections = 100000;
+
 /// Owns the WebSocket transport for one kfc_server: the IXWebSocket network
 /// system's lifetime, the server socket itself, and all per-connection
 /// handling -- logging opens/closes, turning the first Login into a room+colour

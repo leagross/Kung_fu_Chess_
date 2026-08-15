@@ -17,6 +17,7 @@
 #include "kfc/server/rate_limiter.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/server/session_registry.hpp"
+#include "kfc/server/websocket_game_server.hpp"  // kTcpBacklog/kMaxConnections
 
 namespace kfc::server {
 
@@ -244,7 +245,7 @@ HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, Roo
     // WebSocketGameServer -- ix's own init/uninit are reference-counted, so
     // two servers in one process each doing this is the normal pattern.
     ix::initNetSystem();
-    server_ = std::make_unique<ix::HttpServer>(port_, "0.0.0.0");
+    server_ = std::make_unique<ix::HttpServer>(port_, "0.0.0.0", kTcpBacklog, kMaxConnections);
 
     server_->setOnConnectionCallback([this](ix::HttpRequestPtr request,
                                             const std::shared_ptr<ix::ConnectionState>& connection_state)

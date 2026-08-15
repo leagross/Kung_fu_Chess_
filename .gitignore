@@ -31,6 +31,10 @@ CMakeUserPresets.json
 # publish -- every machine builds its own from empty.
 *.db
 *.db-journal
+# WAL mode's sidecar files (see UserRepository's own comment on why WAL) --
+# present whenever the database is open, gone again on a clean close.
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 

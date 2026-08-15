@@ -7,11 +7,13 @@
 # ---------------------------------------------------------------------------
 FROM ubuntu:24.04 AS build
 
-# ca-certificates is not optional: CMake fetches GoogleTest, nlohmann/json,
-# IXWebSocket and SQLiteCpp over HTTPS at configure time, and without root
-# certificates every one of those downloads fails.
+# ca-certificates is not optional: CMake fetches every dependency
+# (googletest, nlohmann/json, IXWebSocket, SQLiteCpp, hiredis, argon2) via
+# `git clone` over HTTPS at configure time (see CMakeLists.txt's own comment
+# on why GIT_REPOSITORY rather than a zip/tar URL), which needs both git
+# itself and root certificates to trust GitHub's.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake ninja-build ca-certificates \
+        build-essential cmake ninja-build ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -29,8 +31,12 @@ RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 # ---------------------------------------------------------------------------
 FROM ubuntu:24.04
 
+# curl is here only for HEALTHCHECK below to have something to run --
+# GET /health already exists (see server/include/kfc/server/http_api.hpp)
+# purely for this and for a load balancer's own probe; this is the first
+# thing in this repo that actually calls it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libstdc++6 \
+        libstdc++6 curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --no-create-home kfc
 
@@ -56,4 +62,12 @@ USER kfc
 
 EXPOSE 8080
 EXPOSE 8081
+
+# Queries the same GET /health handle_health() already answers with a real
+# UserRepository query (see http_api.cpp), not just "the process exists" --
+# start-period gives the server a few seconds to open its SQLite connection
+# and bind both ports before the first probe counts against it.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8081/health || exit 1
+
 CMD ["kfc_server", "8080", "--http-port=8081"]

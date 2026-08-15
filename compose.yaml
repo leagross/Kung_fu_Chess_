@@ -13,7 +13,7 @@ services:
       # host:container. The server takes its ports from argv (see CMD), so
       # changing the container side means changing both.
       - "8080:8080"  # WebSocket game protocol
-      - "8081:8081"  # register/login/history (HTTP+JSON)
+      - "8081:8081"  # register/login/history (HTTP+JSON), also GET /metrics
     volumes:
       # Accounts, ratings, game history and the log. Without this every
       # `docker compose up` would start from an empty database -- the
@@ -22,5 +22,47 @@ services:
       - kfc-data:/data
     restart: unless-stopped
 
+  # Scrapes server's GET /metrics -- see DOCKER/prometheus.yml and
+  # server/include/kfc/server/metrics.hpp. Local-dev only: this stack is not
+  # part of compose.prod.yaml, which publishes nothing but Caddy's 80/443 to
+  # the internet (see DOCKER/README.md) -- a cloud deployment wanting
+  # Prometheus/Grafana would run this pair alongside it on the same private
+  # network, not exposed the way they are here.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./DOCKER/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # Pre-wired to Prometheus and the one dashboard this repo ships -- see
+  # DOCKER/grafana/provisioning. Anonymous viewer access, no login screen:
+  # this is a local dev convenience, not a service anyone else ever reaches.
+  grafana:
+    image: grafana/grafana:11.3.0
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./DOCKER/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      # The provider config is mounted as one file, not its whole directory,
+      # so that directory is free for Docker to create the second mount
+      # below inside it -- a directory bind-mounted read-only cannot have a
+      # mountpoint created inside it, which a whole-directory mount here
+      # would have been.
+      - ./DOCKER/grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./DOCKER/grafana/dashboards:/etc/grafana/provisioning/dashboards/files:ro
+    restart: unless-stopped
+
 volumes:
   kfc-data:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,12 @@
+# Scrapes kfc_server's own GET /metrics (see server/include/kfc/server/metrics.hpp)
+# every 5 seconds. "server:8081" is the compose service name, not a real
+# hostname -- Prometheus reaches it over the compose-internal network the
+# same way Caddy does in DOCKER/Caddyfile, no port publishing required.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: kfc_server
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["server:8081"]

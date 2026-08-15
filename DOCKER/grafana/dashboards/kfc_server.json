@@ -1,0 +1,75 @@
+{
+  "title": "kfc_server",
+  "uid": "kfc-server",
+  "editable": true,
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active connections",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "kfc_active_connections", "refId": "A" }]
+    },
+    {
+      "id": 2,
+      "title": "Active rooms",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "kfc_active_rooms", "refId": "A" }]
+    },
+    {
+      "id": 3,
+      "title": "Worker threads",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "kfc_worker_threads", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "title": "Rooms per worker thread",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "kfc_active_rooms / kfc_worker_threads", "refId": "A" }],
+      "fieldConfig": { "defaults": { "decimals": 2 }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "Client frames / sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "rate(kfc_messages_received_total[1m])", "legendFormat": "received", "refId": "A" },
+        { "expr": "rate(kfc_messages_rejected_total[1m])", "legendFormat": "rejected", "refId": "B" },
+        { "expr": "rate(kfc_messages_undecodable_total[1m])", "legendFormat": "undecodable", "refId": "C" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Moves processed / sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [{ "expr": "rate(kfc_moves_processed_total[1m])", "legendFormat": "moves/sec", "refId": "A" }]
+    },
+    {
+      "id": 7,
+      "title": "Worker tick duration",
+      "description": "avg = rate(sum)/rate(count) over the last minute; max is the worst single tick pass since process start, not windowed.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "rate(kfc_tick_duration_seconds_sum[1m]) / rate(kfc_tick_duration_seconds_count[1m])",
+          "legendFormat": "avg",
+          "refId": "A"
+        },
+        { "expr": "kfc_tick_duration_seconds_max", "legendFormat": "max (lifetime)", "refId": "B" }
+      ]
+    }
+  ]
+}

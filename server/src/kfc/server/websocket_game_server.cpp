@@ -22,7 +22,7 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
     // Windows needs WSAStartup (what this wraps) before any socket use;
     // paired with uninitNetSystem() in the destructor.
     ix::initNetSystem();
-    server_ = std::make_unique<ix::WebSocketServer>(port_, "0.0.0.0");
+    server_ = std::make_unique<ix::WebSocketServer>(port_, "0.0.0.0", kTcpBacklog, kMaxConnections);
 
     server_->setOnConnectionCallback([this](std::weak_ptr<ix::WebSocket> weak_socket,
                                             std::shared_ptr<ix::ConnectionState> connection_state) {

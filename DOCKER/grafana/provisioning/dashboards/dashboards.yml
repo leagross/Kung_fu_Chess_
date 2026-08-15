@@ -1,0 +1,12 @@
+# Points Grafana at ../dashboards for anything to auto-load on start --
+# paired with datasources/prometheus.yml so the one dashboard this repo
+# ships (kfc_server.json) is already there the first time anyone opens
+# Grafana, not something to import by hand.
+apiVersion: 1
+
+providers:
+  - name: kfc_server
+    folder: ""
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards/files

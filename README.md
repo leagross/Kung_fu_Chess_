@@ -127,6 +127,13 @@ docker compose down        # stop
 docker compose down -v     # stop and delete the accounts too
 ```
 
+`docker compose up` also brings up Prometheus (`http://localhost:9090`),
+scraping the server's `GET /metrics`, and Grafana (`http://localhost:3000`,
+no login) with a `kfc_server` dashboard already loaded — connections, rooms,
+worker threads, message/move rates, and tick duration. See
+`server/include/kfc/server/metrics.hpp` for what each metric actually means
+and `DOCKER/prometheus.yml`/`DOCKER/grafana/` for how they're wired up.
+
 ### Networked, from a local build
 
 Start the server — it listens on `ws://localhost:8080` (pass a port to change

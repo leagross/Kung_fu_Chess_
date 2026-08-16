@@ -12,6 +12,7 @@
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/protocol/json.hpp"
 #include "kfc/server/client_session.hpp"
+#include "kfc/server/rate_limiter.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/server/session_registry.hpp"
 
@@ -78,6 +79,15 @@ struct Fixture {
 
     ClientSession session(FakeSocket& socket, const std::string& id = "conn-1") {
         return ClientSession(id, socket.send_fn(), socket.close_fn(), rooms, users, sessions, logger);
+    }
+
+    // Only the rate-limiting tests need a RateLimiter and a remote IP at
+    // all -- see ClientSession's own doc comment on why both default to
+    // null/empty (skipping the check entirely) for every other test.
+    ClientSession session_rate_limited(FakeSocket& socket, kfc::server::RateLimiter& auth_limiter,
+                                       const std::string& remote_ip, const std::string& id = "conn-1") {
+        return ClientSession(id, socket.send_fn(), socket.close_fn(), rooms, users, sessions, logger,
+                             /*metrics=*/nullptr, &auth_limiter, remote_ip);
     }
 
     FileLogger logger;
@@ -454,4 +464,46 @@ TEST(ClientSessionTest, DifferentAccountsAreUnaffectedByEachOther) {
     EXPECT_TRUE(alice.authenticated());
     EXPECT_TRUE(bob.authenticated());
     EXPECT_EQ(fixture.sessions.live_count(), 2u);
+}
+
+// --- Login shares its rate-limit budget with the HTTP API (see http_api.hpp
+// and RateLimiter's own doc comment) ---
+
+TEST(ClientSessionTest, LoginIsRefusedOnceItsIpsAuthLimiterBudgetIsSpent) {
+    Fixture fixture;
+    kfc::server::RateLimiter auth_limiter(1, std::chrono::minutes(1));
+    FakeSocket first_socket;
+    ClientSession first = fixture.session_rate_limited(first_socket, auth_limiter, "203.0.113.9", "conn-1");
+    first.on_text(login_text("alice", "hunter2"));
+    ASSERT_TRUE(first.authenticated()) << "the one allowed attempt for this IP";
+
+    // A second connection, same IP, same already-exhausted budget: refused
+    // before authenticate() is ever called, exactly the way a wrong
+    // password would be -- so a script cannot simply open a new WebSocket
+    // connection per attempt to dodge kMaxMessagesPerSecond, which is
+    // per-connection, not per-IP.
+    FakeSocket second_socket;
+    ClientSession second = fixture.session_rate_limited(second_socket, auth_limiter, "203.0.113.9", "conn-2");
+    second.on_text(login_text("bob", "hunter2"));
+
+    EXPECT_FALSE(second.authenticated());
+    std::optional<LoginFailed> failure = second_socket.first_of<LoginFailed>();
+    ASSERT_TRUE(failure.has_value());
+    EXPECT_EQ(failure->reason, kfc::protocol::login_reasons::kRateLimited);
+    EXPECT_EQ(second_socket.closes, 1);
+    EXPECT_FALSE(fixture.users.user_exists("bob")) << "a rate-limited Login must not reach authenticate() at all";
+}
+
+TEST(ClientSessionTest, LoginFromADifferentIpIsUnaffectedByAnotherIpsBudget) {
+    Fixture fixture;
+    kfc::server::RateLimiter auth_limiter(1, std::chrono::minutes(1));
+    FakeSocket spent_socket;
+    fixture.session_rate_limited(spent_socket, auth_limiter, "203.0.113.9", "conn-1")
+        .on_text(login_text("alice", "hunter2"));
+
+    FakeSocket other_socket;
+    ClientSession other = fixture.session_rate_limited(other_socket, auth_limiter, "198.51.100.4", "conn-2");
+    other.on_text(login_text("carol", "hunter2"));
+
+    EXPECT_TRUE(other.authenticated());
 }

@@ -7,6 +7,7 @@
 #include "kfc/protocol/messages.hpp"
 #include "kfc/server/connection_callbacks.hpp"
 #include "kfc/server/metrics.hpp"
+#include "kfc/server/rate_limiter.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/server/session_registry.hpp"
 
@@ -64,10 +65,19 @@ public:
     /// users, sessions and logger are shared and must outlive the session.
     /// metrics is null by default -- see Metrics's own doc comment; every
     /// existing test constructs a session with no metrics object at all, and
-    /// on_text simply skips the counter bumps when it is null.
+    /// on_text simply skips the counter bumps when it is null. auth_limiter
+    /// is null by default too, for the same reason: when given (with
+    /// remote_ip, the connection's own address), a Login is refused with
+    /// login_reasons::kRateLimited before authenticate() is ever called once
+    /// this connection's remote_ip has used up its budget for the current
+    /// window -- see RateLimiter's own doc comment for why this shares one
+    /// budget with POST /api/auth/login and /register rather than each
+    /// having its own, and http_api.hpp's class comment for why the HTTP
+    /// side needed this before the WebSocket side did (both do now).
     ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                   kfc::database::IUserStore& users, SessionRegistry& sessions,
-                  kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr);
+                  kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr,
+                  RateLimiter* auth_limiter = nullptr, std::string remote_ip = {});
 
     /// The socket opened. Logging only -- nothing is decided until a Login
     /// arrives.
@@ -125,6 +135,8 @@ private:
     SessionRegistry& sessions_;
     kfc::protocol::FileLogger& logger_;
     Metrics* metrics_;
+    RateLimiter* auth_limiter_;
+    std::string remote_ip_;
 
     // This connection's hold on its username, taken once the password checks
     // out and given back when the session is destroyed -- see SessionRegistry.

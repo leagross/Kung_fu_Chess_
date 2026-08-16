@@ -232,6 +232,11 @@ namespace login_reasons {
 /// at once would be one player in two games at the same time, and the returning
 /// player's own seat could not be told apart from a second copy of them.
 inline constexpr const char* kAlreadyLoggedIn = "already_logged_in";
+/// Too many Login attempts from this connection's remote IP in the current
+/// window -- see kfc::server::RateLimiter. Shared with POST /api/auth/login
+/// and /register's own budget (see HttpApiServer), so splitting an attack
+/// across the WebSocket and HTTP paths does not double it.
+inline constexpr const char* kRateLimited = "rate_limited";
 }  // namespace login_reasons
 
 /// Broadcast when a player who dropped came back before their grace ran out --

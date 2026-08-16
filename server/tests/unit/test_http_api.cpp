@@ -16,6 +16,7 @@
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/server/http_api.hpp"
 #include "kfc/server/metrics.hpp"
+#include "kfc/server/rate_limiter.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/server/session_registry.hpp"
 
@@ -55,7 +56,8 @@ protected:
     void SetUp() override {
         port_ = next_port();
         users_ = std::make_unique<kfc::database::UserRepository>(fresh_db_path());
-        server_ = std::make_unique<kfc::server::HttpApiServer>(port_, *users_, rooms_, sessions_, metrics_, logger_);
+        server_ = std::make_unique<kfc::server::HttpApiServer>(port_, *users_, rooms_, sessions_, metrics_,
+                                                               auth_limiter_, logger_);
         ASSERT_TRUE(server_->listen());
         server_->start();
         base_url_ = "http://127.0.0.1:" + std::to_string(port_);
@@ -97,6 +99,11 @@ protected:
     kfc::server::RoomManager rooms_{[] { return kfc::model::Board(1, 1); }, logger_};
     kfc::server::SessionRegistry sessions_;
     kfc::server::Metrics metrics_;
+    // Same 10-per-minute budget production uses (see main.cpp) -- shared,
+    // in production, with ClientSession's Login path; nothing in this
+    // HTTP-only fixture exercises that sharing directly (see
+    // test_client_session.cpp for that side).
+    kfc::server::RateLimiter auth_limiter_{10, std::chrono::minutes(1)};
     int port_ = 0;
     std::string base_url_;
     std::unique_ptr<kfc::database::UserRepository> users_;

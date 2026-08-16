@@ -228,19 +228,15 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, RoomManager& 
 }  // namespace
 
 HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms,
-                             SessionRegistry& sessions, Metrics& metrics, kfc::protocol::FileLogger& logger)
+                             SessionRegistry& sessions, Metrics& metrics, RateLimiter& auth_limiter,
+                             kfc::protocol::FileLogger& logger)
     : port_(port),
       users_(users),
       rooms_(rooms),
       sessions_(sessions),
       metrics_(metrics),
       logger_(logger),
-      // At most 10 register/login attempts per IP per minute -- generous for
-      // a real player who fat-fingers a password a few times, a real
-      // deterrent against a script trying passwords or spinning up accounts
-      // as fast as the network allows. See RateLimiter's own doc comment for
-      // why a fixed window rather than something more precise.
-      login_and_register_limiter_(10, std::chrono::minutes(1)) {
+      auth_limiter_(auth_limiter) {
     // Paired with uninitNetSystem() in the destructor, exactly like
     // WebSocketGameServer -- ix's own init/uninit are reference-counted, so
     // two servers in one process each doing this is the normal pattern.
@@ -250,8 +246,8 @@ HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, Roo
     server_->setOnConnectionCallback([this](ix::HttpRequestPtr request,
                                             const std::shared_ptr<ix::ConnectionState>& connection_state)
                                          -> ix::HttpResponsePtr {
-        return dispatch(users_, rooms_, sessions_, metrics_, tokens_, login_and_register_limiter_,
-                        connection_state->getRemoteIp(), request);
+        return dispatch(users_, rooms_, sessions_, metrics_, tokens_, auth_limiter_, connection_state->getRemoteIp(),
+                        request);
     });
 }
 

@@ -17,8 +17,14 @@ namespace kfc::server {
 
 WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
                                          SessionRegistry& sessions, kfc::protocol::FileLogger& logger,
-                                         Metrics* metrics)
-    : port_(port), rooms_(rooms), users_(users), sessions_(sessions), logger_(logger), metrics_(metrics) {
+                                         Metrics* metrics, RateLimiter* auth_limiter)
+    : port_(port),
+      rooms_(rooms),
+      users_(users),
+      sessions_(sessions),
+      logger_(logger),
+      metrics_(metrics),
+      auth_limiter_(auth_limiter) {
     // Windows needs WSAStartup (what this wraps) before any socket use;
     // paired with uninitNetSystem() in the destructor.
     ix::initNetSystem();
@@ -65,7 +71,8 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
         // shared_ptr so it outlives each callback invocation; captured by the
         // message callback, which IXWebSocket holds for the connection's life.
         auto session = std::make_shared<ClientSession>(connection_state->getId(), send, close_connection, rooms_,
-                                                       users_, sessions_, logger_, metrics_);
+                                                       users_, sessions_, logger_, metrics_, auth_limiter_,
+                                                       connection_state->getRemoteIp());
 
         socket->setOnMessageCallback([session](const ix::WebSocketMessagePtr& msg) {
             switch (msg->type) {

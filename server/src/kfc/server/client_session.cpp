@@ -14,7 +14,8 @@ namespace kfc::server {
 
 ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                              kfc::database::IUserStore& users, SessionRegistry& sessions,
-                             kfc::protocol::FileLogger& logger, Metrics* metrics)
+                             kfc::protocol::FileLogger& logger, Metrics* metrics, RateLimiter* auth_limiter,
+                             std::string remote_ip)
     : connection_id_(std::move(connection_id)),
       send_(std::move(send)),
       close_(std::move(close)),
@@ -22,7 +23,9 @@ ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn clo
       users_(users),
       sessions_(sessions),
       logger_(logger),
-      metrics_(metrics) {}
+      metrics_(metrics),
+      auth_limiter_(auth_limiter),
+      remote_ip_(std::move(remote_ip)) {}
 
 void ClientSession::on_open() {
     logger_.log("Connection opened: " + connection_id_);
@@ -114,6 +117,20 @@ bool ClientSession::handle_login(const kfc::protocol::ClientMessage& message) {
     }
     if (authenticated()) {
         return true;  // already logged in; a second Login changes nothing
+    }
+
+    // Checked before authenticate() is ever called, on the same per-IP
+    // budget POST /api/auth/login and /register share (see RateLimiter's own
+    // doc comment) -- otherwise this connection's remote IP getting an HTTP
+    // 429 would mean nothing, since authenticate() itself both checks
+    // passwords *and* auto-registers a first-seen username, and this path
+    // was reachable at kMaxMessagesPerSecond per connection times as many
+    // connections as an attacker cared to open.
+    if (auth_limiter_ != nullptr && !auth_limiter_->allow(remote_ip_, std::chrono::steady_clock::now())) {
+        send_(kfc::protocol::encode(
+            kfc::protocol::ServerMessage{kfc::protocol::LoginFailed{kfc::protocol::login_reasons::kRateLimited}}));
+        drop(remote_ip_ + ": " + kfc::protocol::login_reasons::kRateLimited);
+        return true;
     }
 
     const kfc::protocol::Login& login = std::get<kfc::protocol::Login>(message);

@@ -70,4 +70,9 @@ EXPOSE 8081
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8081/health || exit 1
 
-CMD ["kfc_server", "8080", "--http-port=8081"]
+# info, not the binary's own debug default -- this is the image real traffic
+# runs behind (compose.yaml and DOCKER/compose.prod.yaml both use it
+# unmodified), and per-move traffic logged at debug level is more disk than
+# it is worth for a long-running container. Local iteration against the
+# binary directly (not through Docker) still gets the debug default.
+CMD ["kfc_server", "8080", "--http-port=8081", "--log-level=info"]

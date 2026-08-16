@@ -42,6 +42,9 @@ std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& use
 
 WatcherId MatchAudience::watch(SendFn send, CloseFn close) {
     std::lock_guard<std::mutex> guard(mutex_);
+    if (roster_->watchers.size() >= kMaxSpectators) {
+        return 0;  // "not a watcher" -- see WatcherId's own doc comment
+    }
     std::shared_ptr<Roster> next = editable_copy();
     WatcherId id = next_watcher_id_++;
     next->watchers.push_back(Watcher{id, std::move(send), std::move(close)});

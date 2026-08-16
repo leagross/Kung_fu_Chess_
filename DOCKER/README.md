@@ -1,6 +1,7 @@
 # Deploying kfc_server to a real cloud host
 
-This is [Roadmap.md](../Roadmap.md)'s stage 1: the same `kfc_server` image,
+This is the project roadmap's stage 1 (kept locally, not tracked in git): the
+same `kfc_server` image,
 running on a machine that is actually on the internet, behind TLS. Nothing
 here needs Kubernetes, Redis or a second language -- just this repo's
 existing `Dockerfile`, plus [Caddy](https://caddyserver.com) in front of it
@@ -49,7 +50,7 @@ just that the containers start.
 
 ## Hardening
 
-The other half of `Roadmap.md`'s stage 1 -- server-side changes, not
+The other half of the roadmap's stage 1 -- server-side changes, not
 deployment configuration, so they live in `kfc_server` itself rather than
 this folder:
 

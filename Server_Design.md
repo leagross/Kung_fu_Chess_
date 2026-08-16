@@ -4,9 +4,12 @@ How the server in this repository would have to change to carry **100 million
 registered players, 10 million of them playing at once.**
 
 Today it is one process: [`RoomManager`](server/README.md) holds every room in a
-`std::map`, each room owns a `Match` with its **own `std::thread`**, and accounts
-live in a single SQLite file. That is the right shape for one machine. This
-document is about what breaks first, and what replaces it.
+`std::map`, a small pool of `MatchScheduler` worker threads ticks every room's
+`Match` in turn (one thread per core, not per room — see that class's own doc
+comment for why a `Match` used to own its own thread and no longer does), and
+accounts live in a single SQLite file. That is the right shape for one
+machine. This document is about what breaks first past that, and what
+replaces it.
 
 Every number below is computed, not guessed. The message sizes are measured from
 this project's own `encode()` — the arithmetic is at the end.
@@ -89,16 +92,17 @@ retried safely.
 
 ### Limit one: threads
 
-The current design is **one `std::thread` per room**. 5 M rooms is 5 M threads.
-At even 64 KB of stack each that is 320 GB of stack, on one machine, before any
-game logic runs. This is the first thing that has to change, and it changes
-*inside* our code, not around it:
-
-> **One tick thread must drive many rooms.** A thread per core, each looping over
-> a few thousand rooms and advancing them all by the elapsed time. `Match` is
-> already built for this — `GameCore::wait(elapsed_ms)` takes time as a
-> parameter and never reads a clock, which is exactly what lets one thread serve
-> many rooms.
+One `std::thread` per room would be 5 M rooms needing 5 M threads — at even
+64 KB of stack each, 320 GB of stack on one machine before any game logic
+runs. That limit is already gone inside our code: `MatchScheduler` (see its
+own doc comment) drives every room's `Match` from a small pool of worker
+threads, one per core, each looping over its own slice of rooms and
+advancing them all by the elapsed time — `GameCore::wait(elapsed_ms)` takes
+time as a parameter and never reads a clock, which is what lets one thread
+serve many rooms. What is left is arithmetic, not architecture: how many
+rooms one core's slice can actually carry at 5 M concurrent games, and
+everything below this section is about that and about the limits *outside*
+one process (many machines, not just many threads on one).
 
 ### Limit two: arithmetic
 
@@ -288,14 +292,19 @@ sets a lower bound on the routing entry's TTL.
 
 ## What we would change here, in order
 
-1. **One tick thread per core, not per room.** The single hard blocker. Everything
-   else is around our code; this one is *in* it.
+1. ~~**One tick thread per core, not per room.**~~ Done — `MatchScheduler`.
 2. **Split `kfc_server` into gateway and game server.** Mostly a packaging change:
    `ClientSession` is already free of the socket, and `Match` is already free of
    the network.
 3. **`UserRepository` behind an interface**, with a Postgres implementation
-   alongside the SQLite one. It is already the single place that touches accounts.
-4. **Room directory in Redis** instead of `RoomManager`'s in-process `std::map`.
+   alongside the SQLite one. The interface (`IUserStore`) is built; only the
+   Postgres implementation itself is not.
+4. ~~**Room directory in Redis** instead of `RoomManager`'s in-process
+   `std::map`.~~ Done — `RedisRoomDirectory`, one worker per process, `SET`
+   registers a room's owner and a redirect follows a `JoinFailed` for a room
+   another worker owns. Global (cross-worker) matchmaking itself — actually
+   *pairing* players across workers, not just redirecting a known room — is
+   still not built; see Microservices_Design.md's own "not yet" list.
 5. **Rating updates as two independent writes**, not one transaction — see §1.
 
 Steps 2–5 are all made possible by the layering already in the repo: `logic/`

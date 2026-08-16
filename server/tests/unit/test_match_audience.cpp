@@ -200,6 +200,39 @@ TEST(MatchAudienceTest, SendToReachesOneColourOnly) {
     EXPECT_TRUE(watcher.received.empty()) << "a rejection is nobody else's business";
 }
 
+// --- The watcher count is capped, unlike seats ---
+
+TEST(MatchAudienceTest, TheSpectatorLimitRefusesAWatcherOnceReached) {
+    MatchAudience audience;
+    std::vector<Sink> sinks(MatchAudience::kMaxSpectators);
+    for (Sink& sink : sinks) {
+        ASSERT_NE(audience.watch(sink.send_fn(), sink.close_fn()), 0u);
+    }
+    ASSERT_EQ(audience.watcher_count(), MatchAudience::kMaxSpectators);
+
+    Sink one_too_many;
+    WatcherId refused = audience.watch(one_too_many.send_fn(), one_too_many.close_fn());
+
+    EXPECT_EQ(refused, 0u) << "0 is the same sentinel unwatch() already treats as 'not a watcher'";
+    EXPECT_EQ(audience.watcher_count(), MatchAudience::kMaxSpectators) << "the refused watcher must not be seated";
+}
+
+TEST(MatchAudienceTest, LeavingBelowTheLimitFreesUpASpotForTheNextWatcher) {
+    MatchAudience audience;
+    std::vector<Sink> sinks(MatchAudience::kMaxSpectators);
+    std::vector<WatcherId> ids;
+    for (Sink& sink : sinks) {
+        ids.push_back(audience.watch(sink.send_fn(), sink.close_fn()));
+    }
+
+    audience.unwatch(ids.front());
+    Sink newcomer;
+    WatcherId admitted = audience.watch(newcomer.send_fn(), newcomer.close_fn());
+
+    EXPECT_NE(admitted, 0u) << "a spot freed by unwatch() must be usable again, not permanently spent";
+    EXPECT_EQ(audience.watcher_count(), MatchAudience::kMaxSpectators);
+}
+
 TEST(MatchAudienceTest, ReseatingKeepsTheUsernameAndRedirectsTheSends) {
     MatchAudience audience;
     Sink dropped, returned;

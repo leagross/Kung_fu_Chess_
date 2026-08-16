@@ -194,6 +194,17 @@ TEST_F(HttpApiFixture, MalformedRegisterBodyReturns400) {
     EXPECT_EQ(response->statusCode, 400);
 }
 
+TEST_F(HttpApiFixture, AGrotesquelyOversizedRegisterBodyReturns413AndCreatesNoAccount) {
+    // Still valid JSON, just absurd -- this is here to prove the size check
+    // happens before json::parse, not to prove the parse itself is slow.
+    json oversized = json{{"username", "alice"}, {"password", std::string(200 * 1024, 'x')}};
+
+    ix::HttpResponsePtr response = post("/api/auth/register", oversized.dump());
+
+    EXPECT_EQ(response->statusCode, 413);
+    EXPECT_FALSE(users_->user_exists("alice"));
+}
+
 TEST_F(HttpApiFixture, HealthReturns200WithStatusOk) {
     ix::HttpResponsePtr response = get("/health");
 

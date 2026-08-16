@@ -148,9 +148,11 @@ public:
     /// disconnect is not a forfeit -- nothing about the game changes when one
     /// comes or goes. If the match is already under way it is also sent
     /// MatchStart immediately, so it starts watching instead of "searching".
-    /// Unlimited: seats are what's capped at two, not viewers. Returns the
-    /// handle identifying this watcher, to be given back to leave_spectator
-    /// when its connection closes.
+    /// Returns the handle identifying this watcher, to be given back to
+    /// leave_spectator when its connection closes -- or 0 (see WatcherId's
+    /// own doc comment) once MatchAudience::kMaxSpectators is already
+    /// attached. Nothing is sent to send/close in that case; the caller
+    /// (RoomManager) is the one that owes this connection a JoinFailed.
     [[nodiscard]] WatcherId join_spectator(const std::string& username, SendFn send, CloseFn close = {});
 
     /// A watcher's connection closed: stop sending to it. Nothing else about

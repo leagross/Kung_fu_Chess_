@@ -332,8 +332,9 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
             reclaimed = match->reclaimable_seat_for(username);
             if (!reclaimed.has_value()) {
                 // Both seats already taken -> this joiner watches instead.
-                // Viewers are unlimited, so there is no rejection path left
-                // here.
+                // match->join_spectator below is what actually enforces
+                // MatchAudience::kMaxSpectators; a full room still falls
+                // through this branch and is rejected there, not here.
                 as_spectator = it->second.seats_taken >= 2;
                 if (!as_spectator) {
                     ++it->second.seats_taken;
@@ -385,6 +386,20 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
 
     if (as_spectator) {
         WatcherId watcher = match->join_spectator(username, std::move(send), std::move(close));
+        if (watcher == 0) {
+            // At MatchAudience::kMaxSpectators -- give back the connection
+            // counted above, the same way an expired reclaim does, or the
+            // room would never reach zero and never be reaped.
+            {
+                std::lock_guard<std::mutex> guard(rooms_mutex_);
+                auto it = rooms_.find(room_id);
+                if (it != rooms_.end()) {
+                    --it->second.connected;
+                }
+            }
+            fail(failure_reason, kfc::protocol::join_reasons::kSpectatorLimitReached);
+            return std::nullopt;
+        }
         logger_.log("RoomManager: '" + username + "' is watching room '" + name + "'");
         // Colour is meaningless for a viewer -- see Seat::spectator.
         return Seat{room_id, kfc::model::PieceColor::White, /*spectator=*/true, watcher};

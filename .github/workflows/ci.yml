@@ -35,3 +35,42 @@ jobs:
 
       - name: Run the full suite (unit + integration)
         run: ctest --test-dir build --output-on-failure
+
+  # Same suite, compiled with AddressSanitizer + UndefinedBehaviorSanitizer
+  # instead of just running Debug -- catches use-after-free, buffer overruns
+  # and UB (signed overflow, misaligned access, etc) that a plain Debug build
+  # and a passing test can both hide. Kept as its own job, not folded into
+  # the one above, so a sanitizer finding is unambiguous about which run
+  # caught it and a slow ASan build never blocks the fast feedback of the
+  # plain one.
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install a C++20 toolchain, CMake and OpenCV
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ libopencv-dev
+
+      - name: Configure (Debug, ASan + UBSan)
+        run: |
+          cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build every target
+        run: cmake --build build-asan
+
+      - name: Run the full suite (unit + integration)
+        env:
+          # abort_on_error makes a sanitizer finding fail the job the same
+          # way any other crash would, instead of only printing to a log
+          # ctest may not surface; halt_on_error=1 is ASan's own default but
+          # spelled out here rather than relied upon.
+          ASAN_OPTIONS: abort_on_error=1:halt_on_error=1
+          UBSAN_OPTIONS: abort_on_error=1:halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build-asan --output-on-failure

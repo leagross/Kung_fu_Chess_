@@ -7,6 +7,12 @@ RateLimiter::RateLimiter(int max_attempts, std::chrono::milliseconds window)
 
 bool RateLimiter::allow(const std::string& key, std::chrono::steady_clock::time_point now) {
     std::lock_guard<std::mutex> guard(mutex_);
+
+    if (++calls_since_sweep_ >= kSweepEveryNCalls) {
+        calls_since_sweep_ = 0;
+        evict_expired(now);
+    }
+
     Bucket& bucket = buckets_[key];  // default-constructed (count 0, window_start the epoch) if new
 
     if (now - bucket.window_start >= window_) {
@@ -16,6 +22,25 @@ bool RateLimiter::allow(const std::string& key, std::chrono::steady_clock::time_
 
     ++bucket.count;
     return bucket.count <= max_attempts_;
+}
+
+std::size_t RateLimiter::bucket_count() const {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return buckets_.size();
+}
+
+void RateLimiter::evict_expired(std::chrono::steady_clock::time_point now) {
+    // A bucket whose window has already elapsed behaves exactly like one
+    // that was never there -- the next allow() for that key resets count and
+    // window_start from scratch either way (see the check above). Erasing it
+    // now only reclaims memory; it changes no caller's rate-limit outcome.
+    for (auto it = buckets_.begin(); it != buckets_.end();) {
+        if (now - it->second.window_start >= window_) {
+            it = buckets_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 }  // namespace kfc::server

@@ -203,6 +203,13 @@ inline constexpr const char* kNoSuchRoom = "no_such_room";
 inline constexpr const char* kRoomNotActive = "room_not_active";
 /// CreateRoom named a room that already exists.
 inline constexpr const char* kRoomNameTaken = "room_name_taken";
+/// The room already has as many spectators as it will take -- see
+/// MatchAudience's own kMaxSpectators. Unlike the two player seats, this
+/// exists purely as a resource cap: nothing about the game itself changes
+/// with more viewers, but nothing stops one attacker from opening thousands
+/// of watch connections to the same room otherwise, each one paid for on
+/// every broadcast.
+inline constexpr const char* kSpectatorLimitReached = "spectator_limit_reached";
 }  // namespace join_reasons
 
 /// Sent instead of Welcome or JoinFailed when JoinRoom named a room that is

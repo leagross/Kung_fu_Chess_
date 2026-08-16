@@ -62,3 +62,25 @@ TEST(RateLimiterTest, DifferentKeysHaveIndependentBudgets) {
     EXPECT_FALSE(limiter.allow("1.2.3.4", now)) << "1.2.3.4's own budget is used up";
     EXPECT_TRUE(limiter.allow("5.6.7.8", now)) << "a different key must not share 1.2.3.4's budget";
 }
+
+// A key that will never be seen again must not hold its bucket forever --
+// see RateLimiter's own doc comment on why buckets_ needs a sweep at all.
+TEST(RateLimiterTest, AKeysBucketIsEventuallyReclaimedOnceItsWindowHasLongPassed) {
+    RateLimiter limiter(1, std::chrono::seconds(60));
+    std::chrono::steady_clock::time_point now = start();
+
+    limiter.allow("one-off-caller", now);
+    ASSERT_EQ(limiter.bucket_count(), 1u);
+
+    // Sweeps are amortized over allow() calls, not on a timer -- enough calls
+    // from a different, still-active key both triggers a sweep and gives
+    // "one-off-caller"'s window (long since elapsed) something to be swept
+    // away by.
+    std::chrono::steady_clock::time_point long_after = now + std::chrono::hours(1);
+    for (int i = 0; i < 2000; ++i) {
+        limiter.allow("still-active-caller", long_after);
+    }
+
+    EXPECT_EQ(limiter.bucket_count(), 1u)
+        << "one-off-caller's long-expired bucket should have been swept, leaving only still-active-caller's";
+}

@@ -46,9 +46,16 @@ public:
     /// arrival (Match makes them a watcher).
     [[nodiscard]] std::optional<kfc::model::PieceColor> seat(const std::string& username, SendFn send, CloseFn close);
 
+    /// The most watchers one match will seat. Nothing about the simulation
+    /// cares how many there are -- this exists purely so one attacker cannot
+    /// open unbounded watch connections to a single room and have every
+    /// broadcast paid for that many times over.
+    static constexpr std::size_t kMaxSpectators = 200;
+
     /// Adds a watcher: reached by every broadcast, owns no colour, never
-    /// affects the game. Unlimited -- seats are what's capped at two. Returns
-    /// the handle to pass to unwatch when that connection closes.
+    /// affects the game. Returns 0 (the same sentinel unwatch() already
+    /// treats as "not a watcher") once kMaxSpectators is already attached,
+    /// instead of the handle to pass to unwatch when that connection closes.
     [[nodiscard]] WatcherId watch(SendFn send, CloseFn close);
 
     /// Drops a watcher that disconnected. Unknown ids are ignored, so a double

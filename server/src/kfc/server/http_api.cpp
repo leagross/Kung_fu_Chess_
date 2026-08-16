@@ -27,6 +27,16 @@ using nlohmann::json;
 
 constexpr std::string_view kHistoryPrefix = "/api/history/";
 
+// Every real body this API ever receives is a username+password pair --
+// nowhere near this. ixwebsocket's own HttpServer has no request-body-size
+// option (checked its header directly: no maxBody/ContentLength setting
+// exists), so it always reads a request's full body into memory before this
+// callback ever runs -- this check cannot stop that read, only stop a
+// grotesquely oversized body from then also being JSON-parsed and handed to
+// UserRepository. A real cap on the read itself would need a change inside
+// ixwebsocket, not here.
+constexpr std::size_t kMaxHttpBodyBytes = 64 * 1024;
+
 // The reason phrase HttpResponse::description ends up as (the "Created" in
 // "HTTP/1.1 201 Created") -- not the content type, which is set through
 // headers below. Only the codes this API actually returns need a name here.
@@ -46,6 +56,8 @@ std::string reason_phrase(int status) {
             return "Not Found";
         case 409:
             return "Conflict";
+        case 413:
+            return "Payload Too Large";
         case 429:
             return "Too Many Requests";
         case 503:
@@ -212,6 +224,9 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, RoomManager& 
             // splitting an attack across the two does not double it.
             if (!auth_limiter.allow(remote_ip, std::chrono::steady_clock::now())) {
                 return empty_response(429);
+            }
+            if (request->body.size() > kMaxHttpBodyBytes) {
+                return empty_response(413);
             }
             return is_register ? handle_register(users, tokens, json::parse(request->body))
                                : handle_login(users, tokens, json::parse(request->body));

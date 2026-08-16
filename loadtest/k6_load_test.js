@@ -51,9 +51,20 @@ export const options = {
 // Custom metrics -- k6's own http_req_duration/etc. don't exist for a raw
 // WebSocket connection, so everything worth reporting here is defined by
 // hand.
+// One per *player* seated into a game, not one per game -- a 2-player game
+// produces two of these. Divide by 2 for a games-matched estimate (RESULTS.md
+// does this explicitly rather than leaving the raw count to be misread as
+// "games").
 const welcomesReceived = new Counter('kfc_welcomes_received');
 const joinFailures = new Counter('kfc_join_failures');
 const movesSent = new Counter('kfc_moves_sent');
+// ws.connect() throws rather than returning a failed response when the
+// handshake itself never completes (connection refused, reset, etc) -- those
+// iterations never reach the check() below, so a handshake-success rate
+// computed as "checks passed / checks run" silently excludes them and always
+// reads near 100%. This counter plus k6's own built-in `iterations` metric
+// is what makes that denominator honest -- see RESULTS.md.
+const connectionErrors = new Counter('kfc_connection_errors');
 // Approximate, not a per-message-correlated latency: the protocol carries no
 // request id a BoardUpdate/MoveRejected could echo back, so this is "time
 // until the next reply of either kind arrives on this socket" -- which is
@@ -97,7 +108,9 @@ export default function () {
   let board = null;
   let myColor = null;
 
-  const res = ws.connect(TARGET_URL, {}, function (socket) {
+  let res;
+  try {
+    res = ws.connect(TARGET_URL, {}, function (socket) {
     socket.on('open', () => {
       socket.send(frame('Login', { username, password: 'hunter2' }));
       socket.send(frame('Play', {}));
@@ -181,7 +194,14 @@ export default function () {
     socket.setTimeout(() => {
       socket.close();
     }, 1000 * 60 * 30); // 30 min ceiling -- effectively "until the scenario ends" for any DURATION this is meant to be run with
-  });
+    });
+  } catch (e) {
+    // Connection refused/reset/timed out before the handshake ever
+    // completed -- ws.connect() throws instead of returning a failed
+    // response, so this is the only place these are ever counted.
+    connectionErrors.add(1);
+    return;
+  }
 
   check(res, { 'websocket handshake succeeded': (r) => r && r.status === 101 });
 }

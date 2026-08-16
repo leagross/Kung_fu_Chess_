@@ -71,6 +71,9 @@ WatcherId Match::join_spectator(const std::string& username, SendFn send, CloseF
     // for: the client discards any BoardUpdate at or below Welcome::revision.
     bool already_started = audience_.both_seats_taken();
     WatcherId watcher = audience_.watch(send, std::move(close));
+    if (watcher == 0) {
+        return 0;  // at MatchAudience::kMaxSpectators -- RoomManager sends JoinFailed
+    }
 
     kfc::protocol::Welcome welcome = welcome_for(kfc::model::PieceColor::White, /*spectator=*/true);
 

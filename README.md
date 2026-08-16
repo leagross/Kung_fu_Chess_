@@ -11,7 +11,7 @@ networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators. Register/login/match-history is a plain HTTP+JSON API
 served from the same process, alongside the WebSocket game protocol.
 
-**398 tests** cover the logic, protocol, database and server.
+**467 tests** cover the logic, protocol, database and server.
 
 ---
 
@@ -48,8 +48,13 @@ database server.
 
 ## Building
 
-Requires **CMake ≥ 3.20** and a **C++20** compiler (MSVC 2022+, GCC 10+,
-Clang 12+). GoogleTest, nlohmann/json, IXWebSocket and SQLiteCpp are downloaded
+Requires **CMake ≥ 3.20** and a **C++20** compiler with a working `<format>`
+(MSVC 2022+, GCC 13+, or Clang paired with a standard library new enough to
+back `std::format`) — `<format>` is what sets the floor, not C++20 itself;
+`database/src/kfc/database/user_repository.cpp` uses `std::format`, which GCC
+only ships complete starting at 13. This repo's own Dockerfile builds on
+`ubuntu:24.04` (GCC 13.3) for exactly this reason. GoogleTest, nlohmann/json,
+IXWebSocket and SQLiteCpp are downloaded
 automatically by CMake — nothing to install by hand.
 
 **OpenCV is the one dependency you provide yourself.** Everything else is

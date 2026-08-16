@@ -280,6 +280,42 @@ TEST(RoomManagerTest, JoiningARoomWhoseGameIsAlreadyOverIsRefusedNotSeated) {
     EXPECT_EQ(reason, join_reasons::kRoomNotActive);
 }
 
+TEST(RoomManagerTest, TheSpectatorAfterTheLimitIsRefusedNotSeatedAndTheRoomStaysJoinable) {
+    FileLogger logger(log_path());
+    RoomManager rooms(two_pawn_factory(), logger);
+
+    RecordingSink s1, s2;
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", s1.as_send_fn());
+    ASSERT_TRUE(white.has_value());
+    std::string room_id = room_id_from_welcome(s1);
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", s2.as_send_fn()).has_value());
+
+    std::vector<std::unique_ptr<RecordingSink>> sinks;
+    std::optional<RoomManager::Seat> first_watcher;
+    for (std::size_t i = 0; i < kfc::server::MatchAudience::kMaxSpectators; ++i) {
+        sinks.push_back(std::make_unique<RecordingSink>());
+        std::optional<RoomManager::Seat> seat =
+            rooms.join_room(room_id, "watcher" + std::to_string(i), sinks.back()->as_send_fn());
+        ASSERT_TRUE(seat.has_value()) << "spectator " << i << " should still be within the limit";
+        if (i == 0) {
+            first_watcher = seat;
+        }
+    }
+
+    RecordingSink one_too_many;
+    std::string reason;
+    EXPECT_FALSE(rooms.join_room(room_id, "one_too_many", one_too_many.as_send_fn(), {}, &reason).has_value());
+    EXPECT_EQ(reason, join_reasons::kSpectatorLimitReached);
+
+    // Refused, not merely uncounted -- a room stuck thinking a refused
+    // connection is still attached would never be reaped once everyone real
+    // leaves. A fresh spectator slot (one of the kMaxSpectators above
+    // disconnecting) must still be usable afterwards.
+    rooms.on_disconnect(*first_watcher);
+    RecordingSink newcomer;
+    EXPECT_TRUE(rooms.join_room(room_id, "newcomer", newcomer.as_send_fn()).has_value());
+}
+
 TEST(RoomManagerTest, JoinersAfterTheSecondBecomeSpectatorsOfTheSameRoom) {
     FileLogger logger(log_path());
     RoomManager rooms(two_pawn_factory(), logger);

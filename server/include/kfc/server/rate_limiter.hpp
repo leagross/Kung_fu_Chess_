@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -42,16 +43,33 @@ public:
     /// retrying does not get to reset its own window early.
     [[nodiscard]] bool allow(const std::string& key, std::chrono::steady_clock::time_point now);
 
+    /// How many distinct keys currently hold a bucket. For tests and
+    /// diagnostics only -- allow()'s own behaviour never depends on this.
+    [[nodiscard]] std::size_t bucket_count() const;
+
 private:
     struct Bucket {
         int count = 0;
         std::chrono::steady_clock::time_point window_start;
     };
 
-    std::mutex mutex_;
+    // Sweeps buckets_ for entries whose window has already elapsed -- called
+    // periodically from allow() rather than on every call, so eviction is
+    // amortized instead of paying an O(n) scan on the server's busiest path.
+    // Long-running server, ever-growing set of distinct remote IPs, no other
+    // place a key is ever removed -- without this buckets_ only ever grows,
+    // one entry per distinct caller for the lifetime of the process.
+    void evict_expired(std::chrono::steady_clock::time_point now);
+
+    mutable std::mutex mutex_;
     std::unordered_map<std::string, Bucket> buckets_;
     int max_attempts_;
     std::chrono::milliseconds window_;
+    // Sweep every this many allow() calls, not this many seconds -- an idle
+    // server (no calls at all) has nothing to evict, so there is no need for
+    // a wall-clock timer or a background thread for this.
+    static constexpr int kSweepEveryNCalls = 1000;
+    int calls_since_sweep_ = 0;
 };
 
 }  // namespace kfc::server

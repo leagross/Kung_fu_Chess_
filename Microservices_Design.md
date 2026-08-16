@@ -33,7 +33,7 @@ source of truth for what happened in a game, always.
 | WebSocket Gateway | **Go** *(not yet built)* | Goroutines make thousands of concurrent long-lived connections cheap; this is the same reason Discord and similar real-time platforms lean on Go (or Elixir) for their connection layer. |
 | Matchmaker | **Go** *(not yet built)* | A small coordinating service whose real work is reading/writing a Redis-backed rating queue — a lightweight binary that starts fast and scales horizontally is the right shape, and Go is the common choice for exactly this. |
 | Game Allocator | **Go** *(not yet built)* | Direct real-world precedent: [Agones](https://agones.dev), Google's own project for "which shard runs this game server" on Kubernetes, is written in Go. |
-| Game Server Shards | **C++** | Already built and tested (405+ tests) as `kfc_server`/`kfc_core`. Real-time simulation at 60 Hz with hard performance requirements is the case C++ (or Rust) is actually for — this is not a place to rewrite. |
+| Game Server Shards | **C++** | Already built and tested (467 tests) as `kfc_server`/`kfc_core`. Real-time simulation at 60 Hz with hard performance requirements is the case C++ (or Rust) is actually for — this is not a place to rewrite. |
 | Observability | *(tooling, not a service)* | Prometheus for metrics, Grafana for dashboards, structured JSON logs from each service, k6 or Locust for load tests. Every service, regardless of its own language, just needs to expose `/metrics` and `/health`. |
 
 ## Target architecture
@@ -89,10 +89,23 @@ below.
 **Built, working, verified:**
 - **Game Server Shard** — `kfc_server`, doing its own matchmaking, gameplay and WebSocket transport on port 8080, *and* serving `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/history/{username}` on a second port, 8081 (`server/include/kfc/server/http_api.hpp`) — one binary, one SQLite file (`kfc_users.db`), a named volume so it survives a container replace.
 
+**Also built, narrower than the diagram above:**
+- **Redis, for room→worker routing only** — `RedisRoomDirectory`
+  (`server/include/kfc/server/redis_room_directory.hpp`), one `kfc_server`
+  process per worker, each given its own `--worker-url`. A room's owning
+  worker is `SET` into Redis at creation; a `Join` that lands on a different
+  worker gets redirected via `JoinFailed` rather than silently failing. This
+  is *routing to an already-decided room*, not the Matchmaker/Game
+  Allocator's job of *deciding* which shard a new pairing should land on —
+  `RoomManager::join_any` still only pairs waiters local to its own worker,
+  so two players on two different workers cannot be matched with each other.
+  That gap — global, cross-worker matchmaking — is real Redis usage, just
+  not yet the full queue-plus-allocator shape this document designs below.
+
 **Not yet — documented, not built:**
 - **WebSocket Gateway** as its own service. Today `kfc_server` still terminates the WebSocket itself; splitting `ClientSession` out into a standalone Go process needs a real protocol between it and the Game Server Shard (gRPC, or NATS/Redis pub-sub), which is genuinely new plumbing, not a packaging change.
-- **Matchmaker** and **Game Allocator** as separate services — `RoomManager::join_any` inside `kfc_server` still does both jobs (pairing *and* placement) implicitly, because there is only one shard.
-- **Redis / NATS** — nothing needs cross-service ephemeral state yet, because nothing is cross-service yet.
+- **Matchmaker** and **Game Allocator** as separate services — `RoomManager::join_any` inside `kfc_server` still does both jobs (pairing *and* placement) implicitly, and only within its own worker; see the Redis bullet above for exactly where that stops.
+- **NATS**, and the queue/rating-bucket shape of Redis this document diagrams — only the room-directory usage above exists today.
 - **Kubernetes** — Docker Compose only, per the explicit "small version" instruction.
 
 **Why API Gateway isn't its own service anymore:** it briefly was — a Java/

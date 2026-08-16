@@ -137,6 +137,34 @@ private:
     struct WatcherNode {
         Watcher watcher;
         std::shared_ptr<const WatcherNode> next;
+
+        // Without this, destroying a long chain recurses: ~WatcherNode's
+        // compiler-generated body destroys `next`, whose own ~WatcherNode
+        // destroys *its* `next`, one stack frame per watcher -- confirmed as
+        // a real crash (STATUS_STACK_OVERFLOW), not just a theoretical one,
+        // filling a room to kMaxSpectators (5,000) in a Windows Debug build's
+        // much smaller default stack than Linux's. Walks the chain by hand
+        // instead, unlinking one node at a time so no destructor ever calls
+        // into another.
+        ~WatcherNode() {
+            std::shared_ptr<const WatcherNode> current = std::move(next);
+            // use_count() == 1 means this destructor's own `current` is the
+            // only owner left -- safe to reach into its `next` and detach it
+            // before `current` is reassigned (and the old node destroyed)
+            // below. A node some *other* snapshot still references (a reader
+            // mid-broadcast on an older Roster -- see the class comment on
+            // why versions are never mutated in place) is left alone: it
+            // isn't ours to unlink, and whichever owner drops the last
+            // reference to it runs this same bounded unlinking from there.
+            while (current != nullptr && current.use_count() == 1) {
+                std::shared_ptr<const WatcherNode> successor = std::move(const_cast<WatcherNode&>(*current).next);
+                current = std::move(successor);
+                // The previous `current` is destroyed here, at the end of
+                // this iteration -- but its own `next` was already moved out
+                // above, so that destruction is O(1), not another recursive
+                // call into a third node.
+            }
+        }
     };
 
     // Everyone attached, as one immutable value. Published by replacement, so

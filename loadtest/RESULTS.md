@@ -36,14 +36,25 @@ which is an acceptable trade for match history and ratings).
 
 ## Clean runs (fresh server, no prior test's connections still winding down)
 
-| VUs  | Duration | Handshake success | Games matched | Moves sent | Moves/sec (k6) | Peak `kfc_active_connections` | Peak memory |
-|-----:|---------:|-------------------:|---------------:|-----------:|----------------:|-------------------------------:|------------:|
-| 10   | 20s      | 100% (10/10)        | 5              | 490        | 9.8/s            | 10                              | —           |
-| 500  | 60s      | 100% (86/86 checks) | 683 (of ~500 VUs, includes reconnect churn) | 29,559 | 328/s | ~500 | — |
-| 2000 | 90s      | 100% (464/464 checks) | 1,437 | 76,527 | 637/s | ~1,900 | 197 MB, back down to 12 MB once idle |
+`kfc_welcomes_received` counts one `Welcome` per **player** seated into a
+game, not one per game — a 2-player game produces two. "Games matched"
+below is that count divided by 2, not a separate server-side number.
+"Handshake success" is `checks passed / (checks passed + kfc_connection_errors)`
+— `kfc_connection_errors` counts iterations where `ws.connect()` itself threw
+(refused/reset before any handshake response came back), which never used to
+reach `check()` at all and so never used to count against the rate. These
+runs predate that fix (`kfc_connection_errors` was always 0 on this
+single-machine, otherwise-idle setup) — see "Reproducing" below to re-run
+with it.
 
-At 2000 concurrent VUs (~1,900 peak concurrent connections, ~900+ concurrent
-games), `kfc_tick_duration_seconds_max` never exceeded ~9ms and
+| VUs  | Duration | Handshake success | Players matched (`kfc_welcomes_received`) | Games matched (÷2) | Moves sent | Moves/sec (k6) | Peak `kfc_active_connections` | Peak memory |
+|-----:|---------:|-------------------:|---------------:|---------------:|-----------:|----------------:|-------------------------------:|------------:|
+| 10   | 20s      | 100% (10/10 checks, 0 connection errors)        | 10             | 5              | 490        | 9.8/s            | 10                              | —           |
+| 500  | 60s      | 100% (86/86 checks, 0 connection errors) | 683 (of ~500 VUs, includes reconnect churn) | ~342 | 29,559 | 328/s | ~500 | — |
+| 2000 | 90s      | 100% (464/464 checks, 0 connection errors) | 1,437 | ~719 | 76,527 | 637/s | ~1,900 | 197 MB, back down to 12 MB once idle |
+
+At 2000 concurrent VUs (~1,900 peak concurrent connections, ~719 games by the
+÷2 estimate above), `kfc_tick_duration_seconds_max` never exceeded ~9ms and
 `kfc_active_connections` tracked what k6 reported almost exactly — the
 server itself showed no sign of strain on this machine's 8 worker threads.
 

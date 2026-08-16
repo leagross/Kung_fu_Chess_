@@ -29,22 +29,33 @@ namespace kfc::graphics::app {
 /// whether the game is local or networked.
 class GameSession {
 public:
-    /// Reads --server=ws://host:port and --username from argv; the password
-    /// is never a command-line argument (it would sit in shell history and
-    /// process listings) -- it is prompted for, without echoing, once
-    /// --server is present. Without --server, starts local single-player
-    /// from the default board file, and no password is asked for at all.
-    /// Determines the board dimensions immediately (from the default
+    /// Reads --server=ws://host:port from argv. Without it, starts local
+    /// single-player from the default board file, and no login is ever
+    /// needed. Determines the board dimensions immediately (from the default
     /// board file, which the networked board matches) so a caller can lay out
     /// its window before connecting, but for networked play does NOT connect
-    /// yet -- call connect() for that, after the Play button. Throws
-    /// std::runtime_error if the shared gameplay config or the board file can't
-    /// be loaded.
+    /// yet -- call set_credentials() (via the Login dialog -- see
+    /// kfc::graphics::dialogs::IRoomPrompt::ask_login) and then connect() for
+    /// that, after the Play button. Throws std::runtime_error if the shared
+    /// gameplay config or the board file can't be loaded.
     GameSession(int argc, char** argv);
 
-    /// True for a --server session (which must connect() before view()).
+    /// True for a --server session (which must set_credentials() and
+    /// connect() before view()).
     [[nodiscard]] bool is_networked() const {
         return networked_;
+    }
+
+    /// Supplies the username/password connect() will authenticate with. Only
+    /// meaningful (and only ever called) for a networked session -- see
+    /// is_networked(). Used to live in this class's own constructor, reading
+    /// --username from argv and prompting for the password in the terminal
+    /// (with no window even open yet); moved out to a caller-supplied value
+    /// so the Login dialog can collect both graphically instead -- see
+    /// IRoomPrompt::ask_login.
+    void set_credentials(std::string username, std::string password) {
+        username_ = std::move(username);
+        password_ = std::move(password);
     }
 
     /// Board dimensions, known immediately in both modes (for window layout

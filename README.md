@@ -155,17 +155,18 @@ dump is more disk than it is worth, keep the events and drop the traffic:
 ./build/Debug/kfc_server 8080 --http-port=8081 --log-level=info
 ```
 
-Then launch a client per player, **each with its own username**. The username and
-password are the shell login the spec asks for; the account is registered on
-first use and the password must match afterwards. The password is never a
-command-line argument -- each client prompts for it, without echoing it back:
+Then launch a client per player, **each with its own username**:
 
 ```sh
-./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=alice
-Password for 'alice':
-./build/Debug/kfc_gui_app --server=ws://localhost:8080 --username=bob
-Password for 'bob':
+./build/Debug/kfc_gui_app --server=ws://localhost:8080
 ```
+
+`--server` is the only flag -- username and password are typed into a Login
+dialog the client opens on startup (masked password field, Login/Cancel), not
+passed on the command line. A username not seen before registers on its first
+successful login with whatever password was typed; the same password must be
+used every time after that. Run the client once per player, each logging in
+with their own username in that player's own dialog.
 
 To play across machines, replace `localhost` with the server's LAN address and
 open the port on its firewall.

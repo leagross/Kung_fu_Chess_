@@ -17,6 +17,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <string>
+#include <tuple>
 
 #include <opencv2/opencv.hpp>
 
@@ -47,6 +50,132 @@ struct Click {
 
 class OpenCvRoomPrompt : public IRoomPrompt {
 public:
+    LoginChoice ask_login() override {
+        const std::string window = "Login";
+        cv::namedWindow(window, cv::WINDOW_AUTOSIZE);
+
+        Click click;
+        cv::setMouseCallback(
+            window,
+            [](int event, int x, int y, int, void* userdata) {
+                if (event == cv::EVENT_LBUTTONDOWN) {
+                    auto* c = static_cast<Click*>(userdata);
+                    c->x = x;
+                    c->y = y;
+                    c->happened = true;
+                }
+            },
+            &click);
+
+        const cv::Rect user_box{20, 55, 420, 40};
+        const cv::Rect pass_box{20, 115, 420, 40};
+        const Button login{{20, 175, 195, 45}, "Login"};
+        const Button cancel{{245, 175, 195, 45}, "Cancel"};
+
+        LoginChoice choice;
+        std::string username;
+        std::string password;
+        // Which field the next keystroke goes into -- Tab or a click on
+        // either box switches this, the same idea as the Win32 version's
+        // SetFocus between two real EDIT controls, just tracked by hand since
+        // there is no OS focus concept for a plain cv::Mat window.
+        bool editing_password = false;
+
+        while (true) {
+            cv::Mat frame(240, kWidth, CV_8UC3, cv::Scalar(240, 240, 240));
+            cv::putText(frame, "Username:", {20, 45}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(20, 20, 20), 1,
+                        cv::LINE_AA);
+            cv::putText(frame, "Password:", {20, 105}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(20, 20, 20), 1,
+                        cv::LINE_AA);
+
+            bool caret_on = (cv::getTickCount() / static_cast<int64>(cv::getTickFrequency() / 2)) % 2 == 0;
+            for (const auto& [box, text, is_password, active] :
+                {std::tuple{user_box, username, false, !editing_password},
+                 std::tuple{pass_box, password, true, editing_password}}) {
+                cv::rectangle(frame, box, cv::Scalar(255, 255, 255), cv::FILLED);
+                cv::rectangle(frame, box, active ? cv::Scalar(60, 120, 220) : cv::Scalar(120, 120, 120),
+                              active ? 2 : 1);
+                // Every character shown as '*' for the password box -- the same
+                // masking ES_PASSWORD gives the Win32 dialog for free.
+                std::string shown = is_password ? std::string(text.size(), '*') : text;
+                cv::putText(frame, shown + (active && caret_on ? "_" : ""), {box.x + 10, box.y + 28},
+                            cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(20, 20, 20), 2, cv::LINE_AA);
+            }
+
+            cv::putText(frame, "A username not seen before registers automatically with the password typed here.",
+                        {20, 165}, cv::FONT_HERSHEY_SIMPLEX, 0.42, cv::Scalar(90, 90, 90), 1, cv::LINE_AA);
+
+            for (const Button* b : {&login, &cancel}) {
+                cv::rectangle(frame, b->rect, cv::Scalar(210, 210, 210), cv::FILLED);
+                cv::rectangle(frame, b->rect, cv::Scalar(90, 90, 90), 1);
+                int baseline = 0;
+                cv::Size ts = cv::getTextSize(b->label, cv::FONT_HERSHEY_SIMPLEX, 0.6, 1, &baseline);
+                cv::putText(frame, b->label,
+                            {b->rect.x + (b->rect.width - ts.width) / 2,
+                             b->rect.y + (b->rect.height + ts.height) / 2},
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(20, 20, 20), 1, cv::LINE_AA);
+            }
+
+            cv::imshow(window, frame);
+            int key = cv::waitKey(30);
+
+            if (key == kKeyEnter) {
+                choice.username = username;
+                choice.password = password;
+                choice.cancelled = false;
+                break;
+            }
+            if (key == kKeyEscape) {
+                choice.cancelled = true;
+                break;
+            }
+            if (key == '\t') {
+                editing_password = !editing_password;
+            } else if (key == kKeyBackspace) {
+                std::string& field = editing_password ? password : username;
+                if (!field.empty()) {
+                    field.pop_back();
+                }
+            } else if (key > 32 && key < 127) {
+                std::string& field = editing_password ? password : username;
+                // 24/128: the same username/password length ceilings
+                // UserRepository::authenticate enforces server-side -- typing
+                // past them here would only be rejected later, less clearly.
+                std::size_t max_length = editing_password ? 128 : 24;
+                if (field.size() < max_length) {
+                    field.push_back(static_cast<char>(key));
+                }
+            }
+
+            if (cv::getWindowProperty(window, cv::WND_PROP_VISIBLE) < 1.0) {
+                choice.cancelled = true;
+                break;
+            }
+
+            if (click.happened) {
+                click.happened = false;
+                cv::Point at(click.x, click.y);
+                if (user_box.contains(at)) {
+                    editing_password = false;
+                } else if (pass_box.contains(at)) {
+                    editing_password = true;
+                } else if (login.rect.contains(at)) {
+                    choice.username = username;
+                    choice.password = password;
+                    choice.cancelled = false;
+                    break;
+                } else if (cancel.rect.contains(at)) {
+                    choice.cancelled = true;
+                    break;
+                }
+            }
+        }
+
+        cv::destroyWindow(window);
+        cv::waitKey(1);
+        return choice;
+    }
+
     RoomChoice ask_room() override {
         const std::string window = "Room";
         cv::namedWindow(window, cv::WINDOW_AUTOSIZE);

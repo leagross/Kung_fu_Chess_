@@ -90,9 +90,11 @@ public:
     /// ClientSession::handle_login). Brings up the network system and wires
     /// the connection handler, but does not bind the port -- call listen()
     /// for that.
+    /// seat_limiter is passed straight through to every connection's
+    /// ClientSession unchanged -- see that class's own doc comment.
     WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
                         SessionRegistry& sessions, kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr,
-                        RateLimiter* auth_limiter = nullptr);
+                        RateLimiter* auth_limiter = nullptr, RateLimiter* seat_limiter = nullptr);
     ~WebSocketGameServer();
 
     WebSocketGameServer(const WebSocketGameServer&) = delete;
@@ -117,6 +119,7 @@ private:
     kfc::protocol::FileLogger& logger_;
     Metrics* metrics_;
     RateLimiter* auth_limiter_;
+    RateLimiter* seat_limiter_;
     std::unique_ptr<ix::WebSocketServer> server_;
 };
 

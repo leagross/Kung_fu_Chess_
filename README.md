@@ -11,7 +11,7 @@ networked through a WebSocket server with accounts, ELO matchmaking, named
 rooms and spectators. Register/login/match-history is a plain HTTP+JSON API
 served from the same process, alongside the WebSocket game protocol.
 
-**467 tests** cover the logic, protocol, database and server.
+**469 tests** cover the logic, protocol, database and server.
 
 ---
 

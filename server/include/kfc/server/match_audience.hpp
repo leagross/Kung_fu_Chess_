@@ -50,7 +50,20 @@ public:
     /// cares how many there are -- this exists purely so one attacker cannot
     /// open unbounded watch connections to a single room and have every
     /// broadcast paid for that many times over.
-    static constexpr std::size_t kMaxSpectators = 200;
+    ///
+    /// Sized as a safety ceiling, not the primary defense: RateLimiter-backed
+    /// per-IP throttling on Play/CreateRoom/JoinRoom (see
+    /// kfc::protocol::join_reasons::kRateLimited and main.cpp's seat_limiter)
+    /// is what actually bounds how fast one attacker can open fresh watch
+    /// connections, since a seating attempt -- successful or not -- always
+    /// costs the connection it arrived on (see ClientSession::handle_seating).
+    /// This number only has to be high enough that a real, popular match
+    /// never hits it by accident; 5,000 real simultaneous viewers of a single
+    /// Kung Fu Chess game is already a lot more than this project's own
+    /// Server_Design.md envisions for one room. A true "millions watching one
+    /// game" audience needs a broadcast-relay layer in front of this match's
+    /// own tick thread, not a bigger number here -- see that document.
+    static constexpr std::size_t kMaxSpectators = 5000;
 
     /// Adds a watcher: reached by every broadcast, owns no colour, never
     /// affects the game. Returns 0 (the same sentinel unwatch() already

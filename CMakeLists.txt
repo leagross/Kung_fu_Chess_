@@ -5,6 +5,18 @@ project(kfc LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Nothing in this project is ever `cmake --install`ed -- every FetchContent
+# dependency below is only ever linked in-tree into kfc_server/kfc_tests/
+# kfc_app/kfc_gui_app. Some of those dependencies' own CMakeLists.txt still
+# define install(EXPORT ...) rules for being consumed as an installed
+# package, which CMake validates at *generate* time regardless of whether
+# --install is ever run -- and that validation fails once one of them
+# (ixwebsocket, once TLS is on) privately links a target from another
+# FetchContent'd dependency (Mbed TLS) that was never itself part of an
+# export set. Skipping install-rule generation entirely sidesteps a
+# consistency check for a feature this project never uses.
+set(CMAKE_SKIP_INSTALL_RULES ON)
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -23,13 +35,51 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# Mbed TLS -- the TLS backend ixwebsocket (declared below) needs so
+# ServerLink, in kfc_gui_app, can open a real wss:// connection. kfc_server
+# itself never terminates TLS (Caddy does -- see DOCKER/Caddyfile: it
+# reverse_proxies to kfc_server over plain ws:// on the compose-internal
+# network), but it links the same ixwebsocket target kfc_gui_app does, one
+# build for both, so this is fetched unconditionally rather than only for
+# the GUI target.
+#
+# Mbed TLS, not OpenSSL: ixwebsocket's own CMakeLists.txt finds either one
+# via a bare find_package(...REQUIRED), i.e. a *system* install -- fine on
+# Linux (apt has libssl-dev), a real obstacle on Windows, where neither
+# OpenSSL nor Mbed TLS is preinstalled and find_package(OpenSSL) simply
+# fails ("Could NOT find OpenSSL"). Fetching Mbed TLS here and manually
+# satisfying find_package(MbedTLS)'s own success variables below --
+# MBEDTLS_FOUND/INCLUDE_DIRS/LIBRARIES, set before ixwebsocket's
+# FetchContent_MakeAvailable runs its own `if (NOT MBEDTLS_FOUND)
+# find_package(...)` -- keeps this project's own promise that every
+# dependency is a `git clone` away, the same promise every other
+# FetchContent_Declare in this file already keeps (OpenCV, below, is the
+# one deliberate exception, and already documented as one).
+#
+# ENABLE_TESTING/PROGRAMS off: this project links three of Mbed TLS's own
+# libraries, not its test suite or its command-line tools.
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  mbedtls
+  GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
+  GIT_TAG v3.6.7
+)
+FetchContent_MakeAvailable(mbedtls)
+set(MBEDTLS_FOUND TRUE CACHE BOOL "" FORCE)
+set(MBEDTLS_INCLUDE_DIRS "${mbedtls_SOURCE_DIR}/include" CACHE PATH "" FORCE)
+set(MBEDTLS_LIBRARIES mbedtls mbedx509 mbedcrypto CACHE STRING "" FORCE)
+
 # WebSocket transport for the client-server split (kfc_protocol/kfc_server/
 # frontend's ServerLink) -- both client and server roles come from this one
-# dependency. TLS is off: everything talks over plain ws://localhost, never
-# wss://, so there is nothing to verify a certificate for. zlib (permessage-
-# deflate compression) is off too -- messages are small JSON, not worth a
-# system zlib dependency this project has no other reason to require.
-set(USE_TLS OFF CACHE BOOL "" FORCE)
+# dependency. USE_TLS OFF (what this used to be) was the original, single-VM
+# dev setup, when nothing yet reached the internet; the Roadmap-stage-1 work
+# to actually deploy behind Caddy, wss:// and all, is exactly what makes it
+# wrong now -- see the Mbed TLS fetch just above for why that backend and
+# not OpenSSL. zlib (permessage-deflate compression) stays off -- messages
+# are small JSON, not worth the dependency.
+set(USE_TLS ON CACHE BOOL "" FORCE)
+set(USE_MBED_TLS ON CACHE BOOL "" FORCE)
 set(USE_ZLIB OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
   ixwebsocket
@@ -37,6 +87,11 @@ FetchContent_Declare(
   GIT_TAG v11.4.5
 )
 FetchContent_MakeAvailable(ixwebsocket)
+# ixwebsocket's own CMakeLists.txt only adds this (needed for Mbed TLS 3.x's
+# API, which moved a few functions this backend calls) inside the
+# find_package(MbedTLS) branch our MBEDTLS_FOUND override above skips --
+# added by hand here since v3.6.7 is definitely "version 3".
+target_compile_definitions(ixwebsocket PRIVATE IXWEBSOCKET_USE_MBED_TLS_MIN_VERSION_3)
 
 # SQLite (via the SQLiteCpp RAII wrapper, which vendors the sqlite3 amalgamation
 # itself -- exactly the "single file, no install" database the CTD SERVER spec

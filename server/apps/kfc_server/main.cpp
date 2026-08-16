@@ -24,6 +24,7 @@
 #include "kfc/database/rating_service.hpp"
 #include "kfc/server/http_api.hpp"
 #include "kfc/server/metrics.hpp"
+#include "kfc/server/rate_limiter.hpp"
 #include "kfc/server/redis_room_directory.hpp"
 #include "kfc/server/room_manager.hpp"
 #include "kfc/database/user_repository.hpp"
@@ -219,6 +220,17 @@ int main(int argc, char** argv) {
         // it for the rest of its own lifetime.
         kfc::server::Metrics metrics;
 
+        // One budget, shared by POST /api/auth/register, /login, and the
+        // WebSocket Login path (see http_api.hpp's own doc comment on why:
+        // all three reach UserRepository::authenticate(), and a separate
+        // limiter per path would just be a second door an attacker could
+        // walk through once the first one closed). At most 10 attempts per
+        // remote IP per minute -- generous for a real player who fat-fingers
+        // a password a few times, a real deterrent against a script. See
+        // RateLimiter's own doc comment for why a fixed window rather than
+        // something more precise.
+        kfc::server::RateLimiter auth_limiter(10, std::chrono::minutes(1));
+
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result,
                                        kfc::server::kDefaultDisconnectGraceMs, room_directory.get(), worker_url,
                                        &metrics);
@@ -226,7 +238,7 @@ int main(int argc, char** argv) {
         // One account, one live connection (see SessionRegistry).
         kfc::server::SessionRegistry sessions;
 
-        kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger, &metrics);
+        kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger, &metrics, &auth_limiter);
         if (!server.listen()) {
             std::cerr << "Failed to listen on port " << port << " (see kfc_server.log)\n";
             return 1;
@@ -235,7 +247,7 @@ int main(int argc, char** argv) {
         // Register/login/history/metrics -- a second, independent listening
         // socket; see http_api.hpp for why it can't share the WebSocket
         // server's port.
-        kfc::server::HttpApiServer http_server(http_port, users, rooms, sessions, metrics, logger);
+        kfc::server::HttpApiServer http_server(http_port, users, rooms, sessions, metrics, auth_limiter, logger);
         if (!http_server.listen()) {
             std::cerr << "Failed to listen on HTTP port " << http_port << " (see kfc_server.log)\n";
             return 1;

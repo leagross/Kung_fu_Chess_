@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <set>
 #include <string>
 #include <thread>
@@ -58,4 +59,37 @@ TEST(AuthTokenStoreTest, ConcurrentIssuesNeverCollideOrCorruptTheStore) {
         ASSERT_TRUE(tokens.username_for(issued[i]).has_value());
         EXPECT_EQ(*tokens.username_for(issued[i]), "user" + std::to_string(i));
     }
+}
+
+TEST(AuthTokenStoreTest, ATokenIsStillValidRightBeforeItsLifetimeEnds) {
+    AuthTokenStore tokens;
+    auto issued_at = std::chrono::steady_clock::now();
+
+    std::string token = tokens.issue("alice", issued_at);
+
+    EXPECT_TRUE(tokens.username_for(token, issued_at + AuthTokenStore::kTokenLifetime - std::chrono::seconds(1))
+                    .has_value());
+}
+
+TEST(AuthTokenStoreTest, ATokenStopsWorkingOnceItsLifetimeHasPassed) {
+    AuthTokenStore tokens;
+    auto issued_at = std::chrono::steady_clock::now();
+
+    std::string token = tokens.issue("alice", issued_at);
+
+    EXPECT_FALSE(
+        tokens.username_for(token, issued_at + AuthTokenStore::kTokenLifetime + std::chrono::seconds(1)).has_value());
+}
+
+TEST(AuthTokenStoreTest, TwoTokensAreIndependentEitherOnesLifetimeDoesNotAffectTheOther) {
+    AuthTokenStore tokens;
+    auto issued_at = std::chrono::steady_clock::now();
+
+    std::string first = tokens.issue("alice", issued_at);
+    std::string second = tokens.issue("alice", issued_at + std::chrono::hours(1));
+
+    auto after_first_expires = issued_at + AuthTokenStore::kTokenLifetime + std::chrono::seconds(1);
+    EXPECT_FALSE(tokens.username_for(first, after_first_expires).has_value());
+    EXPECT_TRUE(tokens.username_for(second, after_first_expires).has_value())
+        << "issued an hour later, so still within its own lifetime";
 }

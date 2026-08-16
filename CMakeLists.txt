@@ -379,8 +379,12 @@ add_executable(kfc_tests
 # machine without it -- which CI relies on.
 target_include_directories(kfc_tests PRIVATE server/include database/include ui/include)
 # ixwebsocket is here only for the end-to-end tests, which bind a real port
-# and speak the real protocol -- see server/tests/integration.
-target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp kfc_argon2 ixwebsocket)
+# and speak the real protocol -- see server/tests/integration. mbedcrypto is
+# for AuthTokenStore's own CSPRNG (see its own comment) -- a direct
+# dependency of this test binary's sources, not something ixwebsocket
+# happens to expose (it links mbedcrypto privately, for its own TLS backend).
+target_link_libraries(kfc_tests PRIVATE kfc_core kfc_protocol GTest::gtest_main SQLiteCpp kfc_argon2 ixwebsocket
+                                        mbedcrypto)
 # Test setup code deliberately fires request_move/request_jump for their board
 # side effect while arranging a scenario, discarding the [[nodiscard]]
 # MoveResult on purpose. Suppress C4834 for this target only -- production code
@@ -432,7 +436,9 @@ target_include_directories(kfc_server PRIVATE server/include database/include)
 # hiredis is kfc_server-only -- RedisRoomDirectory is the one thing that uses
 # it, and it's deliberately not exercised by kfc_tests (see
 # fake_room_directory.hpp's own comment); the fast suite stays Redis-free.
-target_link_libraries(kfc_server PRIVATE kfc_core kfc_protocol ixwebsocket SQLiteCpp kfc_argon2 hiredis::hiredis)
+# mbedcrypto -- see kfc_tests' own target_link_libraries comment above.
+target_link_libraries(kfc_server PRIVATE kfc_core kfc_protocol ixwebsocket SQLiteCpp kfc_argon2 hiredis::hiredis
+                                         mbedcrypto)
 target_compile_definitions(kfc_server PRIVATE
   KFC_SERVER_DEFAULT_BOARD_FILE="${CMAKE_CURRENT_SOURCE_DIR}/server/apps/kfc_server/default_board.txt"
 )

@@ -45,10 +45,14 @@ namespace kfc::server {
 /// be open to anyone who knew or guessed a username.
 ///
 /// POST /api/auth/register and /api/auth/login are also rate-limited per
-/// remote IP (see RateLimiter) -- the WebSocket game protocol has had
-/// per-connection message-rate limiting in ClientSession from early on;
-/// these two endpoints had nothing until now, which made either one a bare
-/// script away from a credential-stuffing or account-creation flood.
+/// remote IP, on the *same* RateLimiter main() hands ClientSession's Login
+/// path (see ClientSession::handle_login) -- both are ways to reach
+/// UserRepository::authenticate(), and a shared budget is what stops an
+/// attacker from simply moving from one to the other once the first is
+/// throttled. This server does not own the limiter for that reason: it used
+/// to (its own private instance, guarding only these two routes), and the
+/// WebSocket path had nothing at all until it was given a reference to this
+/// same one.
 ///
 /// A brand-new username/password pair is also checked against
 /// UserRepository's length and character rules before the account is
@@ -62,15 +66,17 @@ namespace kfc::server {
 /// player's own account.
 class HttpApiServer {
 public:
-    /// users, rooms, sessions, metrics and logger must all outlive this
-    /// server. rooms and sessions back GET /metrics's two gauges
-    /// (kfc_active_rooms, kfc_active_connections); metrics backs its
+    /// users, rooms, sessions, metrics, auth_limiter and logger must all
+    /// outlive this server. rooms and sessions back GET /metrics's two
+    /// gauges (kfc_active_rooms, kfc_active_connections); metrics backs its
     /// counters -- see Metrics's own doc comment for why those two kinds of
-    /// number come from different places. Brings up the network system and
-    /// wires the request handler, but does not bind the port -- call
-    /// listen() for that.
+    /// number come from different places. auth_limiter is the budget
+    /// register/login share with the WebSocket Login path -- see this
+    /// class's own doc comment. Brings up the network system and wires the
+    /// request handler, but does not bind the port -- call listen() for
+    /// that.
     HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms, SessionRegistry& sessions,
-                 Metrics& metrics, kfc::protocol::FileLogger& logger);
+                 Metrics& metrics, RateLimiter& auth_limiter, kfc::protocol::FileLogger& logger);
     ~HttpApiServer();
 
     HttpApiServer(const HttpApiServer&) = delete;
@@ -98,8 +104,9 @@ private:
     // layer's own implementation detail, not something main() or any other
     // caller needs to see or share.
     AuthTokenStore tokens_;
-    // Same reasoning -- see RateLimiter's own doc comment for the numbers.
-    RateLimiter login_and_register_limiter_;
+    // Not owned -- see the constructor's own doc comment on why this one
+    // (unlike tokens_ above) is shared with ClientSession's Login path.
+    RateLimiter& auth_limiter_;
     std::unique_ptr<ix::HttpServer> server_;
 };
 

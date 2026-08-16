@@ -122,6 +122,23 @@ private:
         CloseFn close;
     };
 
+    // One node of a persistent, structurally-shared singly-linked list of
+    // watchers -- newest first. Chosen over a std::vector<Watcher> because a
+    // vector stored inside Roster (see below) would have to be deep-copied,
+    // std::function callbacks and all, on every single watch() call, purely
+    // because editable_copy() copies the whole Roster to publish a new
+    // version. That made watch() O(current watcher count) and filling a room
+    // to kMaxSpectators O(kMaxSpectators^2) -- measured directly: filling
+    // 5,000 slots took multiple seconds in test_match_audience.cpp before
+    // this change existed. Consing a new node onto the existing (immutable)
+    // head is O(1) and copies nothing already there; only unwatch() ever
+    // needs to rebuild anything, and only the portion of the list before the
+    // node being removed -- see its own comment.
+    struct WatcherNode {
+        Watcher watcher;
+        std::shared_ptr<const WatcherNode> next;
+    };
+
     // Everyone attached, as one immutable value. Published by replacement, so
     // any thread already reading a version keeps reading a consistent one --
     // the alternative, mutating in place, is what forces a reader to hold the
@@ -133,7 +150,8 @@ private:
         std::optional<CloseFn> black_close;
         std::string white_username;
         std::string black_username;
-        std::vector<Watcher> watchers;  // in arrival order
+        std::shared_ptr<const WatcherNode> watchers;  // head of the list; nullptr means empty
+        std::size_t watcher_count = 0;  // tracked alongside the list so watcher_count() need not walk it
     };
 
     // The version to read from. One lock acquisition and one refcount bump --

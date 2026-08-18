@@ -534,6 +534,21 @@ if (KFC_HAVE_OPENCV)
       $<TARGET_FILE:opencv_world451>
       $<TARGET_FILE_DIR:kfc_gui_app>
   )
+
+  # A plain add_executable() links the console subsystem on Windows, so every
+  # launch also opened a console window -- alongside the OpenCV game window
+  # and, for networked play, the native Login dialog, three top-level windows
+  # fighting for foreground focus at once. That console used to be load-
+  # bearing (the password prompt read from it -- see game_session.cpp's own
+  # history), but nothing in this app reads stdin any more now that the
+  # Login dialog collects both fields graphically; the only remaining
+  # std::cout/cerr calls are breadcrumbs, fine to go nowhere. WIN32_EXECUTABLE
+  # switches the linked subsystem to GUI (no console is ever created);
+  # /ENTRY:mainCRTStartup keeps the ordinary `int main()` this file already
+  # has as the entry point instead of requiring a WinMain rewrite -- the
+  # standard MSVC trick for a GUI-subsystem app that doesn't want WinMain.
+  set_target_properties(kfc_gui_app PROPERTIES WIN32_EXECUTABLE TRUE)
+  target_link_options(kfc_gui_app PRIVATE /ENTRY:mainCRTStartup)
   endif()
 
 endif()

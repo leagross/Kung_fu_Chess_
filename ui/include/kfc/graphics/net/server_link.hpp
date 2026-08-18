@@ -120,6 +120,17 @@ public:
     /// when we were there from the start. Valid after wait_for_welcome().
     [[nodiscard]] const std::vector<kfc::model::ArrivalEvent>& history() const;
 
+    /// White's username, for the HUD to show whose game this is -- empty only
+    /// in the narrow window between our own Welcome and the MatchStart that
+    /// follows it (see white_username_'s own comment). Valid after
+    /// wait_for_welcome(); black_username() is the same idea for Black.
+    [[nodiscard]] const std::string& white_username() const {
+        return white_username_;
+    }
+    [[nodiscard]] const std::string& black_username() const {
+        return black_username_;
+    }
+
     /// True once the server has signalled both players are present (MatchStart).
     /// Between a successful Welcome and this, the client is "searching" -- seated
     /// in a room but waiting for a rating-compatible opponent to be matched in.
@@ -196,6 +207,11 @@ private:
     bool spectator_ = false;
     // Also from the Welcome -- the room's server-assigned id, to display.
     std::string room_name_;
+    // Both from the Welcome initially; MatchStart overwrites both again once
+    // it arrives (see on_message) -- that is the only way White ever learns
+    // Black's name, since White's own Welcome was sent before Black existed.
+    std::string white_username_;
+    std::string black_username_;
     // How far the game had got when our Welcome's board was snapshotted, and
     // then how far we have applied. Any BoardUpdate at or below this is already
     // reflected in the board we were handed -- see apply_board_update.

@@ -53,12 +53,8 @@ MoveResult GameEngine::request_jump(const Position& cell) {
 }
 
 ArrivalEvents GameEngine::wait(int ms) {
-    // Once the game is over, no further motion -- even one already in
-    // flight before the deciding capture -- may keep mutating the board,
-    // score, or move history. The batch that actually decides the game
-    // (game_over_ flips to true partway through the loop below) still
-    // returns in full, so every observer sees the events that ended it;
-    // only calls after that point become no-ops.
+    // The batch that decides the game still returns in full so observers
+    // see the deciding events; only later calls become no-ops.
     if (game_over_) {
         return {};
     }

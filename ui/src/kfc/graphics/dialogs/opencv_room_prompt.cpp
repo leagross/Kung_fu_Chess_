@@ -1,17 +1,7 @@
 // The portable implementation of IRoomPrompt, for every platform that is not
-// Windows. Compiled only there -- see CMakeLists and win_room_prompt.cpp.
-//
-// Drawn with OpenCV, which the client already depends on and which builds on
-// Linux and macOS as readily as on Windows. That is the whole reason for
-// choosing it over a native toolkit here: it adds no new dependency at all.
-//
-// The cost is text entry. Win32 gives an EDIT control that handles typing,
-// caret, selection and clipboard for free; here the room id has to be
-// assembled key by key from cv::waitKey, which is why this file has an input
-// loop and the Windows one does not. Room ids are six characters from a
-// deliberately unambiguous alphabet (see RoomManager::generate_room_id), so
-// that is a fair trade -- but if a richer dialog is ever wanted on Linux, this
-// is the file to replace with tinyfiledialogs or SDL.
+// Windows (see win_room_prompt.cpp). Drawn with OpenCV, which the client
+// already depends on, adding no new dependency. Text entry is assembled key
+// by key from cv::waitKey since OpenCV has no native EDIT control.
 
 #include "kfc/graphics/dialogs/room_prompt.hpp"
 
@@ -110,12 +100,10 @@ public:
             if (key == kKeyBackspace && !typed.empty()) {
                 typed.pop_back();
             } else if (key > 32 && key < 127 && static_cast<int>(typed.size()) < kMaxIdLength) {
-                // Room ids are generated uppercase, so accept either case and
-                // normalise -- nobody should fail to join over a capital.
+                // Room ids are generated uppercase; accept either case.
                 typed.push_back(static_cast<char>(std::toupper(key)));
             }
 
-            // The user closed the dialog with its own X button.
             if (cv::getWindowProperty(window, cv::WND_PROP_VISIBLE) < 1.0) {
                 choice.action = RoomChoice::Action::Cancel;
                 break;
@@ -141,9 +129,7 @@ public:
         }
 
         cv::destroyWindow(window);
-        // Pump the event loop so the window is really gone before the caller
-        // draws anything else -- HighGUI tears down lazily otherwise.
-        cv::waitKey(1);
+        cv::waitKey(1);  // pump the event loop so the window is really gone
         return choice;
     }
 
@@ -151,8 +137,7 @@ public:
         const std::string window = title;
         cv::namedWindow(window, cv::WINDOW_AUTOSIZE);
 
-        // Wrapped by hand: OpenCV's putText draws a single line and knows
-        // nothing about wrapping, and these messages are full sentences.
+        // Wrapped by hand: OpenCV's putText has no line-wrapping of its own.
         std::vector<std::string> lines = wrap(text, 52);
         int height = 90 + static_cast<int>(lines.size()) * 28;
 

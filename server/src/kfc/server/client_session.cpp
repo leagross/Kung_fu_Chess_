@@ -33,16 +33,13 @@ void ClientSession::on_open() {
 
 void ClientSession::on_close() {
     logger_.log("Connection closed: " + connection_id_);
-    // A seated player who dropped forfeits: tell RoomManager so the opponent is
-    // awarded the win and the room is reaped once empty (see
-    // RoomManager::on_disconnect).
+    // A seated player who dropped forfeits; opponent is awarded the win.
     if (seat_.has_value()) {
         rooms_.on_disconnect(*seat_);
     }
 
-    // Released here, not merely when this object is destroyed: this is the same
-    // moment the disconnect grace starts, so a player whose countdown is running
-    // can always log in again to reclaim their seat. See SessionRegistry.
+    // Released now (not at destruction) so a player whose disconnect grace
+    // is running can log in again immediately to reclaim their seat.
     username_lease_.reset();
 }
 
@@ -52,11 +49,6 @@ void ClientSession::drop(const std::string& why) {
 }
 
 void ClientSession::on_text(const std::string& text) {
-    // Checked before anything else touches the frame -- before it is logged,
-    // and before it is parsed. decode_client_message refuses an oversized text
-    // too, but by then the bytes are already here; this is where the connection
-    // sending them is hung up on, so it cannot keep doing it. Reported by
-    // length, never by content: the content is what we declined to handle.
     if (text.size() > kfc::protocol::kMaxMessageBytes) {
         if (metrics_ != nullptr) {
             metrics_->message_rejected();
@@ -65,10 +57,6 @@ void ClientSession::on_text(const std::string& text) {
         return;
     }
 
-    // A flood of otherwise-valid frames is refused the same way an oversized
-    // one is: before it is logged or parsed. Windows are one second wide and
-    // reset lazily -- there is no timer here, just a comparison against the
-    // clock on the next message to arrive.
     auto now = std::chrono::steady_clock::now();
     if (now - rate_window_start_ >= std::chrono::seconds(1)) {
         rate_window_start_ = now;
@@ -85,9 +73,8 @@ void ClientSession::on_text(const std::string& text) {
         metrics_->message_received();
     }
 
-    // Debug: every inbound frame, so guarded -- redact_for_log rebuilds the
-    // whole message, which is not worth doing for a line that will be dropped.
-    // Redacted because a Login carries the password in clear.
+    // Guarded: redact_for_log rebuilds the whole message, not worth doing
+    // when this line will be dropped.
     if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
         logger_.log(kfc::protocol::LogLevel::Debug,
                     "Received from " + connection_id_ + ": " + kfc::protocol::redact_for_log(text));
@@ -119,13 +106,7 @@ bool ClientSession::handle_login(const kfc::protocol::ClientMessage& message) {
         return true;  // already logged in; a second Login changes nothing
     }
 
-    // Checked before authenticate() is ever called, on the same per-IP
-    // budget POST /api/auth/login and /register share (see RateLimiter's own
-    // doc comment) -- otherwise this connection's remote IP getting an HTTP
-    // 429 would mean nothing, since authenticate() itself both checks
-    // passwords *and* auto-registers a first-seen username, and this path
-    // was reachable at kMaxMessagesPerSecond per connection times as many
-    // connections as an attacker cared to open.
+    // Shares its budget with POST /api/auth/login and /register (see RateLimiter).
     if (auth_limiter_ != nullptr && !auth_limiter_->allow(remote_ip_, std::chrono::steady_clock::now())) {
         send_(kfc::protocol::encode(
             kfc::protocol::ServerMessage{kfc::protocol::LoginFailed{kfc::protocol::login_reasons::kRateLimited}}));
@@ -136,17 +117,11 @@ bool ClientSession::handle_login(const kfc::protocol::ClientMessage& message) {
     const kfc::protocol::Login& login = std::get<kfc::protocol::Login>(message);
     kfc::database::IUserStore::AuthOutcome auth = users_.authenticate(login.username, login.password);
     if (!auth.ok) {
-        // Say why before hanging up. Otherwise the client sees only a closed
-        // socket, times out, and reports whatever it was trying to do
-        // (Play/Create/Join) as the failure -- when the real problem was the
-        // password.
         send_(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::LoginFailed{auth.reason}}));
         drop("'" + login.username + "': " + auth.reason);
         return true;
     }
 
-    // Claimed only after the password checks out: an unauthenticated stranger
-    // must not be able to lock a real account out by guessing at its name.
     std::optional<SessionRegistry::Lease> lease = sessions_.claim(login.username);
     if (!lease.has_value()) {
         send_(kfc::protocol::encode(kfc::protocol::ServerMessage{
@@ -169,8 +144,6 @@ std::optional<RoomManager::Seat> ClientSession::seat_for(const kfc::protocol::Cl
         return rooms_.join_any(user.username, user.rating, send_, close_);
     }
     if (std::holds_alternative<kfc::protocol::CreateRoom>(message)) {
-        // No name to validate: the server mints the id itself, so Create has no
-        // client input that could be wrong.
         return rooms_.create_room(user.username, send_, close_, &failure_reason);
     }
 
@@ -198,9 +171,6 @@ bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) 
         return true;  // already seated
     }
 
-    // Filled by RoomManager whenever seating fails, so the client is told
-    // *which* thing went wrong -- or, if redirect_url ends up non-empty
-    // instead, *where* to go instead (see seat_for's doc comment).
     std::string failure_reason;
     std::string redirect_url;
     std::optional<RoomManager::Seat> assigned = seat_for(message, *pending_, failure_reason, redirect_url);
@@ -215,8 +185,6 @@ bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) 
         return true;
     }
 
-    // Tell the client why *before* hanging up: a bare close leaves it guessing
-    // (and waiting out its Welcome timeout).
     if (failure_reason.empty()) {
         failure_reason = kfc::protocol::join_reasons::kNoSuchRoom;
     }
@@ -226,15 +194,12 @@ bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) 
 }
 
 void ClientSession::handle_gameplay(const kfc::protocol::ClientMessage& message) {
-    // Everything else (Move/Jump/Resign) needs a seat.
     if (!seat_.has_value()) {
         logger_.log(kfc::protocol::LogLevel::Warning,
                     "Ignoring message from " + connection_id_ + ": not seated yet");
         return;
     }
-    // A viewer owns no pieces, so it has nothing to move, jump or resign.
-    // Dropped here rather than in Match, which should never have to know
-    // non-players exist at all.
+    // Spectators are filtered here rather than in Match, which shouldn't need to know they exist.
     if (seat_->spectator) {
         logger_.log(kfc::protocol::LogLevel::Warning,
                     "Ignoring message from " + connection_id_ + ": watching, not playing");

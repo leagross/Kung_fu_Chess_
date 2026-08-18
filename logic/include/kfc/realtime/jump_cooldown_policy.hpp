@@ -4,19 +4,14 @@
 
 namespace kfc::model {
 
-/// Cooldown after a jump-in-place -- a piece must not be movable again
-/// while it is still visually resting (short_rest). Its cooldown is what
-/// makes the race-condition timing in test_jump_in_place.cpp meaningful.
-/// The value is tied to the short_rest clip's own frame-count/frames-per-sec
-/// in the active asset pack's config.json -- if that art is retimed, this
-/// needs updating too.
+/// Cooldown after a jump-in-place (short_rest). Value tracks the short_rest
+/// clip's duration in the active asset pack's config.json.
 class JumpCooldownPolicy : public ICooldownPolicy {
 public:
     int cooldown_ms() const override;
 };
 
-/// The default JumpCooldownPolicy instance -- see
-/// kDefaultStandardCooldownPolicy for why this needs to be a named object.
+/// Named object so callers can bind a reference-typed constructor param to it.
 extern const JumpCooldownPolicy kDefaultJumpCooldownPolicy;
 
 }  // namespace kfc::model

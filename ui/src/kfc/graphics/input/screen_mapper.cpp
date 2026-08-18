@@ -18,23 +18,14 @@ ScreenMapper::ScreenMapper(std::string window_name, int canvas_width, int canvas
 PixelPoint ScreenMapper::to_canvas_pixels(int display_x, int display_y) const {
     cv::Rect displayed = cv::getWindowImageRect(window_name_);
     if (displayed.width <= 0 || displayed.height <= 0) {
-        // Window not currently displayable (e.g. minimized): its on-screen
-        // size is unknown, so there is no valid mapping. Returning the raw
-        // pixels would silently map to some cell as if no scaling applied and
-        // pick the wrong square; return a deliberately off-board point so the
-        // click is ignored downstream (BoardMapper rejects it) instead.
+        // Window not currently displayable (e.g. minimized): no valid mapping.
+        // Return an off-board point so the click is rejected downstream.
         return PixelPoint{-1, -1};
     }
 
-    // The actual game content (board, pieces, HUD -- the only layer that
-    // receives clicks; the background behind it is scaled separately, to
-    // cover the window instead) is scaled *uniformly* to fit inside the
-    // window without being cropped or stretched out of proportion, then
-    // centered -- must match main.cpp's render loop exactly, or clicks
-    // land in the wrong place relative to what's actually drawn. lround
-    // plus clamping down to the window size guards against floating-point
-    // rounding pushing the "fit" size a pixel past the window, which would
-    // make the centering offset go negative.
+    // Scaling here must match main.cpp's render loop exactly, or clicks land
+    // in the wrong place. lround plus clamping guards against float rounding
+    // pushing the "fit" size a pixel past the window (negative offset).
     double scale = std::min(static_cast<double>(displayed.width) / canvas_width_,
                              static_cast<double>(displayed.height) / canvas_height_);
     int rendered_width = std::min(displayed.width, static_cast<int>(std::lround(canvas_width_ * scale)));

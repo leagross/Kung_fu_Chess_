@@ -17,28 +17,16 @@
 
 namespace kfc::texttests {
 
-/// The local-play host for one playable game: owns a GameCore (the shared
-/// Board -> RuleEngine -> RealTimeArbiter -> MotionFactory -> GameEngine
-/// chain, assembled identically by the server's Match) plus the two things
-/// that are specific to local single-player play -- the Controller that sits
-/// in front of GameEngine for click routing, and the event bus every arrival
-/// is published on. CommandProcessor drives a Game through the four-command
-/// DSL; nothing here parses text or touches stdin/stdout. Implements
-/// IGameView so kfc_gui_app's local single-player path and its networked
-/// path (ServerLink) are interchangeable to MouseInputAdapter/
-/// PieceAnimatorRegistry.
+/// The local-play host for one playable game: owns a GameCore (Board ->
+/// RuleEngine -> RealTimeArbiter -> MotionFactory -> GameEngine) plus a
+/// Controller for click routing and the event bus arrivals publish on.
+/// Implements IGameView so local and networked (ServerLink) play are
+/// interchangeable to MouseInputAdapter/PieceAnimatorRegistry.
 class Game : public IGameView {
 public:
-    /// Builds a GameCore around the given board (which registers every known
-    /// piece kind's movement rule and wires the full simulation chain), then
-    /// puts a Controller in front of it. speed_provider/meters_per_cell/
-    /// standard_policy/jump_policy are forwarded straight through to the
-    /// GameCore's MotionFactory unchanged -- see its own constructor for what
-    /// they mean and why they default the way they do. standard_policy/
-    /// jump_policy default to the fixed backend constants; a caller that
-    /// wants cooldowns tied to its own animation timing (e.g. a GUI app
-    /// reading rest-clip durations out of config.json) passes its own
-    /// ICooldownPolicy implementations instead.
+    /// speed_provider/meters_per_cell/standard_policy/jump_policy are
+    /// forwarded to GameCore's MotionFactory unchanged; policies default to
+    /// the fixed backend constants unless the caller supplies its own.
     explicit Game(kfc::model::Board board,
                   const kfc::model::IPieceSpeedProvider& speed_provider = kfc::model::kDefaultPieceSpeedProvider,
                   double meters_per_cell = kfc::model::kDefaultMetersPerCell,
@@ -80,18 +68,13 @@ public:
     bool is_piece_busy(kfc::model::PieceId piece_id) const override;
 
 private:
-    // core_ must precede controller_: the Controller is constructed with
-    // references into core_ (its board and its GameEngine as IMoveRequester).
+    // core_ must precede controller_: Controller holds references into core_.
     kfc::model::GameCore core_;
     kfc::input::Controller controller_;
     kfc::events::EventBus events_;
 
-    // Lifecycle-event bookkeeping for the bus: GameStarted is published on the
-    // first wait(), GameEnded once game_over_ sees a king captured. game_over_
-    // is Game's own detector, independent of any GameOverObserver the UI runs
-    // separately for its banner -- Game owns the authoritative "the game just
-    // ended" signal so every listener (sound, end animation) hears it the same
-    // way, local or networked.
+    // GameStarted publishes on the first wait(); GameEnded once game_over_
+    // sees a king captured.
     kfc::model::GameOverObserver game_over_;
     bool started_ = false;
     bool ended_ = false;

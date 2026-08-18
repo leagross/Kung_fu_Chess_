@@ -23,102 +23,60 @@
 
 namespace kfc::server {
 
-// SendFn / CloseFn -- how the server reaches and releases one connection --
-// live in their own header, so MatchAudience can use them without depending on
-// Match.
+// SendFn / CloseFn live in their own header so MatchAudience can use them
+// without depending on Match.
 
-/// How a match ended -- it decides how ratings move. A Decisive result (a king
-/// captured, or a deliberate resign) and a Draw feed the normal ELO exchange;
-/// a Disconnect is a forfeit that just docks the loser a flat penalty (see the
-/// CTD SERVER spec's -10), never a rating-dependent ELO swing.
+/// How a match ended. Decisive (king captured, resign) and Draw feed the
+/// normal ELO exchange; Disconnect is a forfeit with a flat penalty instead
+/// of a rating-dependent ELO swing.
 enum class GameEndReason { Decisive, Draw, Disconnect };
 
-/// Called exactly once when a match is decided: how it ended, the winner
-/// (std::nullopt for a draw), both players' usernames, and when the match
-/// started (so a caller can persist game history, not just adjust ratings).
-/// This is the hook RoomManager uses to apply the rating change (ELO or
-/// forfeit penalty); Match itself stays rating-agnostic, so a Match built
-/// without one (tests, local-only play) simply reports nothing.
+/// Called once when a match is decided, so RoomManager can apply the rating
+/// change. Match itself stays rating-agnostic; a Match built without one
+/// (tests, local-only play) simply reports nothing.
 using ResultCallback = std::function<void(GameEndReason reason, std::optional<kfc::model::PieceColor> winner,
                                           const std::string& white_username, const std::string& black_username,
                                           std::chrono::system_clock::time_point started_at)>;
 
-/// What a match is doing right now, and therefore what is allowed.
-///
-/// This exists because "may this command be applied?" used to be answered by
-/// reading several unrelated flags -- game_over_, the seat table, the disconnect
-/// watch -- and it was easy to check some and forget others. It was: a player
-/// waiting alone for an opponent could move their pieces, because nothing
-/// checked that anyone was there to move against.
-///
-/// One question, one answer, in one place. Every gate reads this.
+/// What a match is doing right now, and therefore what is allowed. One
+/// question, one answer, in one place -- every gate reads this instead of
+/// separately checking game_over_/seats/disconnect state.
 enum class MatchState {
-    /// Fewer than two players are seated. The board exists, but no gameplay
-    /// command is accepted -- there is no game yet.
+    /// Fewer than two players seated; no gameplay command is accepted yet.
     Waiting,
-    /// Both seats filled and nobody has dropped: the game is on.
+    /// Both seats filled, nobody dropped: the game is on.
     Running,
-    /// A player's connection dropped and their grace period is counting down.
-    /// The clock is stopped and no move is accepted from anyone, so a returning
-    /// player finds the position exactly as they left it.
+    /// A player disconnected; countdown running, board frozen for both sides.
     Frozen,
-    /// Decided -- a king fell, someone resigned, or a grace period expired.
-    /// Nothing changes the board again.
+    /// Decided; nothing changes the board again.
     Finished,
 };
 
-/// How long a dropped player has to come back before the match is forfeited on
-/// their behalf -- the CTD SERVER spec's 20 seconds.
+/// How long a dropped player has to come back before forfeiting.
 inline constexpr int kDefaultDisconnectGraceMs = 20000;
 
-/// How long after a match is decided its participants are released. Long enough
-/// for the final GameOver to reach every screen and register there.
+/// How long after a match is decided its participants are released.
 inline constexpr int kDefaultReleaseDelayMs = 3000;
 
-/// The most commands a match will hold waiting to be applied.
-///
-/// The queue is drained about sixty times a second, and a player cannot
-/// usefully issue commands faster than their pieces come off cooldown, so a
-/// legitimate depth is a handful -- reaching even a fraction of this means
-/// something is sending far faster than it can play. Without a cap, a client
-/// that simply sends in a loop grows this deque until the server runs out of
-/// memory, and it costs the attacker nothing.
-///
-/// Generous on purpose: a burst from a laggy connection catching up must not
-/// lose a real move. What is refused is the flood, not the burst.
+/// Cap on queued-but-unapplied commands. A legitimate client can't move
+/// faster than pieces come off cooldown, so this is generous headroom for a
+/// catch-up burst while still bounding a flooding client's memory cost.
 inline constexpr std::size_t kMaxQueuedCommands = 512;
 
-/// Owns one playable match: a GameCore (the very same Board/RuleEngine/
-/// RealTimeArbiter/MotionFactory/GameEngine stack kfc::texttests::Game
-/// assembles locally, now shared rather than re-wired by hand), plus a
-/// thread-safe incoming-command queue. This *is* the CTD SERVER lecture's
-/// "bus": IXWebSocket's own connection threads only ever call enqueue(),
-/// never touch GameEngine/Board directly -- every mutation happens inside
-/// tick(), called from whichever thread a MatchScheduler assigns this match
-/// to, exactly the single-threaded assumption kfc_core makes everywhere
-/// already.
+/// Owns one playable match: a GameCore plus a thread-safe incoming-command
+/// queue. Connection threads only ever call enqueue(); every mutation
+/// happens inside tick(), on whichever thread a MatchScheduler assigns.
 ///
-/// One Match is exactly two players (first join = White, second = Black), no
-/// spectators, no persistence. Matchmaking across many concurrent games lives
-/// one level up in RoomManager, which owns a Match per room -- a Match itself
-/// never needs to know other games exist. Commands are applied in the order
-/// the queue delivers them -- deterministic, and answers the lecture's own
-/// "which command wins on a near-tie" question without any special-casing.
+/// One Match is exactly two players (first join = White, second = Black),
+/// no spectators seated, no persistence. Matchmaking across many concurrent
+/// games lives one level up in RoomManager. Commands are applied in queue
+/// order, deterministically.
 class Match {
 public:
     /// board is the starting position; logger must outlive this Match.
-    /// config supplies the shared gameplay timing/values (speed, cooldowns,
-    /// meters-per-cell) -- the server loads it from gameplay.json and the
-    /// client loads the same file, so networked and local play agree. Defaults
-    /// to the built-in values, which is what tests use.
-    /// on_result, if set, is called once the moment the match is decided --
-    /// see ResultCallback. Defaults to none, which is what tests and any
-    /// rating-free Match use. disconnect_grace_ms is how long a dropped player
-    /// has before the match is forfeited on their behalf (CTD SERVER spec: 20
-    /// seconds); tests pass a short value so the countdown resolves quickly.
-    /// release_delay_ms is how long after the match is decided both players are
-    /// let go (see release_players) -- long enough by default for the final
-    /// GameOver to be seen; tests again pass a short value.
+    /// config supplies shared gameplay timing (server and client load the
+    /// same gameplay.json, so play agrees). on_result is called once the
+    /// match is decided.
     explicit Match(kfc::model::Board board, kfc::protocol::FileLogger& logger,
                    kfc::protocol::GameplayConfig config = {}, ResultCallback on_result = {},
                    int disconnect_grace_ms = kDefaultDisconnectGraceMs,
@@ -129,154 +87,77 @@ public:
     Match(const Match&) = delete;
     Match& operator=(const Match&) = delete;
 
-    /// Registers a new connection's send callback and assigns it the next
-    /// open color (White first, then Black). Returns std::nullopt without
-    /// registering anything if the match is already full -- the caller
-    /// (kfc_server's connection handler) is responsible for rejecting that
-    /// connection instead. Immediately sends that player a Welcome message
-    /// with the current board snapshot. close, if given, is how this player is
-    /// released once the match is decided (see release_players); a Match built
-    /// without one simply leaves its players connected, which is what tests do.
+    /// Assigns the next open color (White first, then Black). Returns
+    /// nullopt without registering anything if the match is already full.
+    /// Immediately sends a Welcome with the current board snapshot.
     [[nodiscard]] std::optional<kfc::model::PieceColor> join(const std::string& username, SendFn send,
                                                               CloseFn close = {});
 
-    /// Registers a watcher rather than a player -- the spec's "the following
-    /// people who join are viewers". A spectator gets the same Welcome (marked
-    /// spectator, with the board as it stands *right now*, not as it started)
-    /// and every later broadcast, so its screen mirrors the game exactly; it is
-    /// never given a colour, never asked for by owns_piece_at, and its
-    /// disconnect is not a forfeit -- nothing about the game changes when one
-    /// comes or goes. If the match is already under way it is also sent
-    /// MatchStart immediately, so it starts watching instead of "searching".
-    /// Returns the handle identifying this watcher, to be given back to
-    /// leave_spectator when its connection closes -- or 0 (see WatcherId's
-    /// own doc comment) once MatchAudience::kMaxSpectators is already
-    /// attached. Nothing is sent to send/close in that case; the caller
-    /// (RoomManager) is the one that owes this connection a JoinFailed.
+    /// Registers a watcher rather than a player: same Welcome/broadcasts as
+    /// a player but no colour, never owns a piece, disconnect is not a
+    /// forfeit. Returns 0 if MatchAudience::kMaxSpectators is already
+    /// attached, in which case nothing is sent and the caller owes this
+    /// connection a JoinFailed.
     [[nodiscard]] WatcherId join_spectator(const std::string& username, SendFn send, CloseFn close = {});
 
-    /// A watcher's connection closed: stop sending to it. Nothing else about
-    /// the game changes -- a viewer holds no seat, so this is not a forfeit and
-    /// not a reason to freeze anything. Unknown handles are ignored.
+    /// Unknown handles are ignored.
     void leave_spectator(WatcherId watcher);
 
-    /// What this match is doing right now -- see MatchState. Derived from the
-    /// three things that actually decide it (decided? frozen? both seated?)
-    /// rather than stored, so there is no fourth copy of the truth to drift.
-    ///
-    /// All three reads are lock-free atomics, because this is asked for every
-    /// command and every tick.
+    /// Derived from decided/frozen/seated state rather than stored, so
+    /// there's no separate copy of the truth to drift. Lock-free atomics:
+    /// asked on every command and every tick.
     [[nodiscard]] MatchState state() const;
 
-    /// True once this match is decided (a king fell, someone resigned, or a
-    /// disconnect grace ran out). Nothing can be joined, watched or played in
-    /// such a room, so callers refuse to seat anyone into one -- see
-    /// kfc::protocol::join_reasons::kRoomNotActive. Safe to call from any
-    /// thread.
+    /// Safe to call from any thread.
     [[nodiscard]] bool is_over() const;
 
-    /// Which seat, if any, this username is entitled to reclaim right now: the
-    /// colour of a player whose disconnect countdown is currently running and
-    /// whose username this is. std::nullopt in every other case -- nobody is
-    /// mid-countdown, or this is simply a different person. This is what keeps
-    /// a returning player apart from a stranger walking into the same room: a
-    /// stranger becomes a spectator, the actual player gets their pieces back.
-    /// Safe to call from a connection thread.
+    /// Colour of a player whose disconnect countdown is running and whose
+    /// username this is; nullopt otherwise. Lets a returning player reclaim
+    /// their seat while a stranger with the same room link becomes a
+    /// spectator. Safe to call from a connection thread.
     [[nodiscard]] std::optional<kfc::model::PieceColor> reclaimable_seat_for(const std::string& username) const;
 
-    /// Reseats a returning player: swaps in their new connection's send/close,
-    /// cancels the countdown, tells the opponent (OpponentReconnected) to clear
-    /// it, and sends the returning player a Welcome with the board as it stands
-    /// now plus MatchStart, so they resume the game already in progress.
-    ///
-    /// **Returns false if the seat was no longer theirs to take** -- the grace
-    /// expired in the moment between reclaimable_seat_for saying yes and this
-    /// being called, so the match is already forfeit. The caller must undo
-    /// whatever it did in anticipation; reporting success here would leave a
-    /// connection believing it is seated in a match that has ended without it.
+    /// Reseats a returning player and cancels the countdown. Returns false
+    /// if the grace expired between reclaimable_seat_for saying yes and this
+    /// call -- caller must undo whatever it did in anticipation.
     [[nodiscard]] bool reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close = {});
 
-    /// Thread-safe hand-off of one decoded client message, called from
-    /// whatever IXWebSocket callback thread received it. Returns
-    /// immediately; the message is applied inside this match's next tick().
-    /// If a wake hook is set (see set_wake_hook), it is called too, so a
-    /// scheduler backing this match applies the command right away rather
-    /// than at its next scheduled tick.
-    ///
-    /// Dropped, rather than queued, once kMaxQueuedCommands are already
-    /// waiting -- see there. The newest is what goes: the ones already queued
-    /// arrived first and are the ones a real player actually meant.
+    /// Thread-safe hand-off of one decoded message; applied on the next
+    /// tick(). If a wake hook is set, it fires too so a scheduler ticks this
+    /// match right away. Dropped (not queued) past kMaxQueuedCommands,
+    /// newest-preferred, since older queued commands arrived first.
     void enqueue(kfc::model::PieceColor from, kfc::protocol::ClientMessage message);
 
-    /// A player's connection dropped: starts a disconnect grace countdown
-    /// rather than ending the game immediately. Each remaining second is
-    /// broadcast to the opponent (OpponentDisconnected) so their screen can
-    /// count it down; if the grace elapses the match is forfeited on the
-    /// dropped player's behalf (opponent wins, GameEndReason::Disconnect, the
-    /// flat -10 penalty). Called from an IXWebSocket connection thread when a
-    /// joined socket closes; like enqueue(), it just records the event for
-    /// the next tick() and returns, so it never races the simulation.
+    /// Starts a disconnect grace countdown instead of ending the game
+    /// immediately. Called from a connection thread; just records the event
+    /// for the next tick(), never races the simulation.
     void on_disconnect(kfc::model::PieceColor color);
 
-    /// Advances this match by one step: drains the command queue, applies what
-    /// was waiting, advances the simulation by elapsed_ms, and broadcasts
-    /// whatever happened.
+    /// Drains the command queue, advances the simulation by elapsed_ms, and
+    /// broadcasts what happened. now/elapsed_ms come in as parameters
+    /// (not read from a clock) so one thread can drive many matches and
+    /// tests can step deterministically.
     ///
-    /// **Time comes in as parameters rather than being read from a clock**, for
-    /// the same reason GameCore::wait does it: it is what lets something other
-    /// than this object decide the cadence. One thread can drive thousands of
-    /// matches by calling this on each in turn -- which is the shape
-    /// Server_Design.md needs, since a thread per match is five million threads
-    /// at the target scale. It is also what would let a test step a match
-    /// forward deterministically instead of sleeping.
-    ///
-    /// now is the wall-clock instant of this step (the disconnect countdown and
-    /// the post-game release are measured against it); elapsed_ms is how much
-    /// simulated time to advance, already clamped by the caller.
-    ///
-    /// Runs the whole step on the calling thread. Safe to call from any one
-    /// thread at a time; two threads must not tick the same match at once.
+    /// Safe to call from any one thread at a time; two threads must not
+    /// tick the same match concurrently.
     void tick(std::chrono::steady_clock::time_point now, int elapsed_ms);
 
-    /// Sets the callback enqueue() fires after queuing a command -- how a
-    /// MatchScheduler learns to tick this match now rather than waiting out
-    /// its worker's normal cadence, without Match knowing the scheduler or
-    /// even that one exists. Unset by default, which is what tests and any
-    /// standalone Match (ticked by hand, or via a test-only scheduling loop)
-    /// use. Expected to be set once, before the match is handed to anything
-    /// that might call enqueue() concurrently -- see RoomManager::open_room.
+    /// Callback enqueue() fires after queuing a command, so a MatchScheduler
+    /// can tick this match now instead of waiting its normal cadence.
+    /// Expected to be set once, before the match is reachable concurrently.
     void set_wake_hook(std::function<void()> hook);
 
 private:
     void apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessage& message);
-    /// True if cell is empty or holds a piece of color from -- false only
-    /// when it holds an opponent's piece, i.e. from is trying to command a
-    /// piece that isn't theirs. See apply()'s own use for why an empty cell
-    /// is not treated as a violation here.
+    /// True unless cell holds an opponent's piece.
     [[nodiscard]] bool owns_piece_at(kfc::model::PieceColor from, const kfc::model::Position& cell) const;
-    /// The Welcome to hand a newly attached connection: its colour, whether it
-    /// is watching, this room's id, and a snapshot of the board as it stands
-    /// right now. Shared by join/join_spectator/reconnect, which differ only in
-    /// the first two.
     [[nodiscard]] kfc::protocol::Welcome welcome_for(kfc::model::PieceColor color, bool spectator) const;
-    /// Fires on_result_ once (guarded by result_reported_) with the end reason,
-    /// winner, and the two usernames. Called from tick() the tick the game is
-    /// decided, whichever way it ended (capture, resign, disconnect).
+    /// Fires on_result_ once (guarded by result_reported_).
     void report_result(GameEndReason reason, std::optional<kfc::model::PieceColor> winner);
-    /// Turns this tick of the disconnect grace into game state: broadcasts each
-    /// remaining second as it changes, and forfeits the match if the grace ran
-    /// out. The countdown itself lives in DisconnectWatch; this is only what
-    /// Match does about it. `now` is this tick's clock.
     void advance_disconnect_countdown(std::chrono::steady_clock::time_point now);
-    /// Closes every participant's connection, once, a moment after the match is
-    /// decided -- see the release_at_ field. Nobody is still playing in a
-    /// finished room, and the survivor of a disconnect forfeit in particular
-    /// would otherwise sit in it forever; letting everyone go is also what lets
-    /// the room be reaped (each close comes back as an ordinary disconnect).
+    /// Closes every participant's connection once, shortly after the match
+    /// is decided, which also lets the room be reaped.
     void release_participants();
-    /// Encodes and logs one message, then hands the text to audience_. The two
-    /// wrappers exist so encoding and its log line live in one place rather
-    /// than at every call site.
     void broadcast_and_log(const kfc::protocol::ServerMessage& message);
     void send_to_and_log(kfc::model::PieceColor color, const kfc::protocol::ServerMessage& message);
 
@@ -289,87 +170,56 @@ private:
     kfc::protocol::GameplayCooldownPolicy jump_policy_;
     kfc::model::GameCore core_;
 
-    // How far the game has got: bumped once per tick that produces arrivals,
-    // under board_mutex_ together with the board change itself, so a snapshot
-    // and a revision taken under that lock always agree. Sent with every
-    // BoardUpdate and every Welcome -- see BoardUpdate::revision.
+    // Bumped once per tick producing arrivals, under board_mutex_, so a
+    // snapshot and revision taken under that lock always agree.
     std::uint64_t revision_ = 0;
 
-    // Every arrival this match has produced, oldest first -- what a joining or
-    // returning client needs to rebuild the move list and score it never saw.
-    // Written by the tick thread and read by welcome_for on a connection
-    // thread, both under board_mutex_ below, exactly like the board itself.
+    // Every arrival this match has produced, oldest first. Written by the
+    // tick thread, read by welcome_for on a connection thread, both under
+    // board_mutex_.
     std::vector<kfc::model::ArrivalEvent> history_;
 
-    // Serializes every read of / write to core_'s board across threads.
-    // Nearly all board access already happens inside tick(), but join() runs
-    // on an IXWebSocket connection thread and reads the board to build its
-    // Welcome snapshot -- without this, that read can race a simultaneous
-    // mutation the tick thread is making inside engine().wait().
+    // join() runs on a connection thread and reads the board for its Welcome
+    // snapshot, which can otherwise race the tick thread's mutation inside
+    // engine().wait().
     mutable std::mutex board_mutex_;
 
     kfc::protocol::FileLogger& logger_;
 
-    // Who is attached to this match and how to reach them -- players and
-    // watchers alike. Internally synchronized, so Match needs no lock of its
-    // own for any of it (see MatchAudience).
+    // Internally synchronized; Match needs no lock of its own for it.
     MatchAudience audience_;
 
     std::mutex queue_mutex_;
     std::deque<std::pair<kfc::model::PieceColor, kfc::protocol::ClientMessage>> queue_;
-    // Commands dropped because the queue was full since the last time it was
-    // reported, so a flood costs one log line and not one per message -- the
-    // logging is otherwise the easiest thing for the flood to turn into the
-    // actual denial of service. Queue-thread state, under queue_mutex_.
+    // Commands dropped since last reported, so a flood costs one log line, not one per message.
     int dropped_commands_ = 0;
 
-    // Set once, before this match is reachable from more than one thread (see
-    // set_wake_hook) -- read by enqueue(), which can run on any connection
-    // thread, so it is never written again after that point rather than
-    // guarded by a lock.
+    // Set once before the match is reachable from more than one thread, so
+    // enqueue() (any connection thread) reads it without a lock.
     std::function<void()> wake_hook_;
 
-    // tick-thread-only game-over state. Once a king is captured, a player
-    // resigns, or a player disconnects, the match is decided: game_over_ stays
-    // true and apply() drops every later command, so a stray move arriving
-    // after the win can never mutate a finished board or emit a second result.
-    // Only apply()/tick() touch these, both on the tick thread, so no mutex
-    // is needed (unlike the board or the player table, which connection threads
-    // also read). pending_game_over_ is set the tick a resign/disconnect is
-    // applied and consumed by tick(), which does the actual broadcast after
-    // releasing board_mutex_ -- network I/O must not hold the board lock.
-    // atomic only so is_over() can be asked from a connection thread deciding
-    // whether a room is still joinable; every write is still the tick thread's.
+    // tick-thread-only game-over state; game_over_ latches so a stray
+    // command after the win never mutates a finished board. Atomic only so
+    // is_over() can be asked from a connection thread. pending_game_over_ is
+    // consumed by tick() after releasing board_mutex_, since network I/O
+    // must not hold the board lock.
     std::atomic<bool> game_over_{false};
     std::optional<kfc::protocol::GameOver> pending_game_over_;
 
-    // The rating hook and a one-shot guard so a result is reported exactly once
-    // even though game-over is latched on the tick thread. tick-thread-only.
+    // tick-thread-only. result_reported_ guards the one-shot rating hook.
     ResultCallback on_result_;
     bool result_reported_ = false;
 
-    // Wall-clock time this Match was constructed, i.e. when the room's game
-    // began -- handed to on_result_ so a caller can record a game's duration,
-    // not just its outcome. Set once at construction, never written again.
     std::chrono::system_clock::time_point started_at_;
-
-    // How long after the match is decided every participant is released.
     int release_delay_ms_;
 
-    // This room's id, echoed in every Welcome so a client can display it (the
-    // spec's "the room id is written on the top of the screen"). Empty for a
-    // matchmaking room, which has no id to show. Set once at construction and
-    // never written again, so it needs no lock.
+    // Empty for a matchmaking room. Set once at construction.
     std::string room_name_;
 
-    // The dropped-player grace period, start to finish -- reporting a drop,
-    // counting it down, cancelling it on a reconnect, and expiring it into a
-    // forfeit. Internally synchronized (see DisconnectWatch).
     DisconnectWatch disconnect_watch_;
 
-    // When everyone is let go (tick-thread-only). Set the tick the match is
-    // decided, a short grace *after* it so the final GameOver has reached both
-    // screens before their sockets close; released_ makes it happen once.
+    // tick-thread-only. Set a short grace after the match is decided so the
+    // final GameOver reaches both screens first; released_ makes it happen once.
     std::optional<std::chrono::steady_clock::time_point> release_at_;
     bool released_ = false;
 };

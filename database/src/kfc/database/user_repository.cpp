@@ -16,20 +16,13 @@ namespace kfc::database {
 
 namespace {
 
-// UTC, second precision -- e.g. "2026-08-09T14:03:21Z". Matches what the Java
-// api-gateway this replaces serialized java.time.Instant as.
+// UTC, second precision -- e.g. "2026-08-09T14:03:21Z".
 std::string to_iso8601(std::chrono::system_clock::time_point tp) {
     return std::format("{:%Y-%m-%dT%H:%M:%SZ}", std::chrono::floor<std::chrono::seconds>(tp));
 }
 
-// Applied only to a username nobody has ever registered -- an existing
-// account's username is whatever it already is, and a login attempt against
-// it is a password check, not a fresh registration, so these never run on
-// that path (see authenticate() below). 3-24 characters keeps a username
-// speakable and displayable everywhere the client puts one -- notably
-// alongside a room id and a rating on one line -- and alnum-or-underscore
-// rules out anything that would need escaping wherever a username is later
-// embedded (a log line, a URL path segment, a filename).
+// Only applied to a username being registered for the first time; an
+// existing account's login is a password check, not this validation.
 bool is_valid_new_username(const std::string& username) {
     constexpr std::size_t kMinLength = 3;
     constexpr std::size_t kMaxLength = 24;
@@ -41,15 +34,7 @@ bool is_valid_new_username(const std::string& username) {
     });
 }
 
-// Same reasoning, for the password half of a fresh registration. The floor
-// is a real (if modest) defense against the accounts a script would create
-// to test the register endpoint -- 6, not the more commonly quoted 8, is a
-// deliberate choice: it is where the floor lands without rejecting
-// "hunter2" (7 characters), the password this codebase's own tests already
-// used everywhere as their stand-in for "a real one" before this rule
-// existed. The ceiling exists so a client cannot feed a multi-megabyte
-// string into Argon2 -- memory-hard hashing does not need a long input to
-// be expensive, but there is no reason to hash one either.
+// Ceiling exists so a client can't feed a multi-megabyte string into Argon2.
 bool is_valid_new_password(const std::string& password) {
     constexpr std::size_t kMinLength = 6;
     constexpr std::size_t kMaxLength = 128;
@@ -60,20 +45,8 @@ bool is_valid_new_password(const std::string& password) {
 
 UserRepository::UserRepository(const std::string& db_path)
     : db_(std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)) {
-    // mutex_ already serializes every call into this class to one at a time
-    // (see its own doc comment) -- these two PRAGMAs are about what each of
-    // those writes costs on disk, not about concurrency this class doesn't
-    // have anyway. SQLite's default (rollback journal) fsyncs twice per
-    // write transaction; WAL fsyncs once, and lets a reader run without
-    // waiting on a writer's lock at all -- found to matter by Roadmap.md's
-    // stage-3 load test, where thousands of brand-new accounts registering
-    // at once (POST /api/auth/register -> authenticate()'s own INSERT) queued
-    // for tens of seconds behind mutex_ purely on disk I/O it did not need
-    // to spend. synchronous=NORMAL is WAL's documented pairing: still durable
-    // against an application crash (this process dying loses nothing
-    // committed), only a full OS crash at the exact wrong instant could lose
-    // the last commit -- an acceptable trade for match history and ratings,
-    // not for a payment ledger.
+    // WAL + synchronous=NORMAL: one fsync per write instead of two, durable
+    // against a process crash but not a full OS crash -- an acceptable trade here.
     db_->exec("PRAGMA journal_mode=WAL");
     db_->exec("PRAGMA synchronous=NORMAL");
     db_->exec(
@@ -115,10 +88,7 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
     }
 
     // First time we've seen this username -> register it, once it and the
-    // password clear the new-account rules (see is_valid_new_username/
-    // is_valid_new_password's own comments for why these never apply to an
-    // existing account). Neither failure creates anything -- a bad username
-    // is not implicitly "taken" by having been rejected.
+    // password clear the new-account rules. Neither failure creates anything.
     if (!is_valid_new_username(username)) {
         return AuthOutcome{false, "invalid_username", 0, false};
     }
@@ -126,9 +96,7 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
         return AuthOutcome{false, "weak_password", 0, false};
     }
 
-    // The salt column is left empty: Argon2 carries its own salt inside the
-    // encoded string, so there is no longer a second value to keep in step
-    // with the hash.
+    // salt column left empty: Argon2 carries its own salt inside the encoded string.
     SQLite::Statement insert(*db_, "INSERT INTO users (username, salt, password_hash, rating) VALUES (?, ?, ?, ?)");
     insert.bind(1, username);
     insert.bind(2, "");
@@ -168,10 +136,7 @@ bool UserRepository::rerate_pair(const std::string& first, const std::string& se
                                  const std::function<std::pair<int, int>(int, int)>& compute) {
     std::lock_guard<std::mutex> guard(mutex_);
 
-    // The lock is what makes this atomic against our own threads. The
-    // transaction is what makes the *pair* of writes all-or-nothing against a
-    // crash, and against any other connection to the same file: half an ELO
-    // exchange on disk would be points created or destroyed, permanently.
+    // Transaction makes the pair of writes all-or-nothing against a crash.
     SQLite::Transaction transaction(*db_);
 
     std::optional<int> before_first = read_rating(first);

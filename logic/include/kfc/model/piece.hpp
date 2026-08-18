@@ -64,17 +64,9 @@ enum class PieceState {
     Captured,
 };
 
-/// A single chess piece: identity, side, role, current cell, lifecycle
-/// state, and whether it has ever completed a real move. Knows nothing
-/// about rendering, mouse input, or movement rules.
-///
-/// has_moved exists so a pawn's two-cell opening move can be board-size
-/// independent: "has this piece ever moved" instead of "is it sitting on a
-/// row computed from board height", which breaks down on the small ad-hoc
-/// boards this project's fixtures use (there is no single row offset that
-/// means "start row" for every board size). RealTimeArbiter sets this to
-/// true on arrival for an ordinary move, never for a jump-in-place (the
-/// piece never left its cell).
+/// A single chess piece: identity, side, role, current cell, lifecycle state.
+/// has_moved tracks "has this piece ever moved" rather than a row computed
+/// from board height, so pawn double-steps stay valid on any board size.
 struct Piece {
     PieceId id;
     PieceColor color;

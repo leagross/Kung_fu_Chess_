@@ -8,10 +8,7 @@
 namespace kfc::io {
 
 /// Builds a kfc::model::Board from board-grid text: one row per line, tokens
-/// space-separated, "." for an empty cell, piece ids assigned in reading
-/// order. This is the io/ layer component the design document names --
-/// shared by the real app and by text integration tests, never duplicated
-/// inside a test-only namespace.
+/// space-separated, "." for an empty cell, piece ids assigned in reading order.
 class BoardParser {
 public:
     /// Rejects a grid with no rows ("EMPTY_BOARD"), rows of inconsistent

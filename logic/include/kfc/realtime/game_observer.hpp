@@ -4,12 +4,9 @@
 
 namespace kfc::model {
 
-/// Reacts to one piece's arrival, entirely decoupled from the hot
-/// move-handling path: neither GameEngine nor RealTimeArbiter ever call
-/// this directly. Game does, once per ArrivalEvent, only after
-/// RealTimeArbiter::advance_time has already fully resolved it -- an
-/// observer never blocks, delays, or otherwise affects whether or how a
-/// move happens, only what a UI shows once it already has.
+/// Reacts to one piece's arrival, decoupled from the hot move-handling path:
+/// Game calls this once per ArrivalEvent only after RealTimeArbiter has
+/// already fully resolved it, so an observer can never affect a move itself.
 class IGameObserver {
 public:
     virtual ~IGameObserver() = default;

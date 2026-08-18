@@ -3,10 +3,8 @@
 #include <algorithm>
 #include <chrono>
 
-// IXWebSocket's Windows headers transitively pull in <windows.h>, whose
-// min/max macros would otherwise swallow every std::min/std::max call below
-// -- same guard kfc_gui_app/main.cpp already needs for its own <windows.h>
-// include.
+// IXWebSocket's Windows headers pull in <windows.h>, whose min/max macros
+// would otherwise swallow std::min/std::max below.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -22,13 +20,8 @@ ServerLink::ServerLink(std::string server_url, std::string username, std::string
                        kfc::protocol::ClientMessage seating_action, kfc::protocol::FileLogger& logger)
     : username_(std::move(username)), password_(std::move(password)), seating_action_(std::move(seating_action)),
       logger_(logger) {
-    // Windows needs WSAStartup (what this wraps) called before any socket
-    // use -- isolated here, not left to main(), so every current and future
-    // caller of ServerLink gets it for free instead of having to remember
-    // it separately, the same way MouseInputAdapter isolates OpenCV's
-    // callback quirk. Safe to call from multiple ServerLink instances/
-    // processes; each pairs with its own uninitNetSystem() in the
-    // destructor.
+    // Windows needs WSAStartup (what this wraps) before any socket use; safe
+    // to call from multiple instances, each paired with uninitNetSystem().
     ix::initNetSystem();
     connect_to(server_url);
 }
@@ -40,8 +33,6 @@ void ServerLink::connect_to(const std::string& url) {
         if (msg->type == ix::WebSocketMessageType::Open) {
             logger_.log("ServerLink: connected, sending Login as '" + username_ + "'");
             send(kfc::protocol::ClientMessage{kfc::protocol::Login{username_, password_}});
-            // Immediately follow with the seating choice (Play / Create / Join);
-            // the server authenticates the Login, then seats us on this.
             send(seating_action_);
         } else if (msg->type == ix::WebSocketMessageType::Message) {
             on_message(msg->str);
@@ -63,9 +54,7 @@ ServerLink::~ServerLink() {
 
 void ServerLink::send(const kfc::protocol::ClientMessage& message) {
     std::string encoded = kfc::protocol::encode(message);
-    // Debug: every outbound frame. Guarded because redact_for_log rebuilds the
-    // whole message, which is not worth doing for a line that will be dropped.
-    // Redacted because the very first thing sent is a Login, password included.
+    // Redacted since the first message sent is a Login with a password.
     if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
         logger_.log(kfc::protocol::LogLevel::Debug,
                     "ServerLink: sending " + kfc::protocol::redact_for_log(encoded));
@@ -91,10 +80,8 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
-    // The server refused to seat us and is about to hang up. Woken through the
-    // same slot the Welcome uses, so wait_for_welcome() returns straight away
-    // with a real reason instead of sitting out its whole timeout on a socket
-    // that will never say anything else.
+    // Woken through the same slot Welcome uses, so wait_for_welcome() returns
+    // immediately instead of sitting out its timeout.
     if (std::holds_alternative<kfc::protocol::JoinFailed>(*decoded)) {
         std::lock_guard<std::mutex> lock(welcome_mutex_);
         join_failure_ = std::get<kfc::protocol::JoinFailed>(*decoded).reason;
@@ -102,11 +89,9 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
-    // A third way that same wait can end: the room is real, just on a
-    // different worker. Only the flag is set here -- reconnecting means
-    // stopping this socket, which must happen from wait_for_welcome() on the
-    // main thread, never from this callback (IXWebSocket's own thread, which
-    // stopping this same socket would try to join).
+    // Only the flag is set here; reconnecting must happen from
+    // wait_for_welcome() on the main thread, not this callback's thread
+    // (which stopping this same socket would try to join).
     if (std::holds_alternative<kfc::protocol::JoinRedirect>(*decoded)) {
         std::lock_guard<std::mutex> lock(welcome_mutex_);
         pending_redirect_url_ = std::get<kfc::protocol::JoinRedirect>(*decoded).url;
@@ -114,9 +99,8 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
-    // Same slot, same reason: authentication failed, so there will never be a
-    // Welcome. Prefixed so the caller can tell a rejected login apart from a
-    // rejected room -- they need very different wording.
+    // Prefixed so the caller can tell a rejected login apart from a rejected
+    // room -- they need different wording.
     if (std::holds_alternative<kfc::protocol::LoginFailed>(*decoded)) {
         std::lock_guard<std::mutex> lock(welcome_mutex_);
         join_failure_ = kLoginFailurePrefix + std::get<kfc::protocol::LoginFailed>(*decoded).reason;
@@ -129,11 +113,8 @@ void ServerLink::on_message(const std::string& text) {
 }
 
 bool ServerLink::wait_for_welcome(int timeout_ms) {
-    // At most two passes: the original attempt, and one retry if it was
-    // redirected to a different worker. A second redirect inside that retry
-    // is treated as a failure rather than followed again, so a misconfigured
-    // deployment (or a bug in the room directory) cannot loop this forever --
-    // one hop is all a correct one-worker-owns-each-room setup ever needs.
+    // At most two passes: the original attempt and one redirect retry. A
+    // second redirect is treated as failure so a bad deployment can't loop.
     for (int attempt = 0; attempt < 2; ++attempt) {
         std::unique_lock<std::mutex> lock(welcome_mutex_);
         bool arrived = welcome_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] {
@@ -149,9 +130,8 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
             }
             std::string redirect_url = *pending_redirect_url_;
             pending_redirect_url_.reset();
-            // socket_->stop() must not run with welcome_mutex_ held: it joins
-            // IXWebSocket's own thread, which on_message (the only other
-            // thing that ever takes this lock) runs on.
+            // Must not hold welcome_mutex_ while stopping: it joins
+            // IXWebSocket's thread, which on_message also locks this mutex on.
             lock.unlock();
             logger_.log("ServerLink: room is on another worker, reconnecting to " + redirect_url);
             socket_->stop();
@@ -159,8 +139,6 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
             continue;  // wait again, on the new connection
         }
 
-        // Either the server said no (join_failure_ holds why, for the caller
-        // to show) or nothing came at all within the timeout.
         if (join_failure_.has_value()) {
             return false;
         }
@@ -178,9 +156,8 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
         }
         board_ = std::move(board);
         board_mapper_.emplace(board_->width(), board_->height());
-        // Restrict click-selection to this client's own color: the opponent's
-        // pieces can't be picked up locally, matching the server's own
-        // ownership check (see Match::owns_piece_at).
+        // Restrict click-selection to this client's own color, matching the
+        // server's ownership check.
         controller_.emplace(*board_, static_cast<kfc::model::IMoveRequester&>(*this), *board_mapper_,
                             assigned_color_);
 
@@ -216,9 +193,6 @@ bool ServerLink::is_match_started() const {
 }
 
 kfc::input::ControllerResult ServerLink::click(int x, int y) {
-    // A viewer's clicks go nowhere. The caller (the GUI) already declines to
-    // wire up mouse input for one, but a Controller built around a colour this
-    // connection was never given must not be reachable even by accident.
     if (spectator_) {
         return {kfc::input::ClickOutcome::Ignored, std::nullopt};
     }
@@ -250,48 +224,28 @@ void ServerLink::wait(int ms) {
                 } else if constexpr (std::is_same_v<T, kfc::protocol::MoveRejected>) {
                     logger_.log("ServerLink: move rejected: " + m.reason);
                 } else if constexpr (std::is_same_v<T, kfc::protocol::OpponentDisconnected>) {
-                    // Re-published onto the local bus so the UI can render the
-                    // countdown, same pattern as arrivals/GameEnded.
                     events_.publish(kfc::events::OpponentCountdown{m.seconds_remaining});
                 } else if constexpr (std::is_same_v<T, kfc::protocol::OpponentReconnected>) {
-                    // They made it back inside the grace -- clear the countdown
-                    // banner and carry on.
                     events_.publish(kfc::events::OpponentReturned{});
                     logger_.log("ServerLink: opponent reconnected");
                 } else if constexpr (std::is_same_v<T, kfc::protocol::JoinFailed>) {
-                    // Only ever seen before wait_for_welcome() succeeds, where
-                    // it is read off the pending slot instead (see on_message);
-                    // logged here purely so a stray one is never silent.
                     logger_.log("ServerLink: join failed: " + m.reason);
                 } else if constexpr (std::is_same_v<T, kfc::protocol::MatchStart>) {
-                    // Both players present -> the match is really beginning.
-                    // Publish GameStarted now (not on mere connection) so the
-                    // intro splash and start sound land at the true start.
+                    // Publish now, not on mere connection, so the intro splash
+                    // and start sound land at the true match start.
                     match_started_ = true;
                     events_.publish(kfc::events::GameStarted{});
                 } else if constexpr (std::is_same_v<T, kfc::protocol::GameOver>) {
-                    // The server declares game-over for every ending (king
-                    // capture, resign, or disconnect), so publishing GameEnded
-                    // here is the one hook that covers them all -- sound and the
-                    // end banner both react to it, uniformly with local play.
                     events_.publish(kfc::events::GameEnded{m.winner});
                     logger_.log(m.winner.has_value() ? "ServerLink: game over, winner recorded"
                                                      : "ServerLink: game over, draw");
                 }
-                // Welcome never reaches this queue -- see on_message.
             },
             message);
     }
 
-    // Re-derives every still-open prediction's elapsed_ms from its absolute
-    // start time rather than accumulating this frame's delta onto the
-    // last -- see motion_start_times_'s own comment for why (a frame's
-    // clamped/delayed delta must never permanently lose real time from the
-    // animation). Clamped to duration_ms: a slow/bursty network must never
-    // let a predicted piece visually overshoot its destination and sit
-    // there having "arrived" before the real BoardUpdate confirms it did.
-    // ms itself is now unused here, but kept as the wait(int ms) override's
-    // own parameter regardless (see IGameView).
+    // Clamped to duration_ms so a slow network never lets a predicted piece
+    // visually overshoot before the real BoardUpdate confirms it arrived.
     auto now = std::chrono::steady_clock::now();
     for (auto& [id, motion] : predicted_motions_) {
         int real_elapsed_ms = static_cast<int>(
@@ -303,13 +257,9 @@ void ServerLink::wait(int ms) {
 void ServerLink::handle_motion_started(const kfc::protocol::MotionStarted& started) {
     kfc::model::PieceId id = started.motion.moving_piece.id;
     predicted_motions_[id] = started.motion;
-    // Anchored to when this motion actually began, not to when this client
-    // happened to receive the broadcast -- subtracting the server's own
-    // elapsed_ms (always 0 today, see MotionStarted's doc comment, but this
-    // stays correct even if a future retry/replay ever delivers one
-    // mid-flight) keeps this client's prediction aligned to the same
-    // instant the server -- and thus the other client -- started counting
-    // from.
+    // Anchored to when the motion actually began (subtracting the server's
+    // own elapsed_ms), so this client's prediction stays aligned with the
+    // instant the server -- and the other client -- started counting from.
     motion_start_times_[id] = std::chrono::steady_clock::now() - std::chrono::milliseconds(started.motion.elapsed_ms);
 }
 
@@ -318,12 +268,9 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
         return;
     }
 
-    // Already in the board we were handed. The server registers a joining or
-    // returning client for broadcasts *before* snapshotting its board, so that
-    // nothing can be missed in between -- which means the first update or two
-    // may describe arrivals the snapshot already contains. Replaying one of
-    // those would move a piece a second time and diverge this board from the
-    // server's for good.
+    // The server snapshots its board after registering us for broadcasts, so
+    // the first update or two may already be reflected in the snapshot;
+    // replaying one would move a piece twice and diverge from the server.
     if (update.revision != 0 && update.revision <= revision_) {
         logger_.log(kfc::protocol::LogLevel::Debug,
                     "ServerLink: skipping update " + std::to_string(update.revision) +
@@ -333,29 +280,16 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
     revision_ = update.revision;
 
     for (const kfc::model::ArrivalEvent& event : update.arrival_events) {
-        // Mirrors RealTimeArbiter::resolve_arrival's own net effect on Board
-        // exactly, using only the publicly observable ArrivalEvent fields --
-        // this Board never runs its own collision resolution, it only ever
-        // replays what the server already decided.
-        //
-        // The destination cell is cleared *unconditionally*, not just on a
-        // capture: the server also clears it when the mover passed through an
-        // airborne enemy (no capture, but the enemy's stale record was still
-        // sitting there). Clearing only on capture left that record in place,
-        // so the add_piece below then hit an already-occupied cell and threw,
-        // diverging the client's board from the server's. remove_piece is a
-        // harmless no-op when the destination was genuinely empty, so this is
-        // safe for an ordinary move too.
+        // Destination is cleared unconditionally, not just on capture: the
+        // server also clears it when the mover passed through an airborne
+        // enemy with no capture, whose stale record would otherwise make
+        // add_piece below throw on an "occupied" cell.
         board_->remove_piece(event.destination);
         board_->remove_piece(event.source);
         board_->add_piece(event.moved_piece);
 
-        // The prediction (if any) for this arrival is now resolved --
-        // whether it matched what was predicted or not, board_ has just
-        // been given the real outcome, so nothing should keep animating
-        // toward a guess anymore. A captured piece's own prediction (it may
-        // have had one mid-flight, e.g. the race JumpRaceTest covers) is
-        // cleared the same way -- it has no board presence left to animate.
+        // The real outcome has arrived, so any prediction for this piece
+        // (or a captured piece caught mid-flight) is now stale.
         predicted_motions_.erase(event.moved_piece.id);
         motion_start_times_.erase(event.moved_piece.id);
         if (event.captured_piece.has_value()) {
@@ -386,13 +320,9 @@ std::optional<kfc::model::Motion> ServerLink::motion_for(kfc::model::PieceId pie
 }
 
 bool ServerLink::is_piece_busy(kfc::model::PieceId piece_id) const {
-    // Doubles as PieceAnimatorRegistry's animator-retention signal (see its
-    // own comment): a piece with an open prediction must keep its animator
-    // alive even on a tick where board_ doesn't currently show it -- the
-    // same transient "attacker provisionally occupies the defender's cell"
-    // window local play already has to handle, now possible client-side
-    // too since arrivals are replayed in the same order/batches the server
-    // produced them.
+    // Doubles as PieceAnimatorRegistry's animator-retention signal: a piece
+    // with an open prediction must keep its animator alive even when board_
+    // doesn't currently show it.
     return predicted_motions_.count(piece_id) > 0;
 }
 

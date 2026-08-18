@@ -6,23 +6,11 @@
 
 namespace kfc::graphics {
 
-/// Converts a mouse event's raw pixel position (in whatever size the OS
-/// window is *currently displayed at*, which changes live as the user
-/// drags a resizable cv::WINDOW_NORMAL window) into native canvas pixel
-/// space -- the fixed width/height everything is actually drawn at,
-/// regardless of window size. The canvas (board, pieces, HUD) is never
-/// stretched out of proportion or cropped -- it's scaled uniformly to fit
-/// inside the window and centered there; the background behind it is a
-/// separate layer, scaled independently to cover the window completely
-/// (see main.cpp's render loop) -- only the canvas's own placement matters
-/// here, since only it receives clicks.
-/// Queries the window's current on-screen size via cv::getWindowImageRect
-/// at every click, since with a resizable window there is no other way to
-/// know it. NOTE: this exact mechanism was previously found unreliable
-/// with this project's vendored OpenCV 4.5.1 build (wrong click positions
-/// after a drag-resize) -- re-enabled because resizing was explicitly
-/// requested again, but verify clicks land on the right cell after
-/// actually resizing the window, not just at its initial size.
+/// Converts a mouse event's raw pixel position (in the window's current
+/// on-screen size, which changes as a resizable cv::WINDOW_NORMAL window is
+/// dragged) into fixed native canvas pixel space. The canvas is scaled
+/// uniformly to fit inside the window and centered; queries the window's
+/// current size via cv::getWindowImageRect at every click.
 class ScreenMapper {
 public:
     /// window_name must already exist (cv::namedWindow called first).

@@ -10,10 +10,7 @@ namespace kfc::texttests {
 
 namespace {
 
-// Parses a whole token as an int, rejecting anything std::stoi would silently
-// accept: non-numeric text, trailing junk ("100abc"), or out-of-int-range
-// values all become a ParseError with a stable code instead of a raw C++
-// exception (or, worse, a partially-parsed number).
+// Rejects trailing junk ("100abc") that std::stoi would silently accept.
 int parse_int(const std::string& token) {
     try {
         std::size_t consumed = 0;
@@ -65,8 +62,6 @@ void CommandProcessor::run(Game& game, const std::vector<std::string>& command_l
             }
             out << game.print_board();
         } else {
-            // A misspelled command ("clik 1 2") used to be silently dropped,
-            // hiding typos in a script; now it fails loudly.
             throw kfc::io::ParseError("UNKNOWN_COMMAND");
         }
     }

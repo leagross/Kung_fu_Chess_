@@ -3,9 +3,7 @@
 namespace kfc::model {
 
 /// Strategy interface for how long a piece rests after a motion arrives.
-/// Two real implementations exist (Standard, Jump) because the rule is
-/// genuinely different between them, not just a parameter -- that is what
-/// justifies the interface rather than a single if/else.
+/// Standard and Jump have genuinely different rules, not just a parameter.
 class ICooldownPolicy {
 public:
     virtual ~ICooldownPolicy() = default;

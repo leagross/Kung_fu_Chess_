@@ -87,8 +87,7 @@ std::optional<kfc::protocol::ClientMessage> run_home_screen(const std::string& w
 
         RoomChoice choice = prompt.ask_room();
         if (choice.action == RoomChoice::Action::Create) {
-            // No name: the server generates the id (see the dialog's own
-            // comment) and reports it back in the Welcome.
+            // No name: the server generates one and reports it in Welcome.
             return finish(kfc::protocol::CreateRoom{});
         }
         if (choice.action == RoomChoice::Action::Join && !choice.room_id.empty()) {

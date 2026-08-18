@@ -1,9 +1,5 @@
-// The Windows implementation of IRoomPrompt: real native controls, via the
-// Win32 API. Compiled only on Windows -- see CMakeLists and room_prompt.cpp.
-//
-// This is the CTD SERVER spec's "windows message with text box and buttons".
-// Text entry is far easier through the OS than key-by-key through OpenCV's
-// waitKey, which is exactly what the portable fallback has to do instead.
+// The Windows implementation of IRoomPrompt: native controls via Win32
+// (see opencv_room_prompt.cpp for the portable fallback).
 
 #include "kfc/graphics/dialogs/room_prompt.hpp"
 

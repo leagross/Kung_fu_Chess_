@@ -22,9 +22,8 @@ kfc::input::ControllerResult Game::jump(int x, int y) {
 }
 
 void Game::wait(int ms) {
-    // The first advance is where the game becomes live -- publish GameStarted
-    // once, here rather than in the constructor, so subscribers wired up after
-    // construction (the normal order) don't miss it.
+    // Published here rather than the constructor so subscribers wired up
+    // after construction don't miss it.
     if (!started_) {
         started_ = true;
         events_.publish(kfc::events::GameStarted{});

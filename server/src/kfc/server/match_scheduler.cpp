@@ -11,13 +11,10 @@ namespace kfc::server {
 
 namespace {
 
-// The cadence every match is advanced at -- the same ~60 Hz a per-match thread
-// used to run at, so nothing about the simulation's feel changes.
-constexpr int kTickIntervalMs = 16;
+constexpr int kTickIntervalMs = 16;  // ~60 Hz
 
-// Real elapsed time is clamped before it reaches a match: never 0, so the
-// simulation always moves forward, and never a large jump, so a stalled process
-// cannot dump seconds of simulated time into one tick.
+// Clamped so elapsed time is never 0 (simulation must move forward) and
+// never huge (a stalled process can't dump seconds into one tick).
 constexpr int kMinTickAdvanceMs = 1;
 constexpr int kMaxTickAdvanceMs = 200;
 
@@ -35,9 +32,7 @@ MatchScheduler::MatchScheduler(std::size_t worker_count, Metrics* metrics) : met
     for (std::size_t i = 0; i < worker_count; ++i) {
         workers_.push_back(std::make_unique<Worker>());
     }
-    // Threads start only once every Worker exists: a worker's run loop reads
-    // running_ and its own state, and starting them during the loop above would
-    // have them running while the vector was still being filled.
+    // Started only once every Worker exists, so run() never sees a partially-filled vector.
     for (std::unique_ptr<Worker>& worker : workers_) {
         worker->thread = std::thread([this, w = worker.get()] { run(*w); });
     }
@@ -63,15 +58,10 @@ void MatchScheduler::add(std::shared_ptr<Match> match) {
     if (!match) {
         return;
     }
-    // Captured before match is moved-from below -- this is the map key, and a
-    // shared_ptr that has been moved out of no longer has a usable .get().
+    // Captured before match is moved-from below.
     Match* key = match.get();
 
-    // Least-loaded worker, decided from each Worker::load alone -- an atomic
-    // read, so choosing among sixteen workers locks none of them. Rooms come
-    // and go constantly (83,000 a second at the target scale), so an even
-    // spread matters more than any affinity: a worker that happened to
-    // collect the long games would fall behind while its neighbours idled.
+    // Least-loaded worker, from each Worker::load (atomic, no locking needed).
     Worker* chosen = nullptr;
     std::size_t fewest = 0;
     for (std::unique_ptr<Worker>& worker : workers_) {
@@ -101,11 +91,6 @@ void MatchScheduler::remove(const std::shared_ptr<Match>& match) {
     if (!match) {
         return;
     }
-    // Which worker, via one map lookup -- not the sixteen-mutex scan this
-    // used to be (see owner_of's old body, and the class comment on why that
-    // mattered). Erased here regardless of whether the vector erase below
-    // actually finds anything, since either way this match is no longer this
-    // scheduler's to own.
     Worker* owner = nullptr;
     {
         std::lock_guard<std::mutex> guard(owners_mutex_);
@@ -123,9 +108,8 @@ void MatchScheduler::remove(const std::shared_ptr<Match>& match) {
         owner->matches.erase(it);
         owner->load.fetch_sub(1, std::memory_order_relaxed);
     }
-    // Nothing joined, nothing waited for. If the worker is mid-tick on this
-    // match right now it holds its own shared_ptr copy for the duration (see
-    // run), so the object outlives the tick and this call returns immediately.
+    // Nothing joined: if the worker is mid-tick on this match, it holds its
+    // own shared_ptr copy for the duration (see run), so this returns immediately.
 }
 
 void MatchScheduler::wake(const std::shared_ptr<Match>& match) {
@@ -146,9 +130,6 @@ void MatchScheduler::wake(const std::shared_ptr<Match>& match) {
 }
 
 std::size_t MatchScheduler::match_count() const {
-    // Each Worker::load, summed lock-free -- see match_count's own doc on why
-    // "for tests and diagnostics" never needed the stronger guarantee a lock
-    // on every worker would have bought it.
     std::size_t total = 0;
     for (const std::unique_ptr<Worker>& worker : workers_) {
         total += worker->load.load(std::memory_order_relaxed);
@@ -178,22 +159,14 @@ void MatchScheduler::run(Worker& worker) {
         last_tick_at = now;
         elapsed_ms = std::clamp(elapsed_ms, kMinTickAdvanceMs, kMaxTickAdvanceMs);
 
-        // Copied out under the lock, then ticked without it. A tick broadcasts,
-        // and a broadcast can come back into this scheduler (a close arrives as
-        // a disconnect, which reaps a room, which calls remove) -- holding the
-        // worker's mutex across that would deadlock against ourselves. The copy
-        // is of shared_ptrs, so a match removed mid-pass stays alive until this
-        // pass is done with it.
+        // Copied out under the lock, then ticked without it: a tick's
+        // broadcast can re-enter this scheduler (disconnect -> reap ->
+        // remove), which would deadlock if the worker's mutex were still held.
         std::vector<std::shared_ptr<Match>> due;
         {
             std::lock_guard<std::mutex> guard(worker.mutex);
             due = worker.matches;
         }
-        // The batch, not any one match's tick, is timed: that whole pass is
-        // the unit of work this worker thread actually repeats once per
-        // interval, and it is what would grow if either a single match got
-        // more expensive or this worker simply ended up holding more of them
-        // -- see Metrics::record_tick.
         auto pass_started_at = std::chrono::steady_clock::now();
         for (const std::shared_ptr<Match>& match : due) {
             match->tick(now, elapsed_ms);

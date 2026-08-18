@@ -10,11 +10,7 @@ namespace kfc::graphics {
 
 /// Draws two side panels (each kHudPanelWidthPixels wide) onto a canvas
 /// shaped [white panel][board][black panel]: white's on the left (moves on
-/// top, score at the bottom) and black's on the right (score on top, moves
-/// below) -- board_pixel_width/height describe the board region between
-/// them. Only ever reads move_log/score -- it has no idea how they got
-/// populated (Game notifying them as an Observer, once per arrival, is a
-/// completely separate concern from drawing whatever they currently hold).
+/// top, score at bottom), black's on the right (score on top, moves below).
 class HudRenderer {
 public:
     /// white_username/black_username label each panel (UI spec: "Presenting

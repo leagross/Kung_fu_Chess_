@@ -27,19 +27,11 @@ using nlohmann::json;
 
 constexpr std::string_view kHistoryPrefix = "/api/history/";
 
-// Every real body this API ever receives is a username+password pair --
-// nowhere near this. ixwebsocket's own HttpServer has no request-body-size
-// option (checked its header directly: no maxBody/ContentLength setting
-// exists), so it always reads a request's full body into memory before this
-// callback ever runs -- this check cannot stop that read, only stop a
-// grotesquely oversized body from then also being JSON-parsed and handed to
-// UserRepository. A real cap on the read itself would need a change inside
-// ixwebsocket, not here.
+// ixwebsocket's HttpServer has no request-body-size option and always reads
+// the full body before this callback runs; this only stops an oversized body
+// from being parsed and handed to UserRepository.
 constexpr std::size_t kMaxHttpBodyBytes = 64 * 1024;
 
-// The reason phrase HttpResponse::description ends up as (the "Created" in
-// "HTTP/1.1 201 Created") -- not the content type, which is set through
-// headers below. Only the codes this API actually returns need a name here.
 std::string reason_phrase(int status) {
     switch (status) {
         case 200:
@@ -73,16 +65,13 @@ ix::HttpResponsePtr json_response(int status, const json& body) {
                                               body.dump());
 }
 
-// No body, but still application/json -- there is nothing to say beyond the
-// status code (409/401), matching the Java api-gateway this replaces.
 ix::HttpResponsePtr empty_response(int status) {
     ix::WebSocketHttpHeaders headers{{"Content-Type", "application/json"}};
     return std::make_shared<ix::HttpResponse>(status, reason_phrase(status), ix::HttpErrorCode::Ok, headers,
                                               std::string());
 }
 
-// GET /metrics's own content type -- the Prometheus text exposition format
-// Metrics::render() writes is not JSON, so this cannot reuse json_response.
+// Prometheus text exposition format, not JSON.
 ix::HttpResponsePtr text_response(const std::string& body) {
     ix::WebSocketHttpHeaders headers{{"Content-Type", "text/plain; version=0.0.4"}};
     return std::make_shared<ix::HttpResponse>(200, "OK", ix::HttpErrorCode::Ok, headers, body);
@@ -92,10 +81,6 @@ json auth_body(const std::string& username, int rating, const std::string& token
     return json{{"username", username}, {"rating", rating}, {"token", token}};
 }
 
-// A body worth having for a 400: unlike "409, no body" (the username was
-// simply taken -- nothing more to say) or "401, no body" (wrong credentials
-// -- deliberately unspecific), a rejected new username/password is a client
-// bug the caller can actually fix once told which rule it broke.
 ix::HttpResponsePtr reason_response(int status, const std::string& reason) {
     return json_response(status, json{{"reason", reason}});
 }
@@ -104,27 +89,13 @@ ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, AuthTo
                                     const json& request) {
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
-    // A single call, not user_exists() followed by authenticate(): those are
-    // two separate locked operations with a window between them where two
-    // concurrent registrations of the same brand-new username could both see
-    // user_exists() == false, then both reach authenticate()'s insert -- the
-    // second hits username's PRIMARY KEY constraint and throws, uncaught,
-    // straight out of an HTTP connection thread. authenticate() is one
-    // atomic, locked lookup-or-insert (see UserRepository), so there is no
-    // window between "does it exist" and "create it" to race into.
-    // newly_registered tells "this call just created the account" apart from
-    // "the account already existed" without a second round trip -- and a
-    // password that happens to match an existing account is still a 409
-    // here, deliberately: register is not a backdoor login.
+    // authenticate() is one atomic lookup-or-insert (not user_exists() then
+    // authenticate()), avoiding a race where two concurrent registrations of
+    // the same new username both insert and one throws on the PRIMARY KEY.
     kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
     if (auth.newly_registered) {
         return json_response(201, auth_body(username, auth.rating, tokens.issue(username)));
     }
-    // Two different reasons an unregistered call can fail, told apart by
-    // auth.reason -- see UserRepository::authenticate's own doc comment.
-    // invalid_username/weak_password mean nothing was created (this
-    // username is still free); anything else (in practice, the username
-    // already existed) is the 409 this always used to return.
     if (auth.reason == "invalid_username" || auth.reason == "weak_password") {
         return reason_response(400, auth.reason);
     }
@@ -135,8 +106,6 @@ ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, AuthToken
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
     if (!users.user_exists(username)) {
-        // Checked separately from authenticate() so an unknown username is
-        // rejected rather than silently registered -- see user_exists's doc.
         return empty_response(401);
     }
     kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
@@ -146,9 +115,6 @@ ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, AuthToken
     return json_response(200, auth_body(username, auth.rating, tokens.issue(username)));
 }
 
-// "Bearer <token>", case-sensitively per RFC 6750 -- std::nullopt if the
-// header is absent or does not have that shape (no header at all, wrong
-// scheme, or nothing after it).
 std::optional<std::string> bearer_token(const ix::HttpRequestPtr& request) {
     constexpr std::string_view kPrefix = "Bearer ";
     auto it = request->headers.find("Authorization");
@@ -170,9 +136,6 @@ ix::HttpResponsePtr handle_history(kfc::database::UserRepository& users, AuthTok
         return empty_response(401);  // credentials, but not ones anyone issued
     }
     if (*owner != username) {
-        // A real account, just not this one's -- a stranger with a valid
-        // token of their own still cannot read someone else's history by
-        // guessing a username in the URL.
         return empty_response(403);
     }
 
@@ -188,14 +151,11 @@ ix::HttpResponsePtr handle_history(kfc::database::UserRepository& users, AuthTok
             {"endedAt", game.ended_at},
         });
     }
-    return json_response(200, games);  // 200 [] for an unknown username too -- not a 404.
+    return json_response(200, games);  // 200 [] for an unknown username too, not a 404.
 }
 
-// A liveness/readiness check for a load balancer or `docker compose`
-// healthcheck: not just "the process exists", but "the account store this
-// process holds a connection to is actually answering queries". The
-// placeholder username is never expected to exist; only whether the query
-// itself succeeds is being checked.
+// Liveness check: confirms the account store is actually answering queries,
+// not just that the process exists. The placeholder username never exists.
 ix::HttpResponsePtr handle_health(kfc::database::UserRepository& users) {
     try {
         (void)users.rating_of("__kfc_health_check__");
@@ -218,10 +178,7 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, RoomManager& 
         bool is_register = request->method == "POST" && request->uri == "/api/auth/register";
         bool is_login = request->method == "POST" && request->uri == "/api/auth/login";
         if (is_register || is_login) {
-            // Checked before the body is even parsed -- a flood of malformed
-            // JSON is exactly as much of an attack as a flood of well-formed
-            // guesses, and both endpoints share one IP-keyed budget so
-            // splitting an attack across the two does not double it.
+            // Checked before the body is parsed: malformed JSON floods count too.
             if (!auth_limiter.allow(remote_ip, std::chrono::steady_clock::now())) {
                 return empty_response(429);
             }
@@ -252,9 +209,7 @@ HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, Roo
       metrics_(metrics),
       logger_(logger),
       auth_limiter_(auth_limiter) {
-    // Paired with uninitNetSystem() in the destructor, exactly like
-    // WebSocketGameServer -- ix's own init/uninit are reference-counted, so
-    // two servers in one process each doing this is the normal pattern.
+    // ix's init/uninit are reference-counted; paired with uninitNetSystem() below.
     ix::initNetSystem();
     server_ = std::make_unique<ix::HttpServer>(port_, "0.0.0.0", kTcpBacklog, kMaxConnections);
 

@@ -14,11 +14,7 @@ namespace kfc::server {
 
 namespace {
 
-// A thin adapter, not a second copy of the logic: the White/Black spelling
-// itself lives in exactly one place, kfc::model::name_of (see piece_names.hpp
-// -- it used to be re-derived here and in game_session.cpp too). This exists
-// only because every call site below builds a std::string by concatenation,
-// which std::string_view (name_of's return type) doesn't support directly.
+// Adapter: name_of returns a string_view, but call sites here concatenate.
 std::string color_name(kfc::model::PieceColor color) {
     return std::string(kfc::model::name_of(color));
 }
@@ -51,9 +47,7 @@ std::optional<kfc::model::PieceColor> Match::join(const std::string& username, i
     logger_.log("Match: '" + username + "' joined as " + color_name(*assigned));
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{welcome_for(*assigned, /*spectator=*/false)}));
 
-    // Black is always the second (last) seat, so its join is the moment both
-    // players are present -- tell both clients the match can begin. White, who
-    // was "searching" since its own Welcome, transitions to play on this.
+    // Black is always the second seat, so its join is when both players are present.
     if (*assigned == kfc::model::PieceColor::Black) {
         broadcast_and_log(kfc::protocol::ServerMessage{
             kfc::protocol::MatchStart{audience_.username_of(kfc::model::PieceColor::White), username,
@@ -65,13 +59,9 @@ std::optional<kfc::model::PieceColor> Match::join(const std::string& username, i
 WatcherId Match::join_spectator(const std::string& username, SendFn send, CloseFn close) {
     logger_.log("Match: '" + username + "' is watching");
 
-    // Registered *first*, snapshotted second. The other order loses updates:
-    // a BoardUpdate broadcast between the snapshot and the registration reaches
-    // nobody, and the viewer's board stays wrong for the rest of the game.
-    //
-    // This way nothing can be missed. The cost is the opposite risk -- an
-    // update the snapshot already contains -- and that is what the revision is
-    // for: the client discards any BoardUpdate at or below Welcome::revision.
+    // Registered before snapshotting: the other order can lose a BoardUpdate
+    // broadcast in between. Welcome::revision lets the client discard any
+    // duplicate the snapshot already covers.
     bool already_started = audience_.both_seats_taken();
     WatcherId watcher = audience_.watch(send, std::move(close));
     if (watcher == 0) {
@@ -81,8 +71,6 @@ WatcherId Match::join_spectator(const std::string& username, SendFn send, CloseF
     kfc::protocol::Welcome welcome = welcome_for(kfc::model::PieceColor::White, /*spectator=*/true);
 
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{welcome}));
-    // Sent to this one connection only: everyone else was told when it actually
-    // happened.
     if (already_started) {
         send(kfc::protocol::encode(kfc::protocol::ServerMessage{
             kfc::protocol::MatchStart{welcome.white_username, welcome.black_username, welcome.white_rating,
@@ -97,10 +85,8 @@ void Match::leave_spectator(WatcherId watcher) {
 }
 
 kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spectator) const {
-    // The board as it stands *right now*, not the starting position -- someone
-    // walking in mid-game must see the game as it actually is. Snapshotted
-    // under board_mutex_ because this runs on a connection thread, against a
-    // board the tick thread may be mid-mutation of.
+    // Snapshotted under board_mutex_: this runs on a connection thread against
+    // a board the tick thread may be mid-mutation of.
     kfc::protocol::Welcome welcome{color, {}, spectator, room_name_, {}, 0};
     welcome.white_username = audience_.username_of(kfc::model::PieceColor::White);
     welcome.black_username = audience_.username_of(kfc::model::PieceColor::Black);
@@ -108,9 +94,6 @@ kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spe
     welcome.black_rating = audience_.rating_of(kfc::model::PieceColor::Black);
     std::lock_guard<std::mutex> board_guard(board_mutex_);
     welcome.board = kfc::protocol::snapshot_of(core_.board());
-    // All three read under the one lock the tick thread also holds while it
-    // changes them, so the board, the history and the revision always describe
-    // the same instant.
     welcome.history = history_;
     welcome.revision = revision_;
     return welcome;
@@ -120,10 +103,8 @@ void Match::enqueue(kfc::model::PieceColor from, kfc::protocol::ClientMessage me
     {
         std::lock_guard<std::mutex> guard(queue_mutex_);
         if (queue_.size() >= kMaxQueuedCommands) {
-            // Counted, not logged here: the whole point of the cap is that a
-            // flood costs the server a fixed amount, and a log line per dropped
-            // message would hand the denial of service straight back. The tick
-            // thread reports the total once, after it drains.
+            // Counted, not logged here: a log line per drop would itself be
+            // the denial of service. tick() reports the total once, after draining.
             ++dropped_commands_;
             return;
         }
@@ -140,9 +121,6 @@ void Match::set_wake_hook(std::function<void()> hook) {
 
 void Match::on_disconnect(kfc::model::PieceColor color) {
     logger_.log("Match: " + color_name(color) + " disconnected");
-    // Not a Resign -- the game only ends if the grace actually runs out. The
-    // watch records it here and the tick loop, which wakes at least every
-    // ~16ms, opens the countdown on its next advance().
     disconnect_watch_.report_disconnect(color);
 }
 
@@ -155,35 +133,18 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
         dropped = std::exchange(dropped_commands_, 0);
     }
     if (dropped > 0) {
-        // One line per tick at worst, however hard the queue was flooded.
         logger_.log(kfc::protocol::LogLevel::Warning,
                     "Match: dropped " + std::to_string(dropped) + " command(s) -- queue full");
     }
 
-    // All board-touching work for this tick runs under board_mutex_ so a
-    // concurrent join() snapshot (on a connection thread) never reads the
-    // board mid-mutation. Released before broadcasting below -- network
-    // I/O must not hold the board lock. Applied in the order the queue
-    // delivered them: deterministic, and the answer to "which of two
-    // near-simultaneous commands wins" is whichever arrived first.
+    // Board-touching work runs under board_mutex_ so a concurrent join()
+    // snapshot never reads the board mid-mutation; released before
+    // broadcasting since network I/O must not hold the board lock.
     //
-    // engine().wait() itself -- the part that actually costs CPU -- only runs
-    // while the match is genuinely Running. Not Frozen: a dropped player's
-    // grace period stops the game clock as well as refusing their opponent's
-    // commands (see apply); without this a piece already in flight would
-    // still arrive, and every cooldown would still expire, while one side
-    // sits at a disconnected client. Not Waiting: apply() refuses every
-    // gameplay command until both seats are filled (kMatchNotStarted), so
-    // nothing can be in flight to advance yet. Not Finished: once game_over_
-    // latches, no new command can mutate the board (see apply), so further
-    // calls buy nothing but CPU -- at the five-million-room scale
-    // Server_Design.md targets, a room sitting in a matchmaking queue or
-    // holding its post-game release delay is not rare, and ticking it exactly
-    // like a live game 60 times a second for no observable effect is the
-    // waste MatchScheduler was built to take seriously. Read once per tick,
-    // before apply() runs below -- the very tick a resign or capture decides
-    // the match, state() here still reports the state it was in when the
-    // tick began, so that decisive tick still gets its engine().wait() call.
+    // engine().wait() only runs while Running (not Waiting, not Frozen, not
+    // Finished), to avoid ticking idle/finished rooms at full rate. Read
+    // once before apply() so the tick that decides the match still gets its
+    // engine().wait() call.
     bool should_advance = state() == MatchState::Running;
 
     kfc::model::ArrivalEvents events;
@@ -196,13 +157,8 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
 
         if (should_advance) {
             events = core_.engine().wait(elapsed_ms);
-            // Kept so a client joining or returning mid-game can rebuild the
-            // move list and score it never saw -- see welcome_for.
             history_.insert(history_.end(), events.begin(), events.end());
             if (!events.empty()) {
-                // Bumped here, under the same lock as the board change, so
-                // a snapshot taken concurrently can never report a revision
-                // that disagrees with the position it contains.
                 ++revision_;
             }
         }
@@ -216,8 +172,6 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
             game_over.on_arrival(event);
         }
         if (game_over.is_game_over()) {
-            // Latch it so any command still in flight after the king fell
-            // is dropped by apply() rather than mutating a decided board.
             game_over_ = true;
             std::optional<kfc::model::PieceColor> winner =
                 game_over.is_draw() ? std::nullopt : game_over.winner();
@@ -226,10 +180,8 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
         }
     }
 
-    // A resign ends the game without any arrival to ride along with, so its
-    // GameOver is broadcast here, after board_mutex_ is released (network
-    // I/O must not hold the board lock -- see above). A deliberate resign is
-    // a decisive loss, so it feeds normal ELO (unlike a disconnect forfeit).
+    // A resign has no arrival to ride along with, so its GameOver is
+    // broadcast here, after board_mutex_ is released.
     if (pending_game_over_.has_value()) {
         broadcast_and_log(kfc::protocol::ServerMessage{*pending_game_over_});
         report_result(GameEndReason::Decisive, pending_game_over_->winner);
@@ -238,13 +190,9 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
 
     advance_disconnect_countdown(now);
 
-    // The match is decided -- by a capture, a resign, or a disconnect whose
-    // grace ran out. Nobody is still playing here, so after a short grace
-    // (so the GameOver just broadcast is seen first) everyone is let go.
-    // Without this the survivor of a forfeit stays seated in a finished
-    // game indefinitely, still sending moves at a board that will never
-    // answer, and the room can never be reaped because a live connection
-    // remains in it.
+    // Everyone is let go a short grace after the match is decided (so the
+    // just-broadcast GameOver is seen first); otherwise the survivor of a
+    // forfeit stays seated forever and the room can never be reaped.
     if (game_over_ && !release_at_.has_value()) {
         release_at_ = now + std::chrono::milliseconds(release_delay_ms_);
     }
@@ -256,17 +204,12 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
 void Match::release_participants() {
     released_ = true;
     logger_.log("Match: releasing everyone -- the match is over");
-    // Closing a socket is network I/O, and each close comes back to this same
-    // Match as an ordinary disconnect (which is what actually reaps the room).
-    // That callback is delivered on the connection's own thread, never
-    // synchronously on this one, so the reaping path's stop() never tries to
-    // join the tick thread from inside itself.
+    // Each close comes back as an ordinary disconnect, delivered on the
+    // connection's own thread, which is what actually reaps the room.
     audience_.release_all();
 }
 
 void Match::advance_disconnect_countdown(std::chrono::steady_clock::time_point now) {
-    // If the game already ended some other way (a capture during the grace, a
-    // resign), stop counting anyone down and do nothing more.
     if (game_over_) {
         disconnect_watch_.clear();
         return;
@@ -275,7 +218,6 @@ void Match::advance_disconnect_countdown(std::chrono::steady_clock::time_point n
     DisconnectWatch::Tick tick = disconnect_watch_.advance(now);
 
     if (tick.expired_for.has_value()) {
-        // Grace ran out -> forfeit the match for the player who never came back.
         kfc::model::PieceColor loser = *tick.expired_for;
         kfc::model::PieceColor winner = kfc::model::opposite_of(loser);
         game_over_ = true;
@@ -285,8 +227,6 @@ void Match::advance_disconnect_countdown(std::chrono::steady_clock::time_point n
         return;
     }
 
-    // Set only when the displayed number actually changed, so this goes out
-    // once a second rather than every tick.
     if (tick.seconds_remaining.has_value()) {
         broadcast_and_log(
             kfc::protocol::ServerMessage{kfc::protocol::OpponentDisconnected{*tick.seconds_remaining}});
@@ -294,8 +234,7 @@ void Match::advance_disconnect_countdown(std::chrono::steady_clock::time_point n
 }
 
 MatchState Match::state() const {
-    // Ordered by precedence: a decided match is Finished whatever else is true,
-    // and a frozen one is Frozen even though both seats are still filled.
+    // Ordered by precedence: Finished beats Frozen beats Waiting.
     if (game_over_) {
         return MatchState::Finished;
     }
@@ -313,17 +252,12 @@ bool Match::is_over() const {
 }
 
 std::optional<kfc::model::PieceColor> Match::reclaimable_seat_for(const std::string& username) const {
-    // Nothing to reclaim unless a countdown is actually running -- a player who
-    // is still connected, or one whose grace already expired, owns no seat a
-    // newcomer could step into.
     std::optional<kfc::model::PieceColor> counting_down = disconnect_watch_.watching();
     if (!counting_down.has_value() || game_over_) {
         return std::nullopt;
     }
 
-    // ...and only for the very person who dropped. Anyone else arriving during
-    // the countdown is just another joiner (i.e. a spectator), never a
-    // substitute for the player whose game this is.
+    // Only for the person who actually dropped; anyone else is a spectator.
     if (audience_.username_of(*counting_down) != username) {
         return std::nullopt;
     }
@@ -331,11 +265,8 @@ std::optional<kfc::model::PieceColor> Match::reclaimable_seat_for(const std::str
 }
 
 bool Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) {
-    // Cancel the countdown first: until this lands, the tick thread is still one
-    // tick away from forfeiting this very seat. cancel() returning false means
-    // it already did -- this player is too late, and there is nothing to return
-    // to. Reported rather than swallowed, so the caller can undo its own
-    // bookkeeping (see RoomManager::join_room).
+    // cancel() returning false means the grace already expired; caller must
+    // undo its own bookkeeping (see RoomManager::join_room).
     if (game_over_ || !disconnect_watch_.cancel(color)) {
         logger_.log("Match: " + color_name(color) + " tried to return, but the grace had already expired");
         return false;
@@ -343,14 +274,8 @@ bool Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) 
 
     logger_.log("Match: " + color_name(color) + " reconnected");
 
-    // Reseated *before* the snapshot, for the same reason join_spectator is --
-    // an update broadcast in between would otherwise reach neither the dead
-    // connection nor the new one, and the returning player would resume from a
-    // position that never existed. Welcome::revision lets them discard the
-    // updates the snapshot already covers.
-    //
-    // It also has to happen before any broadcast, so the OpponentReconnected
-    // below reaches the returning player too.
+    // Reseated before the snapshot (same reason as join_spectator) and before
+    // any broadcast, so OpponentReconnected below reaches the returning player too.
     audience_.reseat(color, send, std::move(close));
 
     kfc::protocol::Welcome welcome = welcome_for(color, /*spectator=*/false);
@@ -366,42 +291,29 @@ bool Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) 
 
 bool Match::owns_piece_at(kfc::model::PieceColor from, const kfc::model::Position& cell) const {
     std::optional<kfc::model::Piece> piece = core_.board().piece_at(cell);
-    // An empty/wrong cell is not an ownership violation -- GameEngine's own
-    // "empty_source"/illegal-move rejection already covers that case with a
-    // more specific reason; this check only ever fires kNotYourPiece for a
-    // cell that does hold a piece, just not one belonging to `from`.
+    // Empty cell is not an ownership violation; GameEngine's own
+    // empty_source rejection already covers that case.
     return !piece.has_value() || piece->color == from;
 }
 
 void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessage& message) {
     MatchState current = state();
 
-    // Already decided (a king fell, or someone resigned/dropped): every later
-    // command is a no-op. Nothing is sent back -- there is no board left to act
-    // on and the result was already broadcast.
     if (current == MatchState::Finished) {
         return;
     }
 
-    // Nobody to play against yet, so no gameplay command means anything --
-    // including a resign: there is no opponent to award the win to, and the
-    // result hook would be handed an empty username. Checked before the resign
-    // below, not after. Without this gate the first player to be seated could
-    // also move their pieces around while waiting to be matched, and their
-    // opponent would walk into a game already in progress.
+    // Checked before Resign below: with nobody to play against, there is no
+    // opponent to award a resign's win to, and the first-seated player could
+    // otherwise move pieces while still waiting to be matched.
     if (current == MatchState::Waiting) {
         send_to_and_log(from, kfc::protocol::ServerMessage{
                                   kfc::protocol::MoveRejected{kfc::model::move_reasons::kMatchNotStarted}});
         return;
     }
 
-    // A resign (also how a disconnect arrives -- see on_disconnect) ends the
-    // game in the opponent's favour. It touches no board state, so it just
-    // latches the outcome; tick_loop broadcasts the GameOver once board_mutex_
-    // is released.
-    //
-    // Deliberately above the Frozen gate: giving up must stay possible while an
-    // opponent's grace counts down. Everything else is refused there.
+    // Deliberately above the Frozen gate: giving up must stay possible while
+    // an opponent's grace counts down.
     if (std::holds_alternative<kfc::protocol::Resign>(message)) {
         kfc::model::PieceColor winner = kfc::model::opposite_of(from);
         logger_.log("Match: " + color_name(from) + " resigned; " + color_name(winner) + " wins");
@@ -410,22 +322,14 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
         return;
     }
 
-    // A dropped player's grace period freezes the game -- see tick_loop, which
-    // also stops the clock. Their opponent must not get to play on against
-    // someone who cannot answer: twenty unopposed seconds is enough to walk a
-    // piece up and take an undefended king, which would make the grace (and the
-    // reconnect it exists for) worthless. Rejected rather than dropped, so the
-    // client learns why instead of watching its click do nothing.
+    // Rejected rather than silently dropped so the client learns why.
     if (current == MatchState::Frozen) {
         send_to_and_log(from, kfc::protocol::ServerMessage{
                                   kfc::protocol::MoveRejected{kfc::model::move_reasons::kOpponentDisconnected}});
         return;
     }
 
-    // Captured before request_move/request_jump, but valid to read after
-    // too -- Board only changes on arrival (see Motion's own doc comment),
-    // so the piece is still sitting at this same cell either way. Used
-    // only to look up the just-started Motion for MotionStarted below.
+    // Used to look up the just-started Motion for MotionStarted below.
     std::optional<kfc::model::PieceId> piece_id;
 
     kfc::model::MoveResult result = std::visit(
@@ -448,9 +352,6 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
                 }
                 return core_.engine().request_jump(m.cell);
             } else {
-                // Login after the match is already joined is a no-op here --
-                // join() is where a connection's first Login is handled,
-                // before it ever reaches the queue.
                 return kfc::model::MoveResult{true, "ok"};
             }
         },
@@ -461,11 +362,8 @@ void Match::apply(kfc::model::PieceColor from, const kfc::protocol::ClientMessag
         return;
     }
 
-    // Broadcast the Motion RealTimeArbiter just started so both clients can
-    // animate it locally (see MotionStarted's own doc comment) -- neither
-    // GameEngine::request_move nor request_jump hands the Motion back
-    // directly, so it's read back out of the arbiter by the id captured
-    // above.
+    // request_move/request_jump don't hand the Motion back directly, so it's
+    // read back out of the arbiter by the id captured above.
     if (piece_id.has_value()) {
         if (std::optional<kfc::model::Motion> motion = core_.arbiter().motion_for(*piece_id); motion.has_value()) {
             broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::MotionStarted{*motion}});
@@ -484,10 +382,7 @@ void Match::report_result(GameEndReason reason, std::optional<kfc::model::PieceC
 
 void Match::broadcast_and_log(const kfc::protocol::ServerMessage& message) {
     std::string encoded = kfc::protocol::encode(message);
-    // Debug: this is the message-by-message traffic, several a second per room.
-    // Guarded so that concatenating the whole encoded message onto a prefix --
-    // a second copy of it, per broadcast -- is skipped too when it is off, not
-    // just the write.
+    // Guarded so the concatenation itself is skipped when debug logging is off.
     if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
         logger_.log(kfc::protocol::LogLevel::Debug, "Match: broadcasting " + encoded);
     }

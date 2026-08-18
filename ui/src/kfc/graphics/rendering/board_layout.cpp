@@ -19,11 +19,8 @@ constexpr int kBoardBackgroundMarginPixels = 50;
 }  // namespace
 
 BoardLayout compute_board_layout(int board_pixel_width, int board_pixel_height) {
-    // Scale the whole board.png (frame included) up just enough that its
-    // inner grid -- not the full image -- comes out to exactly
-    // board_pixel_width x board_pixel_height, the size every existing piece
-    // of coordinate math (cell_top_left, BoardMapper) already assumes for
-    // the playable area.
+    // Scale board.png so its inner grid (not the full image) comes out to
+    // exactly board_pixel_width x board_pixel_height.
     double board_scale_x = static_cast<double>(board_pixel_width) / kBoardSourceGridWidth;
     double board_scale_y = static_cast<double>(board_pixel_height) / kBoardSourceGridHeight;
 
@@ -33,9 +30,8 @@ BoardLayout compute_board_layout(int board_pixel_width, int board_pixel_height) 
     layout.framed_board_inset_x = static_cast<int>(std::lround(kBoardSourceGridInsetLeft * board_scale_x));
     layout.framed_board_inset_y = static_cast<int>(std::lround(kBoardSourceGridInsetTop * board_scale_y));
 
-    // [white panel][background + framed board, centered][black panel] --
-    // the background fills the *entire* canvas (panels included), not just
-    // the board's own column.
+    // Background fills the entire canvas (panels included), not just the
+    // board's own column.
     layout.board_column_width = layout.framed_board_width + 2 * kBoardBackgroundMarginPixels;
     layout.board_column_height = layout.framed_board_height + 2 * kBoardBackgroundMarginPixels;
     layout.board_offset_x = kHudPanelWidthPixels;

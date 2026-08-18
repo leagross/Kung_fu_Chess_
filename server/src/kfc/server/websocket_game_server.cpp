@@ -38,39 +38,26 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
             return;
         }
 
-        // Off by default in IXWebSocket -- turned on here so a connection
-        // that sends nothing at all (never logs in, or hangs mid-handshake
-        // from the client's side) is eventually closed instead of held open
-        // forever. This is independent of ClientSession's own message-rate
-        // limit, which bounds a connection sending *too much*, not too little.
+        // Off by default in IXWebSocket; ensures a connection that sends
+        // nothing (never logs in, hangs mid-handshake) is eventually closed.
         socket->setPingInterval(kIdlePingIntervalSecs);
 
-        // Everything a connection does lives in its ClientSession; all this
-        // callback owns is the socket underneath it. The session is reached
-        // only through these two lambdas, which is what keeps IXWebSocket out
-        // of it entirely -- see ClientSession.
-        //
-        // weak, not shared: the send may be called long after this connection
-        // went away (a room broadcasting to a player who has since dropped),
-        // and a strong reference here would keep the dead socket alive for as
-        // long as the room held the callback.
+        // weak, not shared: send may be called long after this connection
+        // went away (a room broadcasting to a dropped player), and a strong
+        // reference would keep the dead socket alive.
         auto send = [weak_socket](const std::string& text) {
             if (auto live = weak_socket.lock()) {
                 live->send(text);
             }
         };
-        // How a room lets this player go once its game is decided (see
-        // Match::release_players). The close comes back through the Close
-        // branch below as an ordinary disconnect, which is what reaps the
-        // finished room.
+        // The close comes back through the Close branch below as an
+        // ordinary disconnect, reaping the finished room.
         auto close_connection = [weak_socket]() {
             if (auto live = weak_socket.lock()) {
                 live->close();
             }
         };
 
-        // shared_ptr so it outlives each callback invocation; captured by the
-        // message callback, which IXWebSocket holds for the connection's life.
         auto session = std::make_shared<ClientSession>(connection_state->getId(), send, close_connection, rooms_,
                                                        users_, sessions_, logger_, metrics_, auth_limiter_,
                                                        connection_state->getRemoteIp(), seat_limiter_);

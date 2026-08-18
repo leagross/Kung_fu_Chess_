@@ -10,14 +10,11 @@
 
 namespace kfc::model {
 
-/// The public command boundary for the common route plus the jump-in-place
-/// extension -- the only entry point Controller and TextTestRunner use to
-/// request a move, a jump, or to advance time. Coordinates Board,
-/// RuleEngine, RealTimeArbiter, and MotionFactory; contains no
-/// piece-specific movement logic, rendering code, input parsing, or DSL
-/// parsing of its own. Implements IMoveRequester so a networked client's
-/// Controller can be driven by something else entirely (see ServerLink)
-/// without GameEngine itself changing.
+/// The public command boundary for moves and jumps -- the only entry point
+/// Controller and TextTestRunner use. Coordinates Board, RuleEngine,
+/// RealTimeArbiter, and MotionFactory; no piece-specific movement logic of
+/// its own. Implements IMoveRequester so a networked client can be driven
+/// by something else entirely without GameEngine itself changing.
 class GameEngine : public IMoveRequester {
 public:
     /// All four dependencies must outlive this GameEngine. real_time_arbiter
@@ -25,27 +22,17 @@ public:
     GameEngine(const Board& board, const RuleEngine& rule_engine, RealTimeArbiter& real_time_arbiter,
                const MotionFactory& motion_factory);
 
-    /// Requests a move from source to destination. Rejects with "game_over"
-    /// if the game has already ended, or "motion_in_progress" if the piece
-    /// at source already has a motion in flight or is in cooldown --
-    /// unrelated pieces may move or jump at the same time. Otherwise
-    /// delegates rule-level legality to RuleEngine and, if legal, starts an
-    /// ordinary move via MotionFactory/RealTimeArbiter.
+    /// Rejects with "game_over" or "motion_in_progress" (per piece);
+    /// otherwise delegates legality to RuleEngine and starts the move.
     MoveResult request_move(const Position& source, const Position& destination) override;
 
-    /// Requests a jump-in-place for the piece at cell. Rejects with
-    /// "game_over" or "motion_in_progress" under the same conditions as
-    /// request_move, and "empty_source" if cell holds no piece. Bypasses
-    /// RuleEngine entirely -- a jump is not a chess move, it is a distinct
-    /// defensive action with its own timing (see MotionFactory).
+    /// Bypasses RuleEngine entirely -- a jump is not a chess move, it has
+    /// its own timing (see MotionFactory).
     MoveResult request_jump(const Position& cell) override;
 
-    /// Advances simulated time by ms, delegating entirely to
-    /// RealTimeArbiter. If any arrival captured a king, marks the game over.
-    /// Never touches Board directly. Returns whatever arrivals happened, so
-    /// a caller (Game) can forward them to observers -- GameEngine itself
-    /// never touches an observer list; that would mix "what a move is
-    /// allowed to do" with "who cares once it happens".
+    /// Advances simulated time by ms via RealTimeArbiter; marks game over
+    /// if any arrival captured a king. Returns arrivals for the caller to
+    /// forward to observers -- this class never touches an observer list.
     ArrivalEvents wait(int ms);
 
     /// True once a king has been captured. Once true, request_move and

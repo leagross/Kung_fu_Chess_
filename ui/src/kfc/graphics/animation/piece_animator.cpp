@@ -30,20 +30,13 @@ void PieceAnimator::advance(int ms, const kfc::model::Position& board_cell,
     }
 
     if (had_motion && (current_state_ == PieceStateName::Move || current_state_ == PieceStateName::Jump)) {
-        // The Motion that was in flight last tick is gone this tick -- it
-        // arrived. Move on to whichever state that clip's own config names,
-        // regardless of the backend's cooldown timing (StandardCooldownPolicy
-        // is currently 0ms -- there may be no "busy but no Motion" tick to
-        // catch at all, so detecting the Motion's disappearance directly,
-        // not polling is_piece_busy, is what makes this transition reliable
-        // no matter how short that cooldown is).
+        // Motion in flight last tick, gone this tick: it arrived. Detected
+        // directly rather than via is_piece_busy since a very short cooldown
+        // can make "busy but no Motion" too narrow a window to catch.
         transition_to(animation_set_.clip(current_state_).next_state_when_finished);
         return;
     }
 
-    // A non-looping clip (a rest state) that has played out its own natural
-    // duration moves on to its own next_state_when_finished -- a looping
-    // clip (idle) never triggers this on its own.
     if (current_state_ != PieceStateName::Idle) {
         const AnimationClip& clip = animation_set_.clip(current_state_);
         int natural_duration_ms = clip.frame_count * 1000 / clip.frames_per_sec;
@@ -68,10 +61,7 @@ int PieceAnimator::current_frame_index() const {
 }
 
 namespace {
-/// Ease-in-out: slow start, fast middle, slow finish -- reads as a natural
-/// glide instead of linear motion's constant-speed, faintly mechanical
-/// feel. A plain smoothstep (3t^2 - 2t^3), symmetric around t=0.5 and with
-/// zero velocity at both endpoints.
+/// Smoothstep (3t^2 - 2t^3): slow start/finish, fast middle.
 double ease_in_out(double t) {
     return t * t * (3.0 - 2.0 * t);
 }

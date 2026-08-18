@@ -34,8 +34,6 @@ SessionRegistry::Lease& SessionRegistry::Lease::operator=(Lease&& other) noexcep
 
 std::optional<SessionRegistry::Lease> SessionRegistry::claim(const std::string& username) {
     std::lock_guard<std::mutex> guard(mutex_);
-    // One locked test-and-insert: two connections logging in as the same name at
-    // the same instant would both pass a separate "is it free?" check.
     auto [it, inserted] = live_.insert(username);
     if (!inserted) {
         return std::nullopt;

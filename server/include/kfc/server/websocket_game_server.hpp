@@ -23,75 +23,36 @@ class SessionRegistry;
 class Metrics;
 class RateLimiter;
 
-/// How often an idle connection is pinged, in seconds. IXWebSocket closes a
-/// connection with "Ping timeout" if a pong does not come back before the
-/// *next* interval elapses (see IXWebSocketTransport::poll), so this bounds
-/// an unresponsive or never-logged-in connection to roughly twice its value
-/// before it is dropped -- a real client answers a ping automatically (it
-/// costs no application traffic), so a connected player thinking about a
-/// move is never affected by it, only a genuinely dead connection is.
+/// Seconds between pings to an idle connection. IXWebSocket closes a
+/// connection that misses a pong before the next interval, so this bounds a
+/// dead connection to roughly twice its value; a real client answers pings
+/// automatically and is unaffected.
 ///
-/// Kept low rather than generous for a second reason found while debugging
-/// an intermittent slow shutdown: IXWebSocketTransport::poll() computes how
-/// long to block on the socket from _pingIntervalSecs even while a
-/// connection is CLOSING (its own 300 ms close-handshake timeout is meant to
-/// bound that, but the ping-interval wait is computed after it and
-/// overwrites it) -- so a connection mid-close-handshake during server
-/// shutdown can block for up to one full ping interval before that thread is
-/// noticed as terminated, and WebSocketServer::stop() cannot return until
-/// every connection thread is. That is a real bound in the vendored
-/// ixwebsocket library, not something fixable from here; lowering this
-/// value is what keeps the resulting worst-case shutdown stall to a few
-/// seconds instead of up to thirty.
+/// Kept low also because IXWebSocketTransport::poll() blocks for up to a
+/// full ping interval on a connection mid-close-handshake during shutdown,
+/// overriding its own shorter close timeout -- a vendored library bound, not
+/// fixable here, so a lower value keeps worst-case shutdown to a few seconds.
 inline constexpr int kIdlePingIntervalSecs = 5;
 
-/// Passed straight through to the underlying ix::SocketServer (this class
-/// and HttpApiServer both construct one). ixwebsocket's own defaults --
-/// backlog 5, maxConnections 128 -- are sized for a demo, not
-/// Server_Design.md's stated target: found by Roadmap.md's stage-3 load
-/// test, whose k6 run stopped scaling at ~128 concurrent connections with
-/// "reached max connections = 128. Not accepting connection" filling
-/// kfc_server.log, nowhere near CPU- or memory-bound. backlog is the OS-level
-/// TCP SYN queue depth (how many pending handshakes can queue before the
-/// kernel starts refusing new ones outright, invisible to this process
-/// entirely) -- 1024 is generous for a single machine without being the kind
-/// of number that needs its own justification. maxConnections is
-/// ixwebsocket's own accepted-but-not-yet-handed-off cap; 100,000 is nowhere
-/// near Server_Design.md's five-million-game target, but getting there is a
-/// multi-machine question (Roadmap.md's stage 2), not a single constant this
-/// process could raise its way out of.
+/// ixwebsocket's own defaults (backlog 5, maxConnections 128) are sized for
+/// a demo; a k6 load test stopped scaling at ~128 concurrent connections
+/// nowhere near CPU/memory-bound. backlog is the OS TCP SYN queue depth;
+/// maxConnections is ixwebsocket's accepted-but-not-yet-handed-off cap.
 inline constexpr int kTcpBacklog = 1024;
 inline constexpr std::size_t kMaxConnections = 100000;
 
-/// Owns the WebSocket transport for one kfc_server: the IXWebSocket network
-/// system's lifetime, the server socket itself, and all per-connection
-/// handling -- logging opens/closes, turning the first Login into a room+colour
-/// via RoomManager::join_any, routing each decoded Move/Jump/Resign to that
-/// room via RoomManager::enqueue, and reporting a drop via
-/// RoomManager::on_disconnect. It knows only *how* players talk to the server;
-/// it never touches game rules, the board, ownership, timing, or which game a
-/// player belongs to -- routing lives in RoomManager, rules in Match. This is
-/// the CTD SERVER split:
-///   WebSocketGameServer -- how you connect
-///   kfc::protocol       -- what language you speak
-///   RoomManager / Match -- which game you're in / what the game does
+/// Owns the WebSocket transport for one kfc_server: connection lifecycle,
+/// turning the first Login into a room+colour via RoomManager::join_any,
+/// routing decoded messages via RoomManager::enqueue, and reporting drops
+/// via RoomManager::on_disconnect. Knows only how players talk to the
+/// server; game rules and routing live in Match/RoomManager.
 ///
-/// On Login it authenticates the username+password against users (registering
-/// a first-seen username, rejecting a wrong password) before the connection is
-/// ever placed in a room -- so which credentials are valid is decided here,
-/// while what those credentials *are* lives in UserRepository.
+/// Authenticates username+password against users before the connection is
+/// placed in a room.
 class WebSocketGameServer {
 public:
-    /// rooms, users, sessions and logger must outlive this server. metrics
-    /// and auth_limiter are both null by default (see ClientSession's own
-    /// doc comment for why every existing caller can leave them that way);
-    /// handed to each connection's ClientSession unchanged, along with that
-    /// connection's own remote IP (auth_limiter's key -- see
-    /// ClientSession::handle_login). Brings up the network system and wires
-    /// the connection handler, but does not bind the port -- call listen()
-    /// for that.
-    /// seat_limiter is passed straight through to every connection's
-    /// ClientSession unchanged -- see that class's own doc comment.
+    /// rooms, users, sessions and logger must outlive this server. Does not
+    /// bind the port -- call listen() for that.
     WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
                         SessionRegistry& sessions, kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr,
                         RateLimiter* auth_limiter = nullptr, RateLimiter* seat_limiter = nullptr);
@@ -100,15 +61,11 @@ public:
     WebSocketGameServer(const WebSocketGameServer&) = delete;
     WebSocketGameServer& operator=(const WebSocketGameServer&) = delete;
 
-    /// Binds the port. Returns false (after logging the reason) if it can't be
-    /// listened on.
+    /// Returns false (after logging the reason) if the port can't be listened on.
     [[nodiscard]] bool listen();
-    /// Begins accepting connections on IXWebSocket's own background thread
-    /// (non-blocking).
+    /// Non-blocking: accepts connections on IXWebSocket's own background thread.
     void start();
-    /// Blocks until the server is stopped.
     void wait();
-    /// Stops accepting connections and closes the server socket.
     void stop();
 
 private:

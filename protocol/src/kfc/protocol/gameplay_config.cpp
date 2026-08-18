@@ -39,11 +39,7 @@ GameplayConfig load_gameplay_config(const std::string& path) {
         throw std::runtime_error("Malformed gameplay config " + path + ": " + e.what());
     }
 
-    // Every field is optional: anything absent keeps the struct default, so a
-    // partial file is valid and behaves like the old hardcoded values. Each
-    // one is looked up once, with find rather than contains-then-at: the pair
-    // searched the object twice for every field that was actually present,
-    // which is the common case.
+    // Every field is optional: anything absent keeps the struct default.
     GameplayConfig config;
 
     if (auto meters = json.find("meters_per_cell"); meters != json.end()) {

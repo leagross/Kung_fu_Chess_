@@ -54,7 +54,8 @@ std::optional<kfc::model::PieceColor> Match::join(const std::string& username, S
     // players are present -- tell both clients the match can begin. White, who
     // was "searching" since its own Welcome, transitions to play on this.
     if (*assigned == kfc::model::PieceColor::Black) {
-        broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{}});
+        broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{
+            audience_.username_of(kfc::model::PieceColor::White), username}});
     }
     return assigned;
 }
@@ -81,7 +82,8 @@ WatcherId Match::join_spectator(const std::string& username, SendFn send, CloseF
     // Sent to this one connection only: everyone else was told when it actually
     // happened.
     if (already_started) {
-        send(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{}}));
+        send(kfc::protocol::encode(kfc::protocol::ServerMessage{
+            kfc::protocol::MatchStart{welcome.white_username, welcome.black_username}}));
     }
     return watcher;
 }
@@ -97,6 +99,8 @@ kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spe
     // under board_mutex_ because this runs on a connection thread, against a
     // board the tick thread may be mid-mutation of.
     kfc::protocol::Welcome welcome{color, {}, spectator, room_name_, {}, 0};
+    welcome.white_username = audience_.username_of(kfc::model::PieceColor::White);
+    welcome.black_username = audience_.username_of(kfc::model::PieceColor::Black);
     std::lock_guard<std::mutex> board_guard(board_mutex_);
     welcome.board = kfc::protocol::snapshot_of(core_.board());
     // All three read under the one lock the tick thread also holds while it
@@ -347,7 +351,8 @@ bool Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) 
     kfc::protocol::Welcome welcome = welcome_for(color, /*spectator=*/false);
 
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{welcome}));
-    send(kfc::protocol::encode(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{}}));
+    send(kfc::protocol::encode(kfc::protocol::ServerMessage{
+        kfc::protocol::MatchStart{welcome.white_username, welcome.black_username}}));
     // Clears the countdown banner the opponent has been staring at.
     broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::OpponentReconnected{}});
     return true;

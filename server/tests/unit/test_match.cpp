@@ -228,6 +228,51 @@ TEST(MatchJoinTest, MatchStartIsSentToBothOnlyWhenTheSecondPlayerJoins) {
     match.stop();
 }
 
+// A returning std::optional<T> would read more naturally here, but
+// RecordingSink only ever exposes wait_for(predicate) -- see its own
+// comment on why matching the exact field values inline, the same way
+// every other assertion in this suite already does, is simplest.
+TEST(MatchJoinTest, WelcomeAndMatchStartCarryBothPlayersUsernames) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_join_usernames_test.log");
+    ScheduledMatch match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+
+    // White's own Welcome cannot know Black's name yet -- Black hasn't
+    // joined -- but it must already carry White's own.
+    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    EXPECT_TRUE(white_sink.wait_for(500, [](const ServerMessage& m) {
+        if (!std::holds_alternative<Welcome>(m)) {
+            return false;
+        }
+        const Welcome& welcome = std::get<Welcome>(m);
+        return welcome.white_username == "alice" && welcome.black_username.empty();
+    }));
+
+    // Black's own Welcome already has both, seated after alice.
+    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    EXPECT_TRUE(black_sink.wait_for(500, [](const ServerMessage& m) {
+        if (!std::holds_alternative<Welcome>(m)) {
+            return false;
+        }
+        const Welcome& welcome = std::get<Welcome>(m);
+        return welcome.white_username == "alice" && welcome.black_username == "bob";
+    }));
+
+    // MatchStart is White's only way to ever learn Black's name.
+    EXPECT_TRUE(white_sink.wait_for(500, [](const ServerMessage& m) {
+        if (!std::holds_alternative<MatchStart>(m)) {
+            return false;
+        }
+        const MatchStart& start = std::get<MatchStart>(m);
+        return start.white_username == "alice" && start.black_username == "bob";
+    }));
+
+    match.stop();
+}
+
 TEST(MatchResignTest, ResignAwardsTheWinToTheOpponentAndTellsBothPlayers) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_resign_test.log");
     ScheduledMatch match(make_two_pawn_board(), logger);

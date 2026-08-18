@@ -171,6 +171,8 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
         room_name_ = welcome.room;
         history_ = welcome.history;
         revision_ = welcome.revision;
+        white_username_ = welcome.white_username;
+        black_username_ = welcome.black_username;
 
         kfc::model::Board board(welcome.board.width, welcome.board.height);
         for (const kfc::model::Piece& piece : welcome.board.pieces) {
@@ -268,6 +270,12 @@ void ServerLink::wait(int ms) {
                     // Publish GameStarted now (not on mere connection) so the
                     // intro splash and start sound land at the true start.
                     match_started_ = true;
+                    // White's own Welcome couldn't have named Black yet (Black
+                    // hadn't joined) -- this is where White finally learns it.
+                    // A no-op overwrite for Black, whose Welcome already had
+                    // both.
+                    white_username_ = m.white_username;
+                    black_username_ = m.black_username;
                     events_.publish(kfc::events::GameStarted{});
                 } else if constexpr (std::is_same_v<T, kfc::protocol::GameOver>) {
                     // The server declares game-over for every ending (king

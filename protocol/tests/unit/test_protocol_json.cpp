@@ -123,6 +123,46 @@ TEST(ProtocolJsonTest, WelcomeRoundTripsAssignedColorAndBoard) {
     ASSERT_EQ(welcome.board.pieces.size(), 2u);
 }
 
+TEST(ProtocolJsonTest, WelcomeRoundTripsBothPlayersUsernames) {
+    Board board(1, 1);
+    Welcome welcome{PieceColor::White, snapshot_of(board)};
+    welcome.white_username = "alice";
+    welcome.black_username = "bob";
+
+    std::optional<ServerMessage> decoded = decode_server_message(encode(ServerMessage{welcome}));
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<Welcome>(*decoded));
+    EXPECT_EQ(std::get<Welcome>(*decoded).white_username, "alice");
+    EXPECT_EQ(std::get<Welcome>(*decoded).black_username, "bob");
+}
+
+TEST(ProtocolJsonTest, WelcomeWithoutUsernamesOnTheWireDecodesToEmptyOnes) {
+    // A Welcome from before these fields existed, or any hand-written one --
+    // see decode_server_message's own doc comment on why this must not
+    // throw or reject.
+    std::string raw = R"({"type":"Welcome","payload":{"assigned_color":"White",)"
+                       R"("board":{"width":1,"height":1,"pieces":[]}}})";
+
+    std::optional<ServerMessage> decoded = decode_server_message(raw);
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<Welcome>(*decoded));
+    EXPECT_TRUE(std::get<Welcome>(*decoded).white_username.empty());
+    EXPECT_TRUE(std::get<Welcome>(*decoded).black_username.empty());
+}
+
+TEST(ProtocolJsonTest, MatchStartRoundTripsBothPlayersUsernames) {
+    ServerMessage message = MatchStart{"alice", "bob"};
+
+    std::optional<ServerMessage> decoded = decode_server_message(encode(message));
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<MatchStart>(*decoded));
+    EXPECT_EQ(std::get<MatchStart>(*decoded).white_username, "alice");
+    EXPECT_EQ(std::get<MatchStart>(*decoded).black_username, "bob");
+}
+
 TEST(ProtocolJsonTest, SnapshotOfCapturesEveryOccupiedCellExactly) {
     Board board(2, 2);
     board.add_piece(make_piece(7, PieceColor::White, PieceKind::Queen, Position{0, 1}));

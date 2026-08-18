@@ -59,6 +59,14 @@ struct Welcome {
     /// never miss an update; the cost is that it may receive one the snapshot
     /// already contains, and the revision is how it tells.
     std::uint64_t revision = 0;
+    /// Both seats' usernames, for the client to show whose game this is --
+    /// the UI spec's "Presenting player names". Empty until that seat is
+    /// actually filled (a spectator arriving between the first and second
+    /// player sees black_username still empty). Optional on the wire (see
+    /// decode_server_message) so an older client/server pair, or a
+    /// hand-written Welcome, still decodes -- just without names to show.
+    std::string white_username;
+    std::string black_username;
 };
 
 // --- Client -> Server ---
@@ -178,7 +186,16 @@ struct OpponentDisconnected {
 /// on Welcome (seated, board known) but "searching" until this arrives; the
 /// second player gets Welcome and this together. Lets the Play flow tell
 /// "seated, waiting for an opponent" apart from "matched, game on".
-struct MatchStart {};
+/// Both players' usernames again, alongside the "both present" signal itself
+/// -- the one player still needs to hear this, since White's own Welcome (the
+/// only other carrier of these) was sent before Black existed to name. Black's
+/// Welcome already had both, so this is redundant for Black, but broadcast is
+/// one message to both seats, not two different ones -- see
+/// Match::broadcast_and_log.
+struct MatchStart {
+    std::string white_username;
+    std::string black_username;
+};
 
 /// Sent instead of Welcome when a seating request (Play / CreateRoom /
 /// JoinRoom) could not be honoured, carrying *why* in a stable machine-readable

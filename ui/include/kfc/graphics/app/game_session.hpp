@@ -104,6 +104,18 @@ public:
         return server_link_ != nullptr ? server_link_->room_name() : std::string{};
     }
 
+    /// Both seats' usernames (UI spec: "Presenting player names") -- see
+    /// ServerLink::white_username/black_username for exactly when each
+    /// becomes non-empty. Both empty for local play, which has no accounts
+    /// at all; the caller falls back to "White"/"Black" in that case, the
+    /// same way it already would for a name it hasn't heard yet.
+    [[nodiscard]] std::string white_username() const {
+        return server_link_ != nullptr ? server_link_->white_username() : std::string{};
+    }
+    [[nodiscard]] std::string black_username() const {
+        return server_link_ != nullptr ? server_link_->black_username() : std::string{};
+    }
+
     /// The arrivals that happened before this client joined -- see
     /// ServerLink::history. Empty for local play and for anyone present from
     /// the start. A caller replays these into its move log and score so a

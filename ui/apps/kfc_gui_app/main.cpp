@@ -378,7 +378,8 @@ int main(int argc, char** argv) {
 
                 kfc::graphics::Img canvas = static_backdrop.clone();
                 board_frame.draw_on(canvas, grid_offset_x, grid_offset_y);
-                hud_renderer.draw(move_log, score, board_column_width, board_column_height, canvas);
+                hud_renderer.draw(move_log, score, board_column_width, board_column_height, canvas,
+                                  session.white_username(), session.black_username());
                 // A named room shows its id across the top of the screen (spec:
                 // "the room ID is written on the top of the screen").
                 if (!room_name.empty()) {

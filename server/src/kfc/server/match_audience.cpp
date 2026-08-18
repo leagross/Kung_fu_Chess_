@@ -1,7 +1,8 @@
 #include "kfc/server/match_audience.hpp"
 
-#include <algorithm>
+#include <memory>
 #include <utility>
+#include <vector>
 
 namespace kfc::server {
 
@@ -42,29 +43,54 @@ std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& use
 
 WatcherId MatchAudience::watch(SendFn send, CloseFn close) {
     std::lock_guard<std::mutex> guard(mutex_);
-    if (roster_->watchers.size() >= kMaxSpectators) {
+    if (roster_->watcher_count >= kMaxSpectators) {
         return 0;  // "not a watcher" -- see WatcherId's own doc comment
     }
     std::shared_ptr<Roster> next = editable_copy();
     WatcherId id = next_watcher_id_++;
-    next->watchers.push_back(Watcher{id, std::move(send), std::move(close)});
+    // Consed onto the existing list, not copied into a new one -- see
+    // WatcherNode's own comment for why this is what keeps watch() O(1).
+    next->watchers = std::make_shared<const WatcherNode>(
+        WatcherNode{Watcher{id, std::move(send), std::move(close)}, std::move(next->watchers)});
+    next->watcher_count = roster_->watcher_count + 1;
     roster_ = std::move(next);
     return id;
 }
 
 void MatchAudience::unwatch(WatcherId id) {
     std::lock_guard<std::mutex> guard(mutex_);
-    // Checked before copying: an id that is not there (a double close, or a
-    // close after release_all) must not cost a full copy of the roster, and
-    // must not publish a new version that nothing actually changed.
-    auto is_id = [id](const Watcher& watcher) { return watcher.id == id; };
-    if (std::none_of(roster_->watchers.begin(), roster_->watchers.end(), is_id)) {
+
+    // Walk the list once, remembering every node before the one being
+    // removed (head first) and where the list continues right after it.
+    std::vector<const WatcherNode*> before;
+    std::shared_ptr<const WatcherNode> after;
+    bool found = false;
+    for (std::shared_ptr<const WatcherNode> node = roster_->watchers; node; node = node->next) {
+        if (node->watcher.id == id) {
+            after = node->next;
+            found = true;
+            break;
+        }
+        before.push_back(node.get());
+    }
+    // Checked before copying anything: an id that is not there (a double
+    // close, or a close after release_all) must not cost a copy, and must
+    // not publish a new version that nothing actually changed.
+    if (!found) {
         return;
     }
 
+    // Only the prefix before the removed node is rebuilt -- each new node
+    // points at what follows it, ending at `after`, which (and everything
+    // beyond it) is reused unchanged by structural sharing, not copied.
+    std::shared_ptr<const WatcherNode> rebuilt = after;
+    for (auto it = before.rbegin(); it != before.rend(); ++it) {
+        rebuilt = std::make_shared<const WatcherNode>(WatcherNode{(*it)->watcher, rebuilt});
+    }
+
     std::shared_ptr<Roster> next = editable_copy();
-    next->watchers.erase(std::remove_if(next->watchers.begin(), next->watchers.end(), is_id),
-                         next->watchers.end());
+    next->watchers = std::move(rebuilt);
+    next->watcher_count = roster_->watcher_count - 1;
     roster_ = std::move(next);
 }
 
@@ -88,7 +114,7 @@ std::string MatchAudience::username_of(kfc::model::PieceColor color) const {
 }
 
 std::size_t MatchAudience::watcher_count() const {
-    return current()->watchers.size();
+    return current()->watcher_count;
 }
 
 void MatchAudience::broadcast(const std::string& encoded) const {
@@ -101,8 +127,8 @@ void MatchAudience::broadcast(const std::string& encoded) const {
     if (roster->black_send.has_value()) {
         (*roster->black_send)(encoded);
     }
-    for (const Watcher& watcher : roster->watchers) {
-        watcher.send(encoded);
+    for (const WatcherNode* node = roster->watchers.get(); node != nullptr; node = node->next.get()) {
+        node->watcher.send(encoded);
     }
 }
 
@@ -127,9 +153,9 @@ void MatchAudience::release_all() const {
     if (roster->black_close.has_value()) {
         (*roster->black_close)();
     }
-    for (const Watcher& watcher : roster->watchers) {
-        if (watcher.close) {
-            watcher.close();
+    for (const WatcherNode* node = roster->watchers.get(); node != nullptr; node = node->next.get()) {
+        if (node->watcher.close) {
+            node->watcher.close();
         }
     }
 }

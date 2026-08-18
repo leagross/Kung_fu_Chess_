@@ -74,10 +74,17 @@ public:
     /// budget with POST /api/auth/login and /register rather than each
     /// having its own, and http_api.hpp's class comment for why the HTTP
     /// side needed this before the WebSocket side did (both do now).
+    /// seat_limiter is null by default, same reason as auth_limiter: when
+    /// given, a Play/CreateRoom/JoinRoom is refused with
+    /// join_reasons::kRateLimited before RoomManager ever sees it, once this
+    /// connection's remote_ip has used up its own, separate budget for the
+    /// current window -- see that constant's own doc comment for why this is
+    /// not simply reusing auth_limiter's budget.
     ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                   kfc::database::IUserStore& users, SessionRegistry& sessions,
                   kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr,
-                  RateLimiter* auth_limiter = nullptr, std::string remote_ip = {});
+                  RateLimiter* auth_limiter = nullptr, std::string remote_ip = {},
+                  RateLimiter* seat_limiter = nullptr);
 
     /// The socket opened. Logging only -- nothing is decided until a Login
     /// arrives.
@@ -137,6 +144,7 @@ private:
     Metrics* metrics_;
     RateLimiter* auth_limiter_;
     std::string remote_ip_;
+    RateLimiter* seat_limiter_;
 
     // This connection's hold on its username, taken once the password checks
     // out and given back when the session is destroyed -- see SessionRegistry.

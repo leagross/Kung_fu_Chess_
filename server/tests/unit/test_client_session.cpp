@@ -90,6 +90,15 @@ struct Fixture {
                              /*metrics=*/nullptr, &auth_limiter, remote_ip);
     }
 
+    // Same idea, for seat_limiter -- a Login still needs to succeed for these
+    // tests to reach Play/CreateRoom/JoinRoom at all, so auth_limiter stays
+    // unlimited (null) here; only seat_limiter is under test.
+    ClientSession session_seat_rate_limited(FakeSocket& socket, kfc::server::RateLimiter& seat_limiter,
+                                            const std::string& remote_ip, const std::string& id = "conn-1") {
+        return ClientSession(id, socket.send_fn(), socket.close_fn(), rooms, users, sessions, logger,
+                             /*metrics=*/nullptr, /*auth_limiter=*/nullptr, remote_ip, &seat_limiter);
+    }
+
     FileLogger logger;
     kfc::database::UserRepository users;
     RoomManager rooms;
@@ -506,4 +515,48 @@ TEST(ClientSessionTest, LoginFromADifferentIpIsUnaffectedByAnotherIpsBudget) {
     other.on_text(login_text("carol", "hunter2"));
 
     EXPECT_TRUE(other.authenticated());
+}
+
+// --- Play/CreateRoom/JoinRoom have their own, separate budget (see
+// join_reasons::kRateLimited's own doc comment) ---
+
+TEST(ClientSessionTest, SeatingIsRefusedOnceItsIpsSeatLimiterBudgetIsSpent) {
+    Fixture fixture;
+    kfc::server::RateLimiter seat_limiter(1, std::chrono::minutes(1));
+    FakeSocket first_socket;
+    ClientSession first = fixture.session_seat_rate_limited(first_socket, seat_limiter, "203.0.113.9", "conn-1");
+    first.on_text(login_text("alice", "hunter2"));
+    first.on_text(encode(ClientMessage{CreateRoom{}}));
+    ASSERT_TRUE(first.seat().has_value()) << "the one allowed attempt for this IP";
+
+    // A second connection, same IP: even though its own Login succeeds
+    // (auth_limiter is not under test here), its seating attempt is refused
+    // before RoomManager ever sees it.
+    FakeSocket second_socket;
+    ClientSession second = fixture.session_seat_rate_limited(second_socket, seat_limiter, "203.0.113.9", "conn-2");
+    second.on_text(login_text("bob", "hunter2"));
+    second.on_text(encode(ClientMessage{CreateRoom{}}));
+
+    EXPECT_FALSE(second.seat().has_value());
+    std::optional<JoinFailed> failure = second_socket.first_of<JoinFailed>();
+    ASSERT_TRUE(failure.has_value());
+    EXPECT_EQ(failure->reason, kfc::protocol::join_reasons::kRateLimited);
+    EXPECT_EQ(second_socket.closes, 1);
+    EXPECT_EQ(fixture.rooms.room_count(), 1u) << "the rate-limited attempt must not have reached RoomManager";
+}
+
+TEST(ClientSessionTest, SeatingFromADifferentIpIsUnaffectedByAnotherIpsSeatBudget) {
+    Fixture fixture;
+    kfc::server::RateLimiter seat_limiter(1, std::chrono::minutes(1));
+    FakeSocket spent_socket;
+    ClientSession spent = fixture.session_seat_rate_limited(spent_socket, seat_limiter, "203.0.113.9", "conn-1");
+    spent.on_text(login_text("alice", "hunter2"));
+    spent.on_text(encode(ClientMessage{CreateRoom{}}));
+
+    FakeSocket other_socket;
+    ClientSession other = fixture.session_seat_rate_limited(other_socket, seat_limiter, "198.51.100.4", "conn-2");
+    other.on_text(login_text("carol", "hunter2"));
+    other.on_text(encode(ClientMessage{CreateRoom{}}));
+
+    EXPECT_TRUE(other.seat().has_value());
 }

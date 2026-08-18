@@ -210,6 +210,15 @@ inline constexpr const char* kRoomNameTaken = "room_name_taken";
 /// of watch connections to the same room otherwise, each one paid for on
 /// every broadcast.
 inline constexpr const char* kSpectatorLimitReached = "spectator_limit_reached";
+/// Too many Play/CreateRoom/JoinRoom attempts from this connection's remote
+/// IP in the current window -- see kfc::server::RateLimiter. A seating
+/// attempt (this connection's one and only one) always closes the
+/// connection whether it succeeds or fails, so reaching this budget takes a
+/// fresh Login -- and therefore a fresh spend of login_reasons::kRateLimited's
+/// own budget -- for every attempt; this exists as its own, separately
+/// tunable budget rather than relying on that as an accident of how sessions
+/// are torn down.
+inline constexpr const char* kRateLimited = "rate_limited";
 }  // namespace join_reasons
 
 /// Sent instead of Welcome or JoinFailed when JoinRoom named a room that is

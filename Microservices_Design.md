@@ -33,7 +33,7 @@ source of truth for what happened in a game, always.
 | WebSocket Gateway | **Go** *(not yet built)* | Goroutines make thousands of concurrent long-lived connections cheap; this is the same reason Discord and similar real-time platforms lean on Go (or Elixir) for their connection layer. |
 | Matchmaker | **Go** *(not yet built)* | A small coordinating service whose real work is reading/writing a Redis-backed rating queue — a lightweight binary that starts fast and scales horizontally is the right shape, and Go is the common choice for exactly this. |
 | Game Allocator | **Go** *(not yet built)* | Direct real-world precedent: [Agones](https://agones.dev), Google's own project for "which shard runs this game server" on Kubernetes, is written in Go. |
-| Game Server Shards | **C++** | Already built and tested (467 tests) as `kfc_server`/`kfc_core`. Real-time simulation at 60 Hz with hard performance requirements is the case C++ (or Rust) is actually for — this is not a place to rewrite. |
+| Game Server Shards | **C++** | Already built and tested (469 tests) as `kfc_server`/`kfc_core`. Real-time simulation at 60 Hz with hard performance requirements is the case C++ (or Rust) is actually for — this is not a place to rewrite. |
 | Observability | *(tooling, not a service)* | Prometheus for metrics, Grafana for dashboards, structured JSON logs from each service, k6 or Locust for load tests. Every service, regardless of its own language, just needs to expose `/metrics` and `/health`. |
 
 ## Target architecture

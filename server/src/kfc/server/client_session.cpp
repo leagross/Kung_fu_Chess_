@@ -15,7 +15,7 @@ namespace kfc::server {
 ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                              kfc::database::IUserStore& users, SessionRegistry& sessions,
                              kfc::protocol::FileLogger& logger, Metrics* metrics, RateLimiter* auth_limiter,
-                             std::string remote_ip)
+                             std::string remote_ip, RateLimiter* seat_limiter)
     : connection_id_(std::move(connection_id)),
       send_(std::move(send)),
       close_(std::move(close)),
@@ -25,7 +25,8 @@ ClientSession::ClientSession(std::string connection_id, SendFn send, CloseFn clo
       logger_(logger),
       metrics_(metrics),
       auth_limiter_(auth_limiter),
-      remote_ip_(std::move(remote_ip)) {}
+      remote_ip_(std::move(remote_ip)),
+      seat_limiter_(seat_limiter) {}
 
 void ClientSession::on_open() {
     logger_.log("Connection opened: " + connection_id_);
@@ -196,6 +197,16 @@ bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) 
     }
     if (seat_.has_value()) {
         return true;  // already seated
+    }
+
+    // Checked before RoomManager ever sees the request -- see
+    // join_reasons::kRateLimited's own doc comment for why this is a
+    // separate budget from auth_limiter's, not a reuse of it.
+    if (seat_limiter_ != nullptr && !seat_limiter_->allow(remote_ip_, std::chrono::steady_clock::now())) {
+        send_(kfc::protocol::encode(
+            kfc::protocol::ServerMessage{kfc::protocol::JoinFailed{kfc::protocol::join_reasons::kRateLimited}}));
+        drop(remote_ip_ + ": " + kfc::protocol::join_reasons::kRateLimited);
+        return true;
     }
 
     // Filled by RoomManager whenever seating fails, so the client is told

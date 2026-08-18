@@ -50,7 +50,20 @@ public:
     /// cares how many there are -- this exists purely so one attacker cannot
     /// open unbounded watch connections to a single room and have every
     /// broadcast paid for that many times over.
-    static constexpr std::size_t kMaxSpectators = 200;
+    ///
+    /// Sized as a safety ceiling, not the primary defense: RateLimiter-backed
+    /// per-IP throttling on Play/CreateRoom/JoinRoom (see
+    /// kfc::protocol::join_reasons::kRateLimited and main.cpp's seat_limiter)
+    /// is what actually bounds how fast one attacker can open fresh watch
+    /// connections, since a seating attempt -- successful or not -- always
+    /// costs the connection it arrived on (see ClientSession::handle_seating).
+    /// This number only has to be high enough that a real, popular match
+    /// never hits it by accident; 5,000 real simultaneous viewers of a single
+    /// Kung Fu Chess game is already a lot more than this project's own
+    /// Server_Design.md envisions for one room. A true "millions watching one
+    /// game" audience needs a broadcast-relay layer in front of this match's
+    /// own tick thread, not a bigger number here -- see that document.
+    static constexpr std::size_t kMaxSpectators = 5000;
 
     /// Adds a watcher: reached by every broadcast, owns no colour, never
     /// affects the game. Returns 0 (the same sentinel unwatch() already
@@ -109,6 +122,51 @@ private:
         CloseFn close;
     };
 
+    // One node of a persistent, structurally-shared singly-linked list of
+    // watchers -- newest first. Chosen over a std::vector<Watcher> because a
+    // vector stored inside Roster (see below) would have to be deep-copied,
+    // std::function callbacks and all, on every single watch() call, purely
+    // because editable_copy() copies the whole Roster to publish a new
+    // version. That made watch() O(current watcher count) and filling a room
+    // to kMaxSpectators O(kMaxSpectators^2) -- measured directly: filling
+    // 5,000 slots took multiple seconds in test_match_audience.cpp before
+    // this change existed. Consing a new node onto the existing (immutable)
+    // head is O(1) and copies nothing already there; only unwatch() ever
+    // needs to rebuild anything, and only the portion of the list before the
+    // node being removed -- see its own comment.
+    struct WatcherNode {
+        Watcher watcher;
+        std::shared_ptr<const WatcherNode> next;
+
+        // Without this, destroying a long chain recurses: ~WatcherNode's
+        // compiler-generated body destroys `next`, whose own ~WatcherNode
+        // destroys *its* `next`, one stack frame per watcher -- confirmed as
+        // a real crash (STATUS_STACK_OVERFLOW), not just a theoretical one,
+        // filling a room to kMaxSpectators (5,000) in a Windows Debug build's
+        // much smaller default stack than Linux's. Walks the chain by hand
+        // instead, unlinking one node at a time so no destructor ever calls
+        // into another.
+        ~WatcherNode() {
+            std::shared_ptr<const WatcherNode> current = std::move(next);
+            // use_count() == 1 means this destructor's own `current` is the
+            // only owner left -- safe to reach into its `next` and detach it
+            // before `current` is reassigned (and the old node destroyed)
+            // below. A node some *other* snapshot still references (a reader
+            // mid-broadcast on an older Roster -- see the class comment on
+            // why versions are never mutated in place) is left alone: it
+            // isn't ours to unlink, and whichever owner drops the last
+            // reference to it runs this same bounded unlinking from there.
+            while (current != nullptr && current.use_count() == 1) {
+                std::shared_ptr<const WatcherNode> successor = std::move(const_cast<WatcherNode&>(*current).next);
+                current = std::move(successor);
+                // The previous `current` is destroyed here, at the end of
+                // this iteration -- but its own `next` was already moved out
+                // above, so that destruction is O(1), not another recursive
+                // call into a third node.
+            }
+        }
+    };
+
     // Everyone attached, as one immutable value. Published by replacement, so
     // any thread already reading a version keeps reading a consistent one --
     // the alternative, mutating in place, is what forces a reader to hold the
@@ -120,7 +178,8 @@ private:
         std::optional<CloseFn> black_close;
         std::string white_username;
         std::string black_username;
-        std::vector<Watcher> watchers;  // in arrival order
+        std::shared_ptr<const WatcherNode> watchers;  // head of the list; nullptr means empty
+        std::size_t watcher_count = 0;  // tracked alongside the list so watcher_count() need not walk it
     };
 
     // The version to read from. One lock acquisition and one refcount bump --

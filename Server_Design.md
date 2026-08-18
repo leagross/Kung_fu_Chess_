@@ -16,6 +16,53 @@ this project's own `encode()` — the arithmetic is at the end.
 
 ---
 
+## Aligning with the course's proposed six-component split
+
+The course staff sent a follow-up proposal for a scalable server-side design,
+built around six named components and a specific tech stack. This section is
+the decision record: which of their six components we already have (under a
+different name), which technology recommendations we adopt, and which we
+deliberately still defer — so that decision doesn't have to be re-derived
+next time this document is read.
+
+| # | Their component | Our name for it | Status |
+|---|---|---|---|
+| 1 | API Gateway (login, rooms, history — non-realtime) | Folded into the Game Server Shard's own HTTP listener (port 8081) | **Built** — see `Microservices_Design.md` row 1 and "Built now vs. not yet" for why we tried and reverted a standalone one |
+| 2 | WebSocket Gateway (live connections, state updates) | Gateway, §2 below | **Built as an in-process role** (`ClientSession`), *not yet* its own container — §2, Microservices_Design.md row 2 |
+| 3 | Matchmaker (pairs players) | Matchmaker, §2 below | **Built, but local-only** — `RoomManager::join_any` pairs within one worker; global cross-worker pairing is not yet built (Microservices_Design.md row 3) |
+| 4 | Game Allocator (picks which Game Server a room runs on) | Not yet named as its own step | **Not yet built as a decision** — today a room simply runs where its worker created it; Microservices_Design.md row 4 |
+| 5 | Game Server Shards (authoritative `GameEngine`) | Game server, §2 below | **Built** — `kfc_server`'s `GameEngine`/`Match`/`MatchScheduler`, unchanged, single source of truth |
+| 6 | Observability (logs, metrics, health, load tests) | Observability | **Built** — Prometheus + Grafana in `docker-compose.yml`, `/health` endpoint, k6 load tests (previously tracked under `loadtest/`, now local-only, not git-tracked per explicit instruction) |
+
+Their recommended technologies, against what we run today:
+
+| Recommendation | Our status |
+|---|---|
+| NATS / Redis PubSub for inter-service messaging | **Not yet.** No service-to-service messaging exists yet because there is only one service (`kfc_server`, replicated as workers). This becomes necessary the moment the WebSocket Gateway and Game Server Shard are split into separate processes talking over the network instead of a function call. |
+| Redis for sessions/active rooms/reconnect/matchmaking queue | **Partially built.** `RedisRoomDirectory` already does `room_id → owning worker` routing and survives a worker restart. It does *not* yet hold the matchmaking queue itself (that queue is still per-worker, in-process) or session/reconnect state (that is still `DisconnectWatch`, in-process, per §4 below). |
+| PostgreSQL for permanent data (users, games, results, move history) | **Not yet.** Still SQLite, per §1 below. `IUserStore` is the seam a Postgres implementation would slot into without touching call sites. |
+| Docker Compose for a small runnable version | **Built.** `docker-compose.yml` runs `kfc_server` (+ Prometheus + Grafana) today; this is the "small working thing" the staff explicitly asked to prefer over an unfinished big one. |
+| Kubernetes / K3s for many managed, scaled containers | **Not yet, deliberately.** Per the staff's own instruction ("עדיף משהו קטן שעובד"), we are not building K8s manifests before the services they would orchestrate (Gateway, Matchmaker, Game Allocator as separate processes) actually exist to be orchestrated. Building K8s config for a single-service system would be config with nothing real behind it. |
+
+**The invariant they called out — "the client doesn't decide game rules, and
+neither does the Gateway" — already holds.** `ClientSession`/the Gateway role
+only decodes JSON and forwards it; every rule check happens inside
+`GameEngine`, which is exactly what §2's "Gateway — stateless" description
+below says, and it does not change under this proposal.
+
+**What this changes about our plan, concretely:** nothing about the target
+architecture in §2–§4 below — their six components map onto our existing
+Gateway/Matchmaker/game-server split almost exactly, with "Game Allocator"
+naming a decision (*which* shard a newly-matched room lands on) that today is
+implicit rather than a separate step. The next concrete build step, when we
+pick this up, is still item 2 in "What we would change here, in order":
+splitting `kfc_server` into a Gateway process and a Game Server Shard process
+talking over the network — because until that split exists, there is no
+second service for a Matchmaker or Game Allocator to route *to*, and no need
+yet for NATS/Redis pub-sub or Kubernetes.
+
+---
+
 ## The numbers everything else follows from
 
 | Quantity | Value | Where it comes from |
@@ -306,6 +353,14 @@ sets a lower bound on the routing entry's TTL.
    *pairing* players across workers, not just redirecting a known room — is
    still not built; see Microservices_Design.md's own "not yet" list.
 5. **Rating updates as two independent writes**, not one transaction — see §1.
+6. **A Game Allocator decision, once step 2 exists.** Today a room simply runs on
+   whichever worker created it. Once the Gateway is its own process, placing a
+   newly-matched room becomes a real choice (which shard has headroom?) instead
+   of "the only shard there is" — this is the course proposal's component 4.
+7. **NATS or Redis pub-sub for Gateway ↔ Game Server traffic**, once step 2
+   exists — a function call inside one process becomes a network call between
+   two, and that needs a real protocol (see Microservices_Design.md's "not
+   yet" list).
 
 Steps 2–5 are all made possible by the layering already in the repo: `logic/`
 knows nothing about the network, `Match` knows nothing about rooms, and

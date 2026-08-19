@@ -227,6 +227,8 @@ std::string encode(const ClientMessage& message) {
                 return envelope("CreateRoom", json::object());
             } else if constexpr (std::is_same_v<T, JoinRoom>) {
                 return envelope("JoinRoom", json{{"name", m.name}});
+            } else {
+                static_assert(!sizeof(T*), "encode(ClientMessage): unhandled alternative");
             }
         },
         message);
@@ -268,6 +270,8 @@ std::string encode(const ServerMessage& message) {
                 return envelope("LoginFailed", json{{"reason", m.reason}});
             } else if constexpr (std::is_same_v<T, OpponentReconnected>) {
                 return envelope("OpponentReconnected", json::object());
+            } else {
+                static_assert(!sizeof(T*), "encode(ServerMessage): unhandled alternative");
             }
         },
         message);
@@ -330,6 +334,7 @@ std::string redact_for_log(const std::string& text) {
     };
 
     std::string out;
+    out.reserve(text.size());
     std::size_t at = 0;
     while (true) {
         std::size_t key = text.find(kKey, at);

@@ -354,6 +354,8 @@ add_executable(kfc_tests
   server/tests/integration/test_websocket_end_to_end.cpp
   ui/tests/unit/test_match_overlay.cpp
   ui/src/kfc/graphics/app/match_overlay.cpp
+  ui/tests/unit/test_motion_predictor.cpp
+  ui/src/kfc/graphics/net/motion_predictor.cpp
   database/tests/unit/test_elo.cpp
   database/tests/unit/test_user_repository.cpp
   database/tests/unit/test_rating_service.cpp
@@ -475,6 +477,7 @@ if (KFC_HAVE_OPENCV)
     ui/src/kfc/graphics/rendering/game_over_banner.cpp
     ui/src/kfc/graphics/rendering/board_layout.cpp
     ui/src/kfc/graphics/net/server_link.cpp
+    ui/src/kfc/graphics/net/motion_predictor.cpp
     ui/src/kfc/graphics/app/game_session.cpp
     ui/src/kfc/graphics/platform/screen_metrics.cpp
   )

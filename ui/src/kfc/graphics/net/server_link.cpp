@@ -244,24 +244,15 @@ void ServerLink::wait(int ms) {
             message);
     }
 
-    // Clamped to duration_ms so a slow network never lets a predicted piece
-    // visually overshoot before the real BoardUpdate confirms it arrived.
-    auto now = std::chrono::steady_clock::now();
-    for (auto& [id, predicted] : predicted_motions_) {
-        int real_elapsed_ms = static_cast<int>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - predicted.started_at).count());
-        predicted.motion.elapsed_ms = std::clamp(real_elapsed_ms, 0, predicted.motion.duration_ms);
-    }
+    motion_predictor_.tick(std::chrono::steady_clock::now());
 }
 
 void ServerLink::handle_motion_started(const kfc::protocol::MotionStarted& started) {
-    kfc::model::PieceId id = started.motion.moving_piece.id;
-    // started_at is anchored to when the motion actually began (subtracting
-    // the server's own elapsed_ms), so this client's prediction stays
-    // aligned with the instant the server -- and the other client -- started
-    // counting from.
-    predicted_motions_[id] = PredictedMotion{
-        started.motion, std::chrono::steady_clock::now() - std::chrono::milliseconds(started.motion.elapsed_ms)};
+    // Anchored to when the motion actually began (subtracting the server's
+    // own elapsed_ms), so this client's prediction stays aligned with the
+    // instant the server -- and the other client -- started counting from.
+    auto started_at = std::chrono::steady_clock::now() - std::chrono::milliseconds(started.motion.elapsed_ms);
+    motion_predictor_.start(started.motion, started_at);
 }
 
 void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
@@ -291,9 +282,9 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
 
         // The real outcome has arrived, so any prediction for this piece
         // (or a captured piece caught mid-flight) is now stale.
-        predicted_motions_.erase(event.moved_piece.id);
+        motion_predictor_.discard(event.moved_piece.id);
         if (event.captured_piece.has_value()) {
-            predicted_motions_.erase(event.captured_piece->id);
+            motion_predictor_.discard(event.captured_piece->id);
         }
     }
 
@@ -311,18 +302,14 @@ const kfc::model::Board& ServerLink::board() const {
 }
 
 std::optional<kfc::model::Motion> ServerLink::motion_for(kfc::model::PieceId piece_id) const {
-    auto it = predicted_motions_.find(piece_id);
-    if (it == predicted_motions_.end()) {
-        return std::nullopt;
-    }
-    return it->second.motion;
+    return motion_predictor_.motion_for(piece_id);
 }
 
 bool ServerLink::is_piece_busy(kfc::model::PieceId piece_id) const {
     // Doubles as PieceAnimatorRegistry's animator-retention signal: a piece
     // with an open prediction must keep its animator alive even when board_
     // doesn't currently show it.
-    return predicted_motions_.count(piece_id) > 0;
+    return motion_predictor_.is_tracked(piece_id);
 }
 
 kfc::model::MoveResult ServerLink::request_move(const kfc::model::Position& source,

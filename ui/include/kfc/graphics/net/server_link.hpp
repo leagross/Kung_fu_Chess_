@@ -7,11 +7,11 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "kfc/engine/move_requester.hpp"
 #include "kfc/events/event_bus.hpp"
+#include "kfc/graphics/net/motion_predictor.hpp"
 #include "kfc/input/board_mapper.hpp"
 #include "kfc/input/controller.hpp"
 #include "kfc/protocol/file_logger.hpp"
@@ -29,11 +29,10 @@ namespace kfc::graphics::net {
 /// mirror, replaced wholesale by Welcome and updated only by replaying each
 /// BoardUpdate's ArrivalEvents; there is no local RealTimeArbiter.
 ///
-/// motion_for() interpolates from predicted_motions_, which locally ticks
-/// forward (clamped to duration_ms) once a MotionStarted arrives, purely so
+/// motion_for() interpolates from motion_predictor_ (see MotionPredictor),
+/// which locally ticks forward once a MotionStarted arrives, purely so
 /// PieceAnimator has something to draw before the real BoardUpdate confirms
-/// the result; a prediction is discarded the moment its piece appears in an
-/// arrival, matched or not.
+/// the result.
 ///
 /// Threading: IXWebSocket delivers on its own background thread. Incoming
 /// messages are queued under a mutex and applied to board_ only from wait(),
@@ -138,18 +137,7 @@ private:
     std::vector<kfc::model::ArrivalEvent> history_;
     std::optional<kfc::input::BoardMapper> board_mapper_;
     std::optional<kfc::input::Controller> controller_;
-    struct PredictedMotion {
-        kfc::model::Motion motion;
-        // Wall-clock instant this motion actually started, so wait()
-        // recomputes elapsed_ms as `now - started_at` every frame rather
-        // than accumulating a per-frame delta -- accumulation silently
-        // loses time whenever a frame's gap is clamped (e.g. this window
-        // losing focus), drifting the two clients' animations apart.
-        std::chrono::steady_clock::time_point started_at;
-    };
-    // Keyed by the same PieceId in both cases and always mutated in
-    // lockstep, so one map avoids double-hashing every piece every frame.
-    std::unordered_map<kfc::model::PieceId, PredictedMotion> predicted_motions_;
+    kfc::graphics::net::MotionPredictor motion_predictor_;
 
     std::mutex incoming_mutex_;
     std::vector<kfc::protocol::ServerMessage> incoming_queue_;

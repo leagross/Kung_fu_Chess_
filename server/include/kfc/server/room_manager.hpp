@@ -152,6 +152,11 @@ private:
     void mark_waiting(RoomId id, int rating);
     void unmark_waiting(RoomId id, int rating);
 
+    // Undoes the ++connected reserved before a join attempt that ended up
+    // failing after the lock was released (grace expired, spectator limit
+    // hit). Takes rooms_mutex_ itself -- do not call with it already held.
+    void give_back_connection(RoomId id);
+
     std::function<kfc::model::Board()> board_factory_;
     kfc::protocol::FileLogger& logger_;
     kfc::protocol::GameplayConfig config_;

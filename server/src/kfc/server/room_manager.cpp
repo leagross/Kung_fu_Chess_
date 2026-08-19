@@ -133,6 +133,14 @@ void RoomManager::mark_waiting(RoomId id, int rating) {
     waiting_by_rating_.emplace(rating, id);
 }
 
+void RoomManager::give_back_connection(RoomId id) {
+    std::lock_guard<std::mutex> guard(rooms_mutex_);
+    auto it = rooms_.find(id);
+    if (it != rooms_.end()) {
+        --it->second.connected;
+    }
+}
+
 void RoomManager::unmark_waiting(RoomId id, int rating) {
     auto [begin, end] = waiting_by_rating_.equal_range(rating);
     for (auto it = begin; it != end; ++it) {
@@ -295,13 +303,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
             // Grace expired between reclaimable_seat_for saying yes and this
             // call. Give back the connection counted above, or the room
             // would never be reaped.
-            {
-                std::lock_guard<std::mutex> guard(rooms_mutex_);
-                auto it = rooms_.find(room_id);
-                if (it != rooms_.end()) {
-                    --it->second.connected;
-                }
-            }
+            give_back_connection(room_id);
             fail(failure_reason, kfc::protocol::join_reasons::kRoomNotActive);
             return std::nullopt;
         }
@@ -313,13 +315,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
         WatcherId watcher = match->join_spectator(username, std::move(send), std::move(close));
         if (watcher == 0) {
             // At MatchAudience::kMaxSpectators; give back the connection counted above.
-            {
-                std::lock_guard<std::mutex> guard(rooms_mutex_);
-                auto it = rooms_.find(room_id);
-                if (it != rooms_.end()) {
-                    --it->second.connected;
-                }
-            }
+            give_back_connection(room_id);
             fail(failure_reason, kfc::protocol::join_reasons::kSpectatorLimitReached);
             return std::nullopt;
         }

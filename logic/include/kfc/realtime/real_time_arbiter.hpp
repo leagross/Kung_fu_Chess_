@@ -59,7 +59,7 @@ private:
     ResolvedArrival resolve_arrival(const Motion& motion);
 
     Board& board_;
-    std::vector<Motion> active_motions_;
+    std::unordered_map<PieceId, Motion> active_motions_;
     std::unordered_map<PieceId, int> cooldowns_remaining_ms_;
     /// Running total of every ms advance_time has been called with, so every
     /// ArrivalEvent gets an absolute timestamp regardless of call chunking.

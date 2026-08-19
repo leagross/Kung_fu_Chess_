@@ -9,21 +9,12 @@ namespace kfc::model {
 RealTimeArbiter::RealTimeArbiter(Board& board) : board_(board) {}
 
 bool RealTimeArbiter::is_piece_busy(PieceId piece_id) const {
-    for (const Motion& motion : active_motions_) {
-        if (motion.moving_piece.id == piece_id) {
-            return true;
-        }
-    }
-    return cooldowns_remaining_ms_.count(piece_id) > 0;
+    return active_motions_.count(piece_id) > 0 || cooldowns_remaining_ms_.count(piece_id) > 0;
 }
 
 std::optional<Motion> RealTimeArbiter::motion_for(PieceId piece_id) const {
-    for (const Motion& motion : active_motions_) {
-        if (motion.moving_piece.id == piece_id) {
-            return motion;
-        }
-    }
-    return std::nullopt;
+    auto it = active_motions_.find(piece_id);
+    return it != active_motions_.end() ? std::optional<Motion>(it->second) : std::nullopt;
 }
 
 int RealTimeArbiter::cooldown_remaining_ms(PieceId piece_id) const {
@@ -32,7 +23,7 @@ int RealTimeArbiter::cooldown_remaining_ms(PieceId piece_id) const {
 }
 
 void RealTimeArbiter::start_motion(const Motion& motion) {
-    active_motions_.push_back(motion);
+    active_motions_[motion.moving_piece.id] = motion;
     board_.set_piece_state(motion.source,
                             motion.kind == MotionKind::JumpInPlace ? PieceState::Airborne : PieceState::Moving);
 }
@@ -61,14 +52,14 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
         int time_into_tick_ms;
     };
     std::vector<PendingArrival> pending;
-    std::vector<Motion> still_active;
-    for (Motion motion : active_motions_) {
+    std::unordered_map<PieceId, Motion> still_active;
+    for (auto& [piece_id, motion] : active_motions_) {
         int time_until_arrival_ms = motion.duration_ms - motion.elapsed_ms;
         motion.elapsed_ms += ms;
         if (motion.elapsed_ms >= motion.duration_ms) {
-            pending.push_back(PendingArrival{motion, std::clamp(time_until_arrival_ms, 0, ms)});
+            pending.push_back(PendingArrival{std::move(motion), std::clamp(time_until_arrival_ms, 0, ms)});
         } else {
-            still_active.push_back(motion);
+            still_active.emplace(piece_id, std::move(motion));
         }
     }
     std::stable_sort(pending.begin(), pending.end(), [](const PendingArrival& a, const PendingArrival& b) {
@@ -110,9 +101,10 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
     // never a JumpInPlace: an airborne piece is PassedThroughAirborne, never
     // EnemyCaptured (see JumpRaceTest).
     for (PieceId captured_id : captured_this_batch) {
-        std::erase_if(active_motions_, [captured_id](const Motion& m) {
-            return m.moving_piece.id == captured_id && m.kind == MotionKind::Move;
-        });
+        auto it = active_motions_.find(captured_id);
+        if (it != active_motions_.end() && it->second.kind == MotionKind::Move) {
+            active_motions_.erase(it);
+        }
         cooldowns_remaining_ms_.erase(captured_id);
     }
 

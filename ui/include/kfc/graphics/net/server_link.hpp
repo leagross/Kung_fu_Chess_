@@ -138,13 +138,18 @@ private:
     std::vector<kfc::model::ArrivalEvent> history_;
     std::optional<kfc::input::BoardMapper> board_mapper_;
     std::optional<kfc::input::Controller> controller_;
-    std::unordered_map<kfc::model::PieceId, kfc::model::Motion> predicted_motions_;
-    // Wall-clock instant each motion actually started, so wait() recomputes
-    // elapsed_ms as `now - this` every frame rather than accumulating a
-    // per-frame delta -- accumulation silently loses time whenever a frame's
-    // gap is clamped (e.g. this window losing focus), drifting the two
-    // clients' animations apart.
-    std::unordered_map<kfc::model::PieceId, std::chrono::steady_clock::time_point> motion_start_times_;
+    struct PredictedMotion {
+        kfc::model::Motion motion;
+        // Wall-clock instant this motion actually started, so wait()
+        // recomputes elapsed_ms as `now - started_at` every frame rather
+        // than accumulating a per-frame delta -- accumulation silently
+        // loses time whenever a frame's gap is clamped (e.g. this window
+        // losing focus), drifting the two clients' animations apart.
+        std::chrono::steady_clock::time_point started_at;
+    };
+    // Keyed by the same PieceId in both cases and always mutated in
+    // lockstep, so one map avoids double-hashing every piece every frame.
+    std::unordered_map<kfc::model::PieceId, PredictedMotion> predicted_motions_;
 
     std::mutex incoming_mutex_;
     std::vector<kfc::protocol::ServerMessage> incoming_queue_;

@@ -247,20 +247,21 @@ void ServerLink::wait(int ms) {
     // Clamped to duration_ms so a slow network never lets a predicted piece
     // visually overshoot before the real BoardUpdate confirms it arrived.
     auto now = std::chrono::steady_clock::now();
-    for (auto& [id, motion] : predicted_motions_) {
+    for (auto& [id, predicted] : predicted_motions_) {
         int real_elapsed_ms = static_cast<int>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - motion_start_times_.at(id)).count());
-        motion.elapsed_ms = std::clamp(real_elapsed_ms, 0, motion.duration_ms);
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - predicted.started_at).count());
+        predicted.motion.elapsed_ms = std::clamp(real_elapsed_ms, 0, predicted.motion.duration_ms);
     }
 }
 
 void ServerLink::handle_motion_started(const kfc::protocol::MotionStarted& started) {
     kfc::model::PieceId id = started.motion.moving_piece.id;
-    predicted_motions_[id] = started.motion;
-    // Anchored to when the motion actually began (subtracting the server's
-    // own elapsed_ms), so this client's prediction stays aligned with the
-    // instant the server -- and the other client -- started counting from.
-    motion_start_times_[id] = std::chrono::steady_clock::now() - std::chrono::milliseconds(started.motion.elapsed_ms);
+    // started_at is anchored to when the motion actually began (subtracting
+    // the server's own elapsed_ms), so this client's prediction stays
+    // aligned with the instant the server -- and the other client -- started
+    // counting from.
+    predicted_motions_[id] = PredictedMotion{
+        started.motion, std::chrono::steady_clock::now() - std::chrono::milliseconds(started.motion.elapsed_ms)};
 }
 
 void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
@@ -291,10 +292,8 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
         // The real outcome has arrived, so any prediction for this piece
         // (or a captured piece caught mid-flight) is now stale.
         predicted_motions_.erase(event.moved_piece.id);
-        motion_start_times_.erase(event.moved_piece.id);
         if (event.captured_piece.has_value()) {
             predicted_motions_.erase(event.captured_piece->id);
-            motion_start_times_.erase(event.captured_piece->id);
         }
     }
 
@@ -316,7 +315,7 @@ std::optional<kfc::model::Motion> ServerLink::motion_for(kfc::model::PieceId pie
     if (it == predicted_motions_.end()) {
         return std::nullopt;
     }
-    return it->second;
+    return it->second.motion;
 }
 
 bool ServerLink::is_piece_busy(kfc::model::PieceId piece_id) const {

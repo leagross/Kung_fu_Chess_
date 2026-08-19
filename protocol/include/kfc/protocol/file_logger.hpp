@@ -56,11 +56,11 @@ public:
     FileLogger& operator=(const FileLogger&) = delete;
 
     /// Appends one line at Info, prefixed with a wall-clock timestamp.
-    void log(const std::string& line);
+    void log(std::string_view line);
 
     /// Appends one line at the given level. Dropped without being written if
     /// level is below the configured minimum.
-    void log(LogLevel level, const std::string& line);
+    void log(LogLevel level, std::string_view line);
 
     /// Whether a line at this level would be written -- lets a call site skip
     /// building the line (encoding, redacting) when it wouldn't be written.

@@ -72,11 +72,11 @@ std::optional<LogLevel> FileLogger::level_from_name(std::string_view name) {
     return kLevelNames.value_of(lowered);
 }
 
-void FileLogger::log(const std::string& line) {
+void FileLogger::log(std::string_view line) {
     log(LogLevel::Info, line);
 }
 
-void FileLogger::log(LogLevel level, const std::string& line) {
+void FileLogger::log(LogLevel level, std::string_view line) {
     if (!enabled(level)) {
         return;
     }

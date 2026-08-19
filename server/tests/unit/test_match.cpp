@@ -167,8 +167,8 @@ TEST(MatchOwnershipTest, RejectsAMoveRequestForAPieceOfTheWrongColor) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // White (alice) tries to move Black's pawn at (2,2).
     match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 2}, Position{1, 2}}});
@@ -188,8 +188,8 @@ TEST(MatchOwnershipTest, AcceptsAMoveRequestForOnesOwnPiece) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // White (alice) moves her own pawn at (2,0) one step forward.
     match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
@@ -211,13 +211,13 @@ TEST(MatchJoinTest, MatchStartIsSentToBothOnlyWhenTheSecondPlayerJoins) {
     RecordingSink black_sink;
 
     // First player in: seated, but no MatchStart yet (still waiting).
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
     EXPECT_FALSE(white_sink.wait_for(200, [](const ServerMessage& m) {
         return std::holds_alternative<MatchStart>(m);
     }));
 
     // Second player in: both are told the match can begin.
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
     EXPECT_TRUE(white_sink.wait_for(500, [](const ServerMessage& m) {
         return std::holds_alternative<MatchStart>(m);
     }));
@@ -242,7 +242,7 @@ TEST(MatchJoinTest, WelcomeAndMatchStartCarryBothPlayersUsernames) {
 
     // White's own Welcome cannot know Black's name yet -- Black hasn't
     // joined -- but it must already carry White's own.
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
     EXPECT_TRUE(white_sink.wait_for(500, [](const ServerMessage& m) {
         if (!std::holds_alternative<Welcome>(m)) {
             return false;
@@ -252,7 +252,7 @@ TEST(MatchJoinTest, WelcomeAndMatchStartCarryBothPlayersUsernames) {
     }));
 
     // Black's own Welcome already has both, seated after alice.
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
     EXPECT_TRUE(black_sink.wait_for(500, [](const ServerMessage& m) {
         if (!std::holds_alternative<Welcome>(m)) {
             return false;
@@ -273,6 +273,45 @@ TEST(MatchJoinTest, WelcomeAndMatchStartCarryBothPlayersUsernames) {
     match.stop();
 }
 
+// Same shape as WelcomeAndMatchStartCarryBothPlayersUsernames -- ratings ride
+// alongside usernames on the exact same fields/timing.
+TEST(MatchJoinTest, WelcomeAndMatchStartCarryBothPlayersRatings) {
+    FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_join_ratings_test.log");
+    ScheduledMatch match(make_two_pawn_board(), logger);
+    match.start();
+
+    RecordingSink white_sink;
+    RecordingSink black_sink;
+
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    EXPECT_TRUE(white_sink.wait_for(500, [](const ServerMessage& m) {
+        if (!std::holds_alternative<Welcome>(m)) {
+            return false;
+        }
+        const Welcome& welcome = std::get<Welcome>(m);
+        return welcome.white_rating == 1200 && welcome.black_rating == 0;
+    }));
+
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
+    EXPECT_TRUE(black_sink.wait_for(500, [](const ServerMessage& m) {
+        if (!std::holds_alternative<Welcome>(m)) {
+            return false;
+        }
+        const Welcome& welcome = std::get<Welcome>(m);
+        return welcome.white_rating == 1200 && welcome.black_rating == 1300;
+    }));
+
+    EXPECT_TRUE(white_sink.wait_for(500, [](const ServerMessage& m) {
+        if (!std::holds_alternative<MatchStart>(m)) {
+            return false;
+        }
+        const MatchStart& start = std::get<MatchStart>(m);
+        return start.white_rating == 1200 && start.black_rating == 1300;
+    }));
+
+    match.stop();
+}
+
 TEST(MatchResignTest, ResignAwardsTheWinToTheOpponentAndTellsBothPlayers) {
     FileLogger logger(std::filesystem::temp_directory_path() / "kfc_match_resign_test.log");
     ScheduledMatch match(make_two_pawn_board(), logger);
@@ -280,8 +319,8 @@ TEST(MatchResignTest, ResignAwardsTheWinToTheOpponentAndTellsBothPlayers) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // White (alice) resigns -> Black wins, and both players are told.
     match.enqueue(PieceColor::White, ClientMessage{Resign{}});
@@ -304,8 +343,8 @@ TEST(MatchDisconnectTest, ShowsACountdownThenForfeitsAfterTheGrace) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // Black (bob) drops. White (still connected) first sees the countdown...
     match.on_disconnect(PieceColor::Black);
@@ -331,10 +370,10 @@ TEST(MatchStateTest, WalksThroughWaitingRunningFrozenFinished) {
     RecordingSink black_sink;
 
     EXPECT_EQ(match.state(), kfc::server::MatchState::Waiting) << "nobody seated";
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
     EXPECT_EQ(match.state(), kfc::server::MatchState::Waiting) << "one seat filled is still no game";
 
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
     EXPECT_EQ(match.state(), kfc::server::MatchState::Running);
 
     // Frozen the instant the drop is reported -- not one tick later. That gap
@@ -357,7 +396,7 @@ TEST(MatchStateTest, ALonePlayerCannotMoveWhileWaitingForAnOpponent) {
     match.start();
 
     RecordingSink white_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
     ASSERT_EQ(match.state(), kfc::server::MatchState::Waiting);
 
     // Otherwise the first player to be seated could play out a whole opening
@@ -380,8 +419,8 @@ TEST(MatchStateTest, TheSameMoveIsAcceptedOnceTheOpponentArrives) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // The gate is about state, not about the move: the very move refused above
     // goes through now.
@@ -402,8 +441,8 @@ TEST(MatchStateTest, ResigningIsStillAllowedWhileFrozen) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
     match.on_disconnect(PieceColor::Black);
     ASSERT_EQ(match.state(), kfc::server::MatchState::Frozen);
 
@@ -426,8 +465,8 @@ TEST(MatchDisconnectTest, TheSurvivorCannotKeepPlayingWhileTheGraceCountsDown) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // Black drops; the countdown is running from here on.
     match.on_disconnect(PieceColor::Black);
@@ -457,8 +496,8 @@ TEST(MatchDisconnectTest, TheClockStopsWhileTheGraceCountsDownSoAPieceInFlightDo
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // White starts a move, then Black drops before it lands.
     match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
@@ -482,8 +521,8 @@ TEST(MatchJoinTest, AWelcomeCarriesTheArrivalsThatAlreadyHappened) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // Play one move through to its arrival.
     match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
@@ -506,7 +545,7 @@ TEST(MatchJoinTest, AWelcomeBeforeAnyMoveCarriesAnEmptyHistory) {
     match.start();
 
     RecordingSink white_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
 
     EXPECT_TRUE(white_sink.wait_for(1000, [](const ServerMessage& m) {
         return std::holds_alternative<Welcome>(m) && std::get<Welcome>(m).history.empty();
@@ -524,8 +563,8 @@ TEST(MatchRevisionTest, EachUpdateCarriesAHigherRevisionThanTheLast) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     match.enqueue(PieceColor::White, ClientMessage{MoveRequest{Position{2, 0}, Position{1, 0}}});
     ASSERT_TRUE(white_sink.wait_for(2000, is_board_update));
@@ -553,8 +592,8 @@ TEST(MatchRevisionTest, AWelcomesRevisionMatchesTheBoardItCarries) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // Before anything has happened, a Welcome is at revision 0.
     bool fresh_welcome_at_zero = false;
@@ -589,8 +628,8 @@ TEST(MatchRevisionTest, AJoinerIsRegisteredBeforeItsSnapshotIsTaken) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     // Join while a move is in flight, so the tick thread is broadcasting around
     // the same moment the viewer is being let in. Registering after the
@@ -627,8 +666,8 @@ TEST(MatchReleaseTest, ForfeitAfterTheCountdownReleasesBothPlayers) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn(), white_sink.as_close_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn(), black_sink.as_close_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn(), white_sink.as_close_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn(), black_sink.as_close_fn()), PieceColor::Black);
 
     // Black drops; once the grace runs out White wins by forfeit -- and then
     // *both* connections are let go, so nobody is left sitting in a room whose
@@ -652,8 +691,8 @@ TEST(MatchReleaseTest, PlayersAreNotReleasedWhileTheGameIsStillOn) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn(), white_sink.as_close_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn(), black_sink.as_close_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn(), white_sink.as_close_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn(), black_sink.as_close_fn()), PieceColor::Black);
 
     // Well past the (deliberately tiny) release delay, but the match is still
     // undecided -- the release is triggered by game-over, never by mere time.
@@ -672,8 +711,8 @@ TEST(MatchReleaseTest, ANormalWinAlsoReleasesBothPlayers) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn(), white_sink.as_close_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn(), black_sink.as_close_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn(), white_sink.as_close_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn(), black_sink.as_close_fn()), PieceColor::Black);
 
     // A decided game is a finished room too, however it was decided.
     match.enqueue(PieceColor::White, ClientMessage{Resign{}});
@@ -707,8 +746,8 @@ TEST(MatchDisconnectTest, ForfeitReportsTheDisconnectReasonToTheResultHook) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     match.on_disconnect(PieceColor::White);  // white drops -> black should win by forfeit
 
@@ -748,8 +787,8 @@ TEST(MatchResignTest, CommandsArrivingAfterTheGameIsOverAreIgnored) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     match.enqueue(PieceColor::White, ClientMessage{Resign{}});
     ASSERT_TRUE(black_sink.wait_for(500, [](const ServerMessage& m) {
@@ -777,8 +816,8 @@ TEST(MatchQueueTest, CommandsPastTheQueueCapAreDroppedRatherThanQueued) {
     ScheduledMatch match(make_two_pawn_board(), logger);
 
     RecordingSink white_sink, black_sink;
-    ASSERT_EQ(match.join("alice", white_sink.as_send_fn()), PieceColor::White);
-    ASSERT_EQ(match.join("bob", black_sink.as_send_fn()), PieceColor::Black);
+    ASSERT_EQ(match.join("alice", 1200, white_sink.as_send_fn()), PieceColor::White);
+    ASSERT_EQ(match.join("bob", 1300, black_sink.as_send_fn()), PieceColor::Black);
 
     auto is_motion_started = [](const ServerMessage& m) { return std::holds_alternative<MotionStarted>(m); };
     const ClientMessage legal_move{MoveRequest{Position{2, 0}, Position{1, 0}}};

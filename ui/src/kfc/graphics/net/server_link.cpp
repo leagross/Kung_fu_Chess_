@@ -173,6 +173,8 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
         revision_ = welcome.revision;
         white_username_ = welcome.white_username;
         black_username_ = welcome.black_username;
+        white_rating_ = welcome.white_rating;
+        black_rating_ = welcome.black_rating;
 
         kfc::model::Board board(welcome.board.width, welcome.board.height);
         for (const kfc::model::Piece& piece : welcome.board.pieces) {
@@ -276,6 +278,8 @@ void ServerLink::wait(int ms) {
                     // both.
                     white_username_ = m.white_username;
                     black_username_ = m.black_username;
+                    white_rating_ = m.white_rating;
+                    black_rating_ = m.black_rating;
                     events_.publish(kfc::events::GameStarted{});
                 } else if constexpr (std::is_same_v<T, kfc::protocol::GameOver>) {
                     // The server declares game-over for every ending (king

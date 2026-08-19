@@ -15,7 +15,8 @@ std::shared_ptr<MatchAudience::Roster> MatchAudience::editable_copy() const {
     return std::make_shared<Roster>(*roster_);
 }
 
-std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& username, SendFn send, CloseFn close) {
+std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& username, int rating, SendFn send,
+                                                          CloseFn close) {
     std::lock_guard<std::mutex> guard(mutex_);
     std::shared_ptr<Roster> next = editable_copy();
     kfc::model::PieceColor assigned = kfc::model::PieceColor::White;
@@ -24,11 +25,13 @@ std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& use
         next->white_send = std::move(send);
         next->white_close = std::move(close);
         next->white_username = username;
+        next->white_rating = rating;
         assigned = kfc::model::PieceColor::White;
     } else if (!next->black_send.has_value()) {
         next->black_send = std::move(send);
         next->black_close = std::move(close);
         next->black_username = username;
+        next->black_rating = rating;
         assigned = kfc::model::PieceColor::Black;
     } else {
         return std::nullopt;  // both seats taken
@@ -111,6 +114,11 @@ void MatchAudience::reseat(kfc::model::PieceColor color, SendFn send, CloseFn cl
 std::string MatchAudience::username_of(kfc::model::PieceColor color) const {
     std::shared_ptr<const Roster> roster = current();
     return color == kfc::model::PieceColor::White ? roster->white_username : roster->black_username;
+}
+
+int MatchAudience::rating_of(kfc::model::PieceColor color) const {
+    std::shared_ptr<const Roster> roster = current();
+    return color == kfc::model::PieceColor::White ? roster->white_rating : roster->black_rating;
 }
 
 std::size_t MatchAudience::watcher_count() const {

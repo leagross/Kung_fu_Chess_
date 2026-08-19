@@ -121,8 +121,8 @@ public:
     /// out to whoever they arranged to play. failure_reason, if given, is filled
     /// with a kfc::protocol::join_reasons string on the (currently unreachable)
     /// failure paths, so the caller can always tell the client something.
-    [[nodiscard]] std::optional<Seat> create_room(const std::string& username, SendFn send, CloseFn close = {},
-                                                   std::string* failure_reason = nullptr);
+    [[nodiscard]] std::optional<Seat> create_room(const std::string& username, int rating, SendFn send,
+                                                   CloseFn close = {}, std::string* failure_reason = nullptr);
 
     /// Joins an existing named room (the Room dialog's Join button):
     ///  - if a player of this room dropped and their grace is still running and
@@ -140,8 +140,9 @@ public:
     /// redirect_url (if given) receives that worker's address instead of
     /// failure_reason being touched at all -- the caller's cue to send a
     /// JoinRedirect rather than a JoinFailed.
-    [[nodiscard]] std::optional<Seat> join_room(const std::string& name, const std::string& username, SendFn send,
-                                                 CloseFn close = {}, std::string* failure_reason = nullptr,
+    [[nodiscard]] std::optional<Seat> join_room(const std::string& name, const std::string& username, int rating,
+                                                 SendFn send, CloseFn close = {},
+                                                 std::string* failure_reason = nullptr,
                                                  std::string* redirect_url = nullptr);
 
     /// Routes one decoded client message to the given room's Match. A no-op if

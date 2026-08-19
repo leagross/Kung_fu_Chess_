@@ -116,6 +116,16 @@ public:
         return server_link_ != nullptr ? server_link_->black_username() : std::string{};
     }
 
+    /// Both seats' ratings, alongside their usernames -- 0 for local play
+    /// (no accounts) and for a seat not yet filled, same as the username
+    /// convention above.
+    [[nodiscard]] int white_rating() const {
+        return server_link_ != nullptr ? server_link_->white_rating() : 0;
+    }
+    [[nodiscard]] int black_rating() const {
+        return server_link_ != nullptr ? server_link_->black_rating() : 0;
+    }
+
     /// The arrivals that happened before this client joined -- see
     /// ServerLink::history. Empty for local play and for anyone present from
     /// the start. A caller replays these into its move log and score so a

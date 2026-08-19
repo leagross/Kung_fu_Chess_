@@ -172,7 +172,7 @@ std::optional<RoomManager::Seat> ClientSession::seat_for(const kfc::protocol::Cl
     if (std::holds_alternative<kfc::protocol::CreateRoom>(message)) {
         // No name to validate: the server mints the id itself, so Create has no
         // client input that could be wrong.
-        return rooms_.create_room(user.username, send_, close_, &failure_reason);
+        return rooms_.create_room(user.username, user.rating, send_, close_, &failure_reason);
     }
 
     const std::string& room = std::get<kfc::protocol::JoinRoom>(message).name;
@@ -180,7 +180,7 @@ std::optional<RoomManager::Seat> ClientSession::seat_for(const kfc::protocol::Cl
         failure_reason = kfc::protocol::join_reasons::kNoSuchRoom;
         return std::nullopt;
     }
-    return rooms_.join_room(room, user.username, send_, close_, &failure_reason, &redirect_url);
+    return rooms_.join_room(room, user.username, user.rating, send_, close_, &failure_reason, &redirect_url);
 }
 
 bool ClientSession::handle_seating(const kfc::protocol::ClientMessage& message) {

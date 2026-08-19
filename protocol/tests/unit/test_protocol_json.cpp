@@ -163,6 +163,43 @@ TEST(ProtocolJsonTest, MatchStartRoundTripsBothPlayersUsernames) {
     EXPECT_EQ(std::get<MatchStart>(*decoded).black_username, "bob");
 }
 
+TEST(ProtocolJsonTest, WelcomeRoundTripsBothPlayersRatings) {
+    Board board(1, 1);
+    Welcome welcome{PieceColor::White, snapshot_of(board)};
+    welcome.white_rating = 1200;
+    welcome.black_rating = 1350;
+
+    std::optional<ServerMessage> decoded = decode_server_message(encode(ServerMessage{welcome}));
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<Welcome>(*decoded));
+    EXPECT_EQ(std::get<Welcome>(*decoded).white_rating, 1200);
+    EXPECT_EQ(std::get<Welcome>(*decoded).black_rating, 1350);
+}
+
+TEST(ProtocolJsonTest, WelcomeWithoutRatingsOnTheWireDecodesToZero) {
+    std::string raw = R"({"type":"Welcome","payload":{"assigned_color":"White",)"
+                       R"("board":{"width":1,"height":1,"pieces":[]}}})";
+
+    std::optional<ServerMessage> decoded = decode_server_message(raw);
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<Welcome>(*decoded));
+    EXPECT_EQ(std::get<Welcome>(*decoded).white_rating, 0);
+    EXPECT_EQ(std::get<Welcome>(*decoded).black_rating, 0);
+}
+
+TEST(ProtocolJsonTest, MatchStartRoundTripsBothPlayersRatings) {
+    ServerMessage message = MatchStart{"alice", "bob", 1200, 1350};
+
+    std::optional<ServerMessage> decoded = decode_server_message(encode(message));
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_TRUE(std::holds_alternative<MatchStart>(*decoded));
+    EXPECT_EQ(std::get<MatchStart>(*decoded).white_rating, 1200);
+    EXPECT_EQ(std::get<MatchStart>(*decoded).black_rating, 1350);
+}
+
 TEST(ProtocolJsonTest, SnapshotOfCapturesEveryOccupiedCellExactly) {
     Board board(2, 2);
     board.add_piece(make_piece(7, PieceColor::White, PieceKind::Queen, Position{0, 1}));

@@ -222,7 +222,7 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
     // routing runs under rooms_mutex_ on the hot path -- a join must not block
     // it. The shared_ptr taken under the lock is what keeps the Match alive
     // here, whatever another thread does to the room meanwhile.
-    std::optional<kfc::model::PieceColor> color = match->join(username, std::move(send), std::move(close));
+    std::optional<kfc::model::PieceColor> color = match->join(username, rating, std::move(send), std::move(close));
     if (!color.has_value()) {
         // Cannot happen -- seats_taken caps a room at two joiners -- but undo
         // the reservation defensively and reap the room if it's now empty.
@@ -259,8 +259,8 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
     return Seat{room_id, *color};
 }
 
-std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& username, SendFn send, CloseFn close,
-                                                          std::string* failure_reason) {
+std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& username, int rating, SendFn send,
+                                                          CloseFn close, std::string* failure_reason) {
     RoomId room_id = 0;
     std::shared_ptr<Match> match;
     std::string room_key;
@@ -278,7 +278,7 @@ std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& use
                     username + "'");
     }
 
-    std::optional<kfc::model::PieceColor> color = match->join(username, std::move(send), std::move(close));
+    std::optional<kfc::model::PieceColor> color = match->join(username, rating, std::move(send), std::move(close));
     if (!color.has_value()) {
         // Unreachable for a room this call just created, but reported rather
         // than returning a bare nullopt the caller can't explain.
@@ -294,8 +294,8 @@ std::optional<RoomManager::Seat> RoomManager::create_room(const std::string& use
 }
 
 std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name, const std::string& username,
-                                                        SendFn send, CloseFn close, std::string* failure_reason,
-                                                        std::string* redirect_url) {
+                                                        int rating, SendFn send, CloseFn close,
+                                                        std::string* failure_reason, std::string* redirect_url) {
     RoomId room_id = 0;
     std::shared_ptr<Match> match;
     bool as_spectator = false;
@@ -405,7 +405,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
         return Seat{room_id, kfc::model::PieceColor::White, /*spectator=*/true, watcher};
     }
 
-    std::optional<kfc::model::PieceColor> color = match->join(username, std::move(send), std::move(close));
+    std::optional<kfc::model::PieceColor> color = match->join(username, rating, std::move(send), std::move(close));
     if (!color.has_value()) {
         return std::nullopt;
     }

@@ -125,8 +125,8 @@ TEST(MatchSchedulerTest, AnAddedMatchIsActuallyTickedByAWorker) {
 
     RecordingSink white_sink;
     RecordingSink black_sink;
-    ASSERT_TRUE(match->join("white", white_sink.as_send_fn()).has_value());
-    ASSERT_TRUE(match->join("black", black_sink.as_send_fn()).has_value());
+    ASSERT_TRUE(match->join("white", 1200, white_sink.as_send_fn()).has_value());
+    ASSERT_TRUE(match->join("black", 1300, black_sink.as_send_fn()).has_value());
 
     MatchScheduler scheduler(1);
     scheduler.add(match);

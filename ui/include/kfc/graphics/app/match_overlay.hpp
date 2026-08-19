@@ -39,6 +39,10 @@ public:
     /// bus must outlive this object. intro_duration_ms is how long the intro
     /// splash lingers.
     explicit MatchOverlay(kfc::events::EventBus& bus, int intro_duration_ms = kDefaultIntroDurationMs);
+    ~MatchOverlay();
+
+    MatchOverlay(const MatchOverlay&) = delete;
+    MatchOverlay& operator=(const MatchOverlay&) = delete;
 
     /// searching is the caller's own signal (not on the bus, since nothing
     /// publishes it). now is passed in so the intro is testable without a wait.
@@ -55,6 +59,7 @@ public:
     [[nodiscard]] int countdown_seconds() const { return countdown_seconds_.value_or(0); }
 
 private:
+    kfc::events::EventBus& bus_;
     int intro_duration_ms_;
 
     bool started_ = false;
@@ -62,6 +67,11 @@ private:
     std::optional<kfc::model::PieceColor> winner_;
     std::optional<int> countdown_seconds_;
     Clock::time_point started_at_{};
+
+    kfc::events::EventBus::SubscriptionId on_started_;
+    kfc::events::EventBus::SubscriptionId on_ended_;
+    kfc::events::EventBus::SubscriptionId on_countdown_;
+    kfc::events::EventBus::SubscriptionId on_opponent_returned_;
 };
 
 }  // namespace kfc::graphics::app

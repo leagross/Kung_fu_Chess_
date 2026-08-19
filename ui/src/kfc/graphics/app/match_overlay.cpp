@@ -6,25 +6,31 @@
 namespace kfc::graphics::app {
 
 MatchOverlay::MatchOverlay(kfc::events::EventBus& bus, int intro_duration_ms)
-    : intro_duration_ms_(intro_duration_ms) {
-    bus.subscribe<kfc::events::GameStarted>([this](const kfc::events::GameStarted&) {
+    : bus_(bus), intro_duration_ms_(intro_duration_ms) {
+    on_started_ = bus_.subscribe<kfc::events::GameStarted>([this](const kfc::events::GameStarted&) {
         started_ = true;
         started_at_ = Clock::now();
     });
 
-    bus.subscribe<kfc::events::GameEnded>([this](const kfc::events::GameEnded& event) {
+    on_ended_ = bus_.subscribe<kfc::events::GameEnded>([this](const kfc::events::GameEnded& event) {
         ended_ = true;
         winner_ = event.winner;
         countdown_seconds_.reset();
     });
 
-    bus.subscribe<kfc::events::OpponentCountdown>(
+    on_countdown_ = bus_.subscribe<kfc::events::OpponentCountdown>(
         [this](const kfc::events::OpponentCountdown& event) { countdown_seconds_ = event.seconds_remaining; });
 
     // The other way a countdown ends: they returned in time.
-    bus.subscribe<kfc::events::OpponentReturned>([this](const kfc::events::OpponentReturned&) {
-        countdown_seconds_.reset();
-    });
+    on_opponent_returned_ = bus_.subscribe<kfc::events::OpponentReturned>(
+        [this](const kfc::events::OpponentReturned&) { countdown_seconds_.reset(); });
+}
+
+MatchOverlay::~MatchOverlay() {
+    bus_.unsubscribe(on_started_);
+    bus_.unsubscribe(on_ended_);
+    bus_.unsubscribe(on_countdown_);
+    bus_.unsubscribe(on_opponent_returned_);
 }
 
 Overlay MatchOverlay::current(bool searching, Clock::time_point now) const {

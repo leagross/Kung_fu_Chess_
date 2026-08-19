@@ -87,6 +87,41 @@ TEST(EventBusTest, CarriesGameEndedWinnerPayload) {
     EXPECT_EQ(*reported, PieceColor::Black);
 }
 
+TEST(EventBusTest, UnsubscribeStopsFurtherDeliveryToThatHandler) {
+    EventBus bus;
+    int count = 0;
+    auto id = bus.subscribe<Ping>([&](const Ping&) { ++count; });
+
+    bus.publish(Ping{0});
+    bus.unsubscribe(id);
+    bus.publish(Ping{0});
+
+    EXPECT_EQ(count, 1);
+}
+
+TEST(EventBusTest, UnsubscribeLeavesOtherSubscribersOfTheSameTypeIntact) {
+    EventBus bus;
+    std::vector<int> order;
+    auto first = bus.subscribe<Ping>([&](const Ping&) { order.push_back(1); });
+    bus.subscribe<Ping>([&](const Ping&) { order.push_back(2); });
+
+    bus.unsubscribe(first);
+    bus.publish(Ping{0});
+
+    EXPECT_EQ(order, (std::vector<int>{2}));
+}
+
+TEST(EventBusTest, UnsubscribeIsANoOpOnAnAlreadyUnsubscribedOrDefaultId) {
+    EventBus bus;
+    EventBus::SubscriptionId never_subscribed;
+    EXPECT_NO_THROW(bus.unsubscribe(never_subscribed));
+
+    int count = 0;
+    auto id = bus.subscribe<Ping>([&](const Ping&) { ++count; });
+    bus.unsubscribe(id);
+    EXPECT_NO_THROW(bus.unsubscribe(id));
+}
+
 TEST(EventBusTest, GameStartedReachesItsSubscriber) {
     EventBus bus;
     int starts = 0;

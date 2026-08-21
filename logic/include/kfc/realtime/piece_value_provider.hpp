@@ -5,11 +5,8 @@
 namespace kfc::model {
 
 /// Strategy interface: the material value of a captured piece kind, used by
-/// ScoreObserver. Mirrors IPieceSpeedProvider exactly -- the backend defines
-/// the interface plus a fixed default here, while a config.json-driven
-/// implementation can live in the graphics layer, so piece values become
-/// tunable gameplay data instead of a constant that needs a recompile to
-/// change (e.g. making a Drone worth 2 instead of 1).
+/// ScoreObserver. Mirrors IPieceSpeedProvider, so values are tunable
+/// gameplay data instead of a constant needing a recompile to change.
 class IPieceValueProvider {
 public:
     virtual ~IPieceValueProvider() = default;
@@ -18,17 +15,14 @@ public:
     [[nodiscard]] virtual int value_of(PieceKind kind) const = 0;
 };
 
-/// The standard chess material values ScoreObserver used to hardcode: pawn 1,
-/// knight/bishop 3, rook 5, queen 9, king 0 (capturing a king ends the game,
-/// GameEngine::is_game_over, rather than scoring it), and Drone 1.
+/// Standard chess material values: pawn 1, knight/bishop 3, rook 5, queen 9,
+/// king 0 (capturing a king ends the game rather than scoring it), Drone 1.
 class StandardPieceValueProvider : public IPieceValueProvider {
 public:
     [[nodiscard]] int value_of(PieceKind kind) const override;
 };
 
-/// The default every ScoreObserver uses unless handed another. Has static
-/// lifetime so ScoreObserver can hold it by reference -- mirrors
-/// kDefaultPieceSpeedProvider in motion_factory.hpp.
+/// The default every ScoreObserver uses unless handed another.
 extern const StandardPieceValueProvider kDefaultPieceValueProvider;
 
 }  // namespace kfc::model

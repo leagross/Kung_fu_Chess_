@@ -1,9 +1,4 @@
-// The kfc_server executable: top-level startup only. It loads the board and
-// the shared gameplay config, builds a RoomManager (which opens a fresh Match
-// per room on demand), hands it to a WebSocketGameServer (the transport), and
-// runs it. Everything about *how* players connect lives in WebSocketGameServer,
-// *which game* a player is in lives in RoomManager, and *what the game does*
-// lives in Match.
+// The kfc_server executable: top-level startup only.
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -40,9 +35,8 @@ constexpr std::string_view kRedisPortFlag = "--redis-port=";
 constexpr std::string_view kWorkerUrlFlag = "--worker-url=";
 constexpr int kDefaultRedisPort = 6379;
 
-// A port number, or std::nullopt if the argument is not one. Written out rather
-// than calling std::stoi directly, which throws on anything unparsable and
-// would take the process down before the log file is even open.
+// Avoids std::stoi's throw-on-unparsable, which would take the process down
+// before the log file is even open.
 std::optional<int> parse_port(const std::string& text) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
         return std::nullopt;
@@ -55,11 +49,8 @@ std::optional<int> parse_port(const std::string& text) {
     }
 }
 
-// Set from a signal handler, so it must stay to what an atomic store can do
-// -- no logging, no mutex, nothing that could deadlock if the signal lands
-// mid-way through the very code it would need to call. main() polls this
-// from an ordinary thread instead, which is where the actual shutdown runs
-// (see the wait-then-stop loop below).
+// Set from a signal handler: an atomic store only, nothing that could
+// deadlock mid-signal. main() polls this from an ordinary thread instead.
 std::atomic<bool> g_shutdown_requested{false};
 
 void request_shutdown(int /*signal*/) {
@@ -85,18 +76,11 @@ std::vector<std::string> read_board_lines(const std::string& path) {
 
 int main(int argc, char** argv) {
     int port = 8080;
-    // The register/login/history HTTP API's port -- a second listening socket
-    // (see http_api.hpp for why it can't share the WebSocket port).
     int http_port = 8081;
-    // Everything by default, including the message-by-message traffic the spec
-    // asks to be able to read afterwards. --log-level=info turns that traffic
-    // off and leaves the events, for a long-running server where the dump is
-    // more disk than it is worth.
+    // Debug logs message-by-message traffic; --log-level=info turns that off.
     kfc::protocol::LogLevel log_level = kfc::protocol::LogLevel::Debug;
-    // Unset (the default) means single-worker mode: RoomManager gets no
-    // IRoomDirectory and behaves exactly as it always has. Set, together with
-    // --worker-url, this worker registers/looks up rooms across however many
-    // others share the same Redis -- see Roadmap.md's stage 2.
+    // Unset means single-worker mode: no IRoomDirectory. Set together with
+    // --worker-url, this worker shares room lookup across others via Redis.
     std::string redis_host;
     int redis_port = kDefaultRedisPort;
     std::string worker_url;
@@ -140,8 +124,6 @@ int main(int argc, char** argv) {
             worker_url = arg.substr(kWorkerUrlFlag.size());
             continue;
         }
-        // The only positional argument. Rejected explicitly rather than left to
-        // std::stoi, which would throw out of main on a typo.
         std::optional<int> parsed_port = parse_port(arg);
         if (!parsed_port.has_value()) {
             std::cerr << "Usage: kfc_server [port] [--http-port=8081] [--redis-host=host] "
@@ -163,28 +145,18 @@ int main(int argc, char** argv) {
 
     try {
         std::vector<std::string> board_lines = read_board_lines(KFC_SERVER_DEFAULT_BOARD_FILE);
-        // Parse once up front purely to fail fast on a bad board file, instead
-        // of letting the first join hit the error lazily on a connection
-        // thread. Each room then gets its own fresh Board from the factory.
+        // Parsed once up front to fail fast on a bad board file.
         kfc::io::BoardParser().parse(board_lines);
         auto board_factory = [board_lines] { return kfc::io::BoardParser().parse(board_lines); };
 
-        // The same gameplay.json the client loads, so networked and local
-        // play agree on speed/cooldowns/pacing.
         kfc::protocol::GameplayConfig gameplay = kfc::protocol::load_gameplay_config(KFC_GAMEPLAY_CONFIG_FILE);
 
-        // The account store: a single SQLite file in the working directory,
-        // holding usernames, salted password hashes, and ELO ratings. Used both
-        // to authenticate logins (WebSocketGameServer) and to apply each
-        // finished game's rating change (the on_result hook below, run on a
-        // match's tick thread -- UserRepository is internally synchronized).
         kfc::database::UserRepository users("kfc_users.db");
         auto on_result = [&users](kfc::server::GameEndReason reason, std::optional<kfc::model::PieceColor> winner,
                                   const std::string& white, const std::string& black,
                                   std::chrono::system_clock::time_point started_at) {
             if (reason == kfc::server::GameEndReason::Disconnect) {
-                // The winner is the opponent, so the loser (who dropped) is the
-                // other colour -- dock them the flat forfeit penalty.
+                // Loser is the dropped player, i.e. the opposite of the winner.
                 const std::string& loser = winner == kfc::model::PieceColor::White ? black : white;
                 kfc::database::apply_forfeit(users, loser);
             } else {
@@ -202,10 +174,7 @@ int main(int argc, char** argv) {
                               std::chrono::system_clock::now());
         };
 
-        // Null unless --redis-host was given -- see RoomManager's own doc
-        // comment for what that does and doesn't change. Declared here, not
-        // inside an if-block, so it outlives rooms below (RoomManager only
-        // borrows the pointer).
+        // Declared here (not inside the if) so it outlives rooms below, which only borrows the pointer.
         std::unique_ptr<kfc::server::RedisRoomDirectory> room_directory;
         if (!redis_host.empty()) {
             room_directory = std::make_unique<kfc::server::RedisRoomDirectory>(redis_host, redis_port);
@@ -213,40 +182,22 @@ int main(int argc, char** argv) {
                        ", advertising this worker as " + worker_url);
         }
 
-        // Shared by both servers below and by every MatchScheduler worker
-        // thread inside rooms: ClientSession and MatchScheduler::run bump its
-        // counters, HttpApiServer's own GET /metrics reads them back out --
-        // see Metrics's own doc comment. Declared before rooms, which borrows
-        // it for the rest of its own lifetime.
+        // Declared before rooms, which borrows it for its own lifetime.
         kfc::server::Metrics metrics;
 
-        // One budget, shared by POST /api/auth/register, /login, and the
-        // WebSocket Login path (see http_api.hpp's own doc comment on why:
-        // all three reach UserRepository::authenticate(), and a separate
-        // limiter per path would just be a second door an attacker could
-        // walk through once the first one closed). At most 10 attempts per
-        // remote IP per minute -- generous for a real player who fat-fingers
-        // a password a few times, a real deterrent against a script. See
-        // RateLimiter's own doc comment for why a fixed window rather than
-        // something more precise.
+        // Shared budget across register/login/WebSocket-Login (see http_api.hpp).
         kfc::server::RateLimiter auth_limiter(10, std::chrono::minutes(1));
 
-        // A separate budget from auth_limiter's own, for Play/CreateRoom/
-        // JoinRoom -- see join_reasons::kRateLimited's doc comment for why
-        // this needs to exist at all given that a seating attempt already
-        // costs a fresh Login (and so a fresh spend of auth_limiter's
-        // budget) either way. 30/minute is generous for a real player (one
-        // successful attempt is the whole of a normal session; a few failed
-        // room-name guesses is the realistic ceiling) while still bounding
-        // how fast one IP can fill a room's MatchAudience::kMaxSpectators
-        // slots with fresh connections.
+        // A separate budget from auth_limiter's, for Play/CreateRoom/JoinRoom
+        // (see join_reasons::kRateLimited). 30/minute is generous for a real
+        // player while still bounding how fast one IP can fill a room's
+        // spectator slots with fresh connections.
         kfc::server::RateLimiter seat_limiter(30, std::chrono::minutes(1));
 
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result,
                                        kfc::server::kDefaultDisconnectGraceMs, room_directory.get(), worker_url,
                                        &metrics);
 
-        // One account, one live connection (see SessionRegistry).
         kfc::server::SessionRegistry sessions;
 
         kfc::server::WebSocketGameServer server(port, rooms, users, sessions, logger, &metrics, &auth_limiter,
@@ -256,21 +207,14 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        // Register/login/history/metrics -- a second, independent listening
-        // socket; see http_api.hpp for why it can't share the WebSocket
-        // server's port.
         kfc::server::HttpApiServer http_server(http_port, users, rooms, sessions, metrics, auth_limiter, logger);
         if (!http_server.listen()) {
             std::cerr << "Failed to listen on HTTP port " << http_port << " (see kfc_server.log)\n";
             return 1;
         }
 
-        // Ctrl+C (SIGINT) and `docker stop` (SIGTERM) both used to hard-kill
-        // the process -- nothing called server.stop(), so server.wait() below
-        // never returned and the orderly teardown after it never ran. A
-        // signal handler cannot safely do that stopping itself (it can only
-        // set an atomic flag; server.stop() takes a mutex), so a small thread
-        // polls the flag and does the actual stopping on our own time.
+        // A signal handler can't safely call server.stop() itself (it takes
+        // a mutex), so a small thread polls the flag instead.
         std::signal(SIGINT, request_shutdown);
         std::signal(SIGTERM, request_shutdown);
         std::thread shutdown_watcher([&server] {
@@ -288,14 +232,8 @@ int main(int argc, char** argv) {
         shutdown_watcher.join();
         logger.log("kfc_server shutting down");
 
-        // Shutdown order matters, and it is the opposite of the declaration
-        // order, so it has to be spelled out rather than left to destructors.
-        // Stopping the transport first leaves a frozen match's tick thread
-        // broadcasting a disconnect countdown into the very sockets being closed
-        // underneath it, and the process can hang with every game already over.
-        // Rooms go quiet first; the socket layer comes down after, as this scope
-        // exits. See RoomManager::stop_all. http_server has no match threads
-        // behind it, so its own stop order is not load-bearing the same way.
+        // Rooms must go quiet before the socket layer comes down, or a
+        // frozen match's tick thread can broadcast into a closing socket.
         http_server.stop();
         rooms.stop_all();
     } catch (const std::exception& e) {

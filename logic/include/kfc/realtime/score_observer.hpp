@@ -6,10 +6,8 @@
 
 namespace kfc::model {
 
-/// Tallies material score per side. Credits whichever side made the capturing
-/// move, not the captured side. The per-kind point values come from an
-/// injected IPieceValueProvider (defaulting to the standard chess values), so
-/// scoring can be re-tuned as gameplay data without touching this class.
+/// Tallies material score per side, crediting whichever side made the
+/// capturing move. Point values come from an injected IPieceValueProvider.
 class ScoreObserver : public IGameObserver {
 public:
     /// values must outlive this ScoreObserver. Defaults to the standard

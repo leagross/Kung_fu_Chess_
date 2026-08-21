@@ -5,19 +5,15 @@
 
 namespace kfc::graphics {
 
-/// The course-provided image wrapper (OpenCV-backed), vendored verbatim into
-/// kfc's own namespace/layout -- same read/draw_on/put_text/show contract the
-/// instructor specified, not a reimplementation. Everything downstream in
-/// kfc::graphics builds on this instead of touching cv::Mat directly.
+/// OpenCV-backed image wrapper. Everything downstream in kfc::graphics
+/// builds on this instead of touching cv::Mat directly.
 class Img {
 public:
     Img();
 
-    /// Loads the image at path (with alpha channel, if present) and
-    /// optionally resizes it. If size is {0, 0} (the default), the image
-    /// keeps its native pixel dimensions. keep_aspect shrinks so the longer
-    /// side fits size while preserving aspect ratio, instead of stretching
-    /// to size exactly. Throws std::runtime_error if path cannot be read.
+    /// Loads path (with alpha channel, if present) and optionally resizes.
+    /// size {0,0} keeps native dimensions; keep_aspect shrinks to fit rather
+    /// than stretching. Throws std::runtime_error if path can't be read.
     Img& read(const std::string& path, const std::pair<int, int>& size = {}, bool keep_aspect = false,
               int interpolation = cv::INTER_AREA);
 
@@ -39,63 +35,35 @@ public:
         return img_;
     }
 
-    /// A new Img holding an independent deep copy of this image's pixels.
-    /// Img's own (compiler-generated) copy constructor only copies cv::Mat's
-    /// reference-counted handle -- the copy would still share the same pixel
-    /// buffer as the original, so drawing on one would silently corrupt the
-    /// other. Needed for a per-frame render loop: clone a loaded background
-    /// once, then draw fresh pieces onto a new clone every frame, without
-    /// re-reading the file from disk each time.
+    /// Deep copy of this image's pixels. Needed because Img's compiler-
+    /// generated copy constructor only copies cv::Mat's reference-counted
+    /// handle, so it would still share the source's pixel buffer.
     Img clone() const;
 
-    /// A new Img of the given size, filled with color -- the only way to
-    /// get pixel data into an Img without reading a file. Needed to compose
-    /// a canvas bigger than any single loaded asset (e.g. a board texture
-    /// plus an empty side panel with nothing on disk to load for it).
+    /// A new Img of the given size, filled with color.
     static Img blank(int width, int height, const cv::Scalar& color = cv::Scalar(0, 0, 0, 255));
 
-    /// A new Img holding an independent deep copy of the width x height
-    /// region starting at (x, y) -- e.g. pulling just the playable grid out
-    /// of a board texture that also has a decorative frame baked in around
-    /// it. Throws std::runtime_error if that region doesn't fit inside this
-    /// image, the same way draw_on does for the opposite case.
+    /// Deep copy of the width x height region starting at (x, y). Throws
+    /// std::runtime_error if that region doesn't fit inside this image.
     Img cropped(int x, int y, int width, int height) const;
 
-    /// A new Img holding an independent deep copy of this image, resized to
-    /// width x height -- e.g. rescaling the whole background/board/HUD
-    /// composition to fit however large the app's window currently is.
+    /// Deep copy of this image, resized to width x height.
     Img resized(int width, int height) const;
 
-    /// "cover"-scales and center-crops this image to exactly target_width x
-    /// target_height: scales up just enough that both dimensions meet or
-    /// exceed the target (preserving aspect ratio, so one dimension
-    /// typically overshoots), then crops the centered target_width x
-    /// target_height region out of that -- the same fit CSS's
-    /// background-size: cover gives, showing as much of the source as the
-    /// target's aspect ratio allows rather than stretching or letterboxing
-    /// it. Used to fit a background image over an arbitrary window size
-    /// without distorting it.
+    /// CSS background-size:cover equivalent: scales up so both dimensions
+    /// meet or exceed the target (aspect preserved), then center-crops to
+    /// target_width x target_height.
     Img cover_scaled(int target_width, int target_height) const;
 
-    /// Drops this image's alpha channel (if it has one) and marks it fully
-    /// opaque, regardless of whatever residual near-255 alpha noise its
-    /// source PNG happens to carry (e.g. anti-aliased edges) -- for a layer
-    /// meant to always paste as a hard, un-blended backdrop. Without this,
-    /// draw_on's expensive per-pixel double-precision blend can trigger on
-    /// a large image every frame for no visual benefit, the same
-    /// board-texture-alpha pitfall this class already guards against for a
-    /// single flag flip, just not automatically for a freshly cropped or
-    /// otherwise-derived image.
+    /// Drops the alpha channel and marks the image fully opaque, so
+    /// draw_on's per-pixel blend can be skipped for a layer that should
+    /// always paste as a hard backdrop even if its source PNG carries
+    /// near-255 alpha noise (e.g. anti-aliased edges).
     void force_opaque();
 
-    /// Draws a translucent overlay across the bottom of a cell_size x
-    /// cell_size cell whose top-left is at (cell_x, cell_y), covering
-    /// fraction (0..1) of the cell's height. The overlay stays pinned to the
-    /// cell's bottom edge -- as fraction counts down from 1.0 (cell fully
-    /// covered, rest just started) to 0.0 (cell fully clear, rest over), its
-    /// top edge drops, revealing the piece underneath from the top down. A
-    /// "no art asset needed" stand-in for an hourglass's remaining sand,
-    /// still piled against the neck at the bottom.
+    /// Draws a translucent overlay across the bottom fraction (0..1) of a
+    /// cell_size x cell_size cell at (cell_x, cell_y), pinned to the bottom
+    /// edge -- an hourglass-sand stand-in with no art asset needed.
     void draw_hourglass_overlay(int cell_x, int cell_y, int cell_size, double fraction, const cv::Scalar& color);
 
     /// False until read() has successfully loaded an image.
@@ -105,12 +73,9 @@ public:
 
 private:
     cv::Mat img_;
-    // True only if img_ has a 4th channel whose values actually vary below
-    // 255 somewhere -- computed once, whenever pixel data is (re)loaded, not
-    // on every draw_on call. Lets draw_on skip its expensive per-pixel blend
-    // for images that happen to have an alpha channel but are fully opaque
-    // (e.g. a board texture exported as PNG-with-alpha, alpha=255
-    // everywhere) -- see draw_on for why that distinction matters.
+    // True only if img_ has a 4th channel with values below 255 somewhere;
+    // computed once on load so draw_on can skip its per-pixel blend for
+    // images that are nominally alpha but fully opaque.
     bool has_transparency_ = false;
     void update_transparency_flag();
 };

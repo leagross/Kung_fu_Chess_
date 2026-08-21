@@ -1,7 +1,5 @@
-﻿// The real playable entry point: reads a "Board:"/"Commands:" fixture from
-// stdin and drives it through the same command path a click-driven UI would
-// use (InputReader -> BoardParser -> Game -> CommandProcessor), writing only
-// print-board output to stdout.
+﻿// Reads a "Board:"/"Commands:" fixture from stdin and drives it through
+// InputReader -> BoardParser -> Game -> CommandProcessor, printing board output.
 #include <iostream>
 
 #include "../../include/kfc/io/board_parser.hpp"

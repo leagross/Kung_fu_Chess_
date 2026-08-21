@@ -30,10 +30,8 @@ std::size_t RateLimiter::bucket_count() const {
 }
 
 void RateLimiter::evict_expired(std::chrono::steady_clock::time_point now) {
-    // A bucket whose window has already elapsed behaves exactly like one
-    // that was never there -- the next allow() for that key resets count and
-    // window_start from scratch either way (see the check above). Erasing it
-    // now only reclaims memory; it changes no caller's rate-limit outcome.
+    // Erasing an expired bucket only reclaims memory; the next allow() would
+    // reset it from scratch anyway.
     for (auto it = buckets_.begin(); it != buckets_.end();) {
         if (now - it->second.window_start >= window_) {
             it = buckets_.erase(it);

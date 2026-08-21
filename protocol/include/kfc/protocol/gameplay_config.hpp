@@ -10,22 +10,10 @@
 
 namespace kfc::protocol {
 
-/// The one source of truth for gameplay timing/values, read from a single
-/// gameplay.json that BOTH the server (server::Match) and the local client
-/// (graphics::app::GameSession) load. It lives in kfc_protocol -- the only
-/// layer both the headless server and the graphics client already depend on
-/// -- specifically so the two can share it: the per-sprite config.json files
-/// under the graphics asset tree can't be read by the headless server, which
-/// is why local and networked play used to disagree on how fast a piece
-/// moves. Reading everything from this one file keeps them in lockstep while
-/// staying tunable without a recompile.
-///
-/// Defaults reproduce the values the code previously hardcoded, so a
-/// default-constructed GameplayConfig (used by tests) behaves exactly as
-/// before.
+/// Single source of truth for gameplay timing/values, read from gameplay.json
+/// so the server and local client agree on piece speed/cooldowns/values.
 struct GameplayConfig {
-    /// Converts a piece's speed (m/s) into a per-cell-step duration; a pacing
-    /// choice, see MotionFactory.
+    /// Converts a piece's speed (m/s) into a per-cell-step duration.
     double meters_per_cell = 0.6;
 
     /// Speed for any kind without an explicit override below.
@@ -48,16 +36,13 @@ struct GameplayConfig {
 };
 
 /// Parses a GameplayConfig from the JSON file at path. Throws
-/// std::runtime_error if the file can't be opened or is malformed -- a
-/// missing/broken gameplay config is a fatal startup error, handled the same
-/// way a missing board file already is. Any field left out of the file keeps
-/// its GameplayConfig default.
+/// std::runtime_error if the file can't be opened or is malformed. Fields
+/// left out of the file keep their GameplayConfig default.
 [[nodiscard]] GameplayConfig load_gameplay_config(const std::string& path);
 
-// --- Provider adapters: expose a GameplayConfig through the backend's own
-// strategy interfaces, so GameCore/MotionFactory/ScoreObserver consume it
-// without knowing it came from a file. Each holds a reference to the config,
-// which must outlive it. ---
+// Provider adapters: expose a GameplayConfig through the backend's own
+// strategy interfaces. Each holds a reference to the config, which must
+// outlive it.
 
 /// IPieceSpeedProvider backed by a GameplayConfig.
 class GameplaySpeedProvider : public kfc::model::IPieceSpeedProvider {

@@ -39,9 +39,7 @@ Board BoardParser::parse(const std::vector<std::string>& board_lines) const {
         }
     }
 
-    // Parse every cell exactly once (std::nullopt == an empty "." cell),
-    // validating as we go, instead of parsing each token here and then again
-    // when the board is built below.
+    // std::nullopt == an empty "." cell.
     std::vector<std::vector<std::optional<PieceToken>>> parsed(grid.size());
     for (std::size_t row = 0; row < grid.size(); ++row) {
         parsed[row].reserve(width);

@@ -13,31 +13,16 @@
 
 namespace kfc::graphics::app {
 
-/// Owns whichever concrete game backend the command line selects -- local
-/// single-player (kfc::texttests::Game, simulating in-process) or a networked
-/// match (net::ServerLink) -- plus everything that backend depends on for its
-/// own lifetime (FileLogger; the shared gameplay config and the providers
-/// built from it for local play). Exists so main() only ever holds one
-/// GameSession and reads view()/value_provider() from it, instead of juggling
-/// several separate optional/unique_ptr members whose construction order and
-/// lifetimes have to line up exactly (Game's MotionFactory holds long-lived
-/// references into the speed provider/cooldown policies, not just at
-/// construction -- see this class's own constructor for why they live here).
-///
-/// The gameplay config (speed, cooldowns, pacing, piece values) is loaded from
-/// the very same gameplay.json the server reads, so a piece behaves the same
-/// whether the game is local or networked.
+/// Owns whichever concrete game backend the command line selects (local
+/// kfc::texttests::Game or networked net::ServerLink) plus everything it
+/// needs for its lifetime. Gameplay config is the same gameplay.json the
+/// server reads, so a piece behaves the same whether local or networked.
 class GameSession {
 public:
     /// Reads --server=ws://host:port from argv. Without it, starts local
-    /// single-player from the default board file, and no login is ever
-    /// needed. Determines the board dimensions immediately (from the default
-    /// board file, which the networked board matches) so a caller can lay out
-    /// its window before connecting, but for networked play does NOT connect
-    /// yet -- call set_credentials() (via the Login dialog -- see
-    /// kfc::graphics::dialogs::IRoomPrompt::ask_login) and then connect() for
-    /// that, after the Play button. Throws std::runtime_error if the shared
-    /// gameplay config or the board file can't be loaded.
+    /// single-player, no login needed. Networked play still needs
+    /// set_credentials() then connect() before it dials out. Throws
+    /// std::runtime_error if config or the board file can't be loaded.
     GameSession(int argc, char** argv);
 
     /// True for a --server session (which must set_credentials() and
@@ -46,13 +31,9 @@ public:
         return networked_;
     }
 
-    /// Supplies the username/password connect() will authenticate with. Only
-    /// meaningful (and only ever called) for a networked session -- see
-    /// is_networked(). Used to live in this class's own constructor, reading
-    /// --username from argv and prompting for the password in the terminal
-    /// (with no window even open yet); moved out to a caller-supplied value
-    /// so the Login dialog can collect both graphically instead -- see
-    /// IRoomPrompt::ask_login.
+    /// Supplies the username/password connect() will authenticate with --
+    /// only meaningful for a networked session. Set from the Login dialog
+    /// (see IRoomPrompt::ask_login) before connect() is ever called.
     void set_credentials(std::string username, std::string password) {
         username_ = std::move(username);
         password_ = std::move(password);
@@ -67,21 +48,16 @@ public:
         return board_height_;
     }
 
-    /// For networked play, connects, authenticates, and sends seating_action
-    /// (kfc::protocol::Play{} for matchmaking, or CreateRoom/JoinRoom for the
-    /// named-room feature), then blocks up to 5s for the server's Welcome (which
-    /// seats this player and builds the board/controller); returns false on
-    /// timeout. A no-op returning true for local play. view() is valid only
-    /// after this returns true.
+    /// Connects, authenticates, and sends seating_action, then blocks up to
+    /// 5s for the server's Welcome; returns false on timeout. A no-op
+    /// returning true for local play. view() is valid only after this
+    /// returns true.
     [[nodiscard]] bool connect(kfc::protocol::ClientMessage seating_action);
 
-    /// Drops a networked connection immediately, giving up this player's seat on
-    /// the server. Called when the client stops searching: the seat has to be
-    /// released *before* any blocking UI (the "no opponent found" box), because
-    /// until it is, this abandoned room is still a matchmaking candidate -- the
-    /// next player to press Play gets seated opposite a player who is already
-    /// gone, and sees a disconnect countdown the instant this process exits.
-    /// A no-op for local play. view() is invalid afterwards.
+    /// Drops a networked connection and releases this player's seat. Must be
+    /// called before any blocking UI when the client stops searching, or the
+    /// abandoned room stays a matchmaking candidate. A no-op for local play.
+    /// view() is invalid afterwards.
     void disconnect();
 
     /// True once play should actually begin: for networked play, when the
@@ -91,34 +67,22 @@ public:
         return !networked_ || (server_link_ != nullptr && server_link_->is_match_started());
     }
 
-    /// A human-readable explanation of why the last connect() failed. Turns the
-    /// server's machine-readable refusal (kfc::protocol::join_reasons) into a
-    /// sentence to show the player, and falls back to the "couldn't reach the
-    /// server" wording when the attempt simply timed out with no answer.
+    /// Human-readable reason the last connect() failed, or a timeout message.
     [[nodiscard]] std::string join_failure_message() const;
 
-    /// The room's id as the server assigned it, to display across the top of
-    /// the screen. Empty for local play and for Play matchmaking. Valid after
-    /// connect() returns true.
+    /// Server-assigned room id. Empty for local play and Play matchmaking.
     [[nodiscard]] std::string room_name() const {
         return server_link_ != nullptr ? server_link_->room_name() : std::string{};
     }
 
-    /// Both seats' usernames (UI spec: "Presenting player names") -- see
-    /// ServerLink::white_username/black_username for exactly when each
-    /// becomes non-empty. Both empty for local play, which has no accounts
-    /// at all; the caller falls back to "White"/"Black" in that case, the
-    /// same way it already would for a name it hasn't heard yet.
+    /// Both seats' usernames/ratings (UI spec: "Presenting player names") --
+    /// empty/0 for local play (no accounts) or a seat not yet filled.
     [[nodiscard]] std::string white_username() const {
         return server_link_ != nullptr ? server_link_->white_username() : std::string{};
     }
     [[nodiscard]] std::string black_username() const {
         return server_link_ != nullptr ? server_link_->black_username() : std::string{};
     }
-
-    /// Both seats' ratings, alongside their usernames -- 0 for local play
-    /// (no accounts) and for a seat not yet filled, same as the username
-    /// convention above.
     [[nodiscard]] int white_rating() const {
         return server_link_ != nullptr ? server_link_->white_rating() : 0;
     }
@@ -126,18 +90,14 @@ public:
         return server_link_ != nullptr ? server_link_->black_rating() : 0;
     }
 
-    /// The arrivals that happened before this client joined -- see
-    /// ServerLink::history. Empty for local play and for anyone present from
-    /// the start. A caller replays these into its move log and score so a
-    /// mid-game joiner's HUD matches the board it was handed.
+    /// Arrivals that happened before this client joined, replayed into a
+    /// caller's move log/score so a mid-game joiner's HUD matches the board.
     [[nodiscard]] std::vector<kfc::model::ArrivalEvent> history() const {
         return server_link_ != nullptr ? server_link_->history() : std::vector<kfc::model::ArrivalEvent>{};
     }
 
-    /// True when the server seated this connection as a viewer rather than a
-    /// player -- a third or later joiner of a named room. Always false for local
-    /// play. Valid only after connect() returns true; a caller must not wire
-    /// mouse input to view() when this holds.
+    /// True when seated as a viewer rather than a player. A caller must not
+    /// wire mouse input to view() when this holds.
     [[nodiscard]] bool is_spectator() const {
         return networked_ && server_link_ != nullptr && server_link_->is_spectator();
     }
@@ -146,9 +106,6 @@ public:
         return *view_;
     }
 
-    /// The piece-value source (from the shared gameplay config) a caller's
-    /// ScoreObserver should use, so scoring matches the same values the rest
-    /// of the game is tuned with. Valid for both local and networked play.
     const kfc::model::IPieceValueProvider& value_provider() const {
         return *value_provider_;
     }
@@ -169,9 +126,7 @@ private:
     // Kept from a failed connect(), which destroys the link that knew it.
     std::optional<std::string> join_failure_;
 
-    // Local play's motion providers, built from gameplay_config_ (the same
-    // file the server uses). Must outlive local_game_, whose MotionFactory
-    // holds references into them.
+    // Must outlive local_game_, whose MotionFactory holds references into them.
     std::optional<kfc::protocol::GameplaySpeedProvider> speed_provider_;
     std::optional<kfc::protocol::GameplayCooldownPolicy> standard_cooldown_policy_;
     std::optional<kfc::protocol::GameplayCooldownPolicy> jump_cooldown_policy_;

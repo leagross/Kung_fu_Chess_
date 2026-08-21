@@ -7,9 +7,6 @@ DisconnectWatch::DisconnectWatch(int grace_ms) : grace_ms_(grace_ms) {}
 void DisconnectWatch::report_disconnect(kfc::model::PieceColor color) {
     std::lock_guard<std::mutex> guard(mutex_);
     pending_ = color;
-    // Frozen from this instant, not from the tick that opens the countdown --
-    // otherwise a command arriving in between is applied against a player who
-    // has already left. See is_frozen().
     frozen_.store(true, std::memory_order_release);
 }
 

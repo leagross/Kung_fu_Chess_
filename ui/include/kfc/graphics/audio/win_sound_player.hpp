@@ -6,16 +6,9 @@
 
 namespace kfc::graphics::audio {
 
-/// The real, Windows-only ISoundPlayer: maps each Sound cue to a .wav file in a
-/// sounds directory and plays it asynchronously via the OS (PlaySound from
-/// winmm) -- no audio library dependency, the same "let Windows do it" approach
-/// the CTD SERVER lecture takes for its MessageBox/pop-up.
-///
-/// Deliberately tolerant of missing files: if a cue's .wav isn't present it
-/// simply stays silent (no crash, no default beep). That is exactly the "wire
-/// the whole mechanism now, drop in real audio files later" stub -- the game
-/// plays correctly today and gains sound the moment the .wav files appear in
-/// the sounds directory (see its README for the expected file names).
+/// Windows-only ISoundPlayer: maps each Sound cue to a .wav file and plays
+/// it asynchronously via PlaySound (winmm). Missing files stay silent rather
+/// than crashing or beeping.
 class WinSoundPlayer : public kfc::audio::ISoundPlayer {
 public:
     explicit WinSoundPlayer(std::filesystem::path sounds_dir);

@@ -9,13 +9,9 @@
 
 namespace kfc::texttests {
 
-/// What a GUI actually needs from "the current game" -- exactly the subset
-/// of Game's public surface MouseInputAdapter and PieceAnimatorRegistry
-/// call. Game implements this for local single-player play; a networked
-/// client (ServerLink, in ui/graphics/net) implements it too, backed
-/// by a server connection instead of a local GameEngine -- neither
-/// MouseInputAdapter nor PieceAnimatorRegistry ever needs to know which one
-/// they were handed.
+/// What a GUI needs from "the current game". Game implements this for local
+/// play; a networked client (ServerLink) implements it backed by a server
+/// connection instead -- callers never need to know which one they were handed.
 class IGameView {
 public:
     virtual ~IGameView() = default;
@@ -28,13 +24,9 @@ public:
     /// server says so, asynchronously, not on any local clock.
     virtual void wait(int ms) = 0;
 
-    /// The event bus this view publishes game events on -- ArrivalEvent per
-    /// resolved move, plus GameStarted/GameEnded (see kfc/events). A UI
-    /// subscribes its score panel, move log, sound, and start/end animations
-    /// here; the view never needs to know who, if anyone, is listening. Wire
-    /// all subscriptions before the render loop starts: neither Game nor
-    /// ServerLink synchronizes the bus, and both publish from the same single
-    /// thread that then drives rendering.
+    /// Publishes ArrivalEvent per resolved move, plus GameStarted/GameEnded.
+    /// Wire subscriptions before the render loop starts: the bus is not
+    /// synchronized.
     virtual kfc::events::EventBus& events() = 0;
 
     virtual const kfc::model::Board& board() const = 0;

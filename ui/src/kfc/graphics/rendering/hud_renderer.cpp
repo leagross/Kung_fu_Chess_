@@ -40,12 +40,8 @@ std::string format_time_ms(long long ms) {
 }
 
 /// Draws a "Time | Move" table starting at (x, y), wrapping into a new
-/// column (its own "Time | Move" header repeated) once the current one
-/// fills the vertical space down to canvas_height, instead of ever growing
-/// past the panel or silently capping at a fixed row count -- new columns
-/// stop once panel_right_x is reached, at which point only the most
-/// recent entries that still fit (across every column together) are kept,
-/// oldest-first within each column, left column oldest.
+/// column once the current one fills canvas_height. New columns stop at
+/// panel_right_x; only the most recent entries that still fit are kept.
 void draw_move_table(Img& image, const std::vector<kfc::model::MoveLogEntry>& entries, int x, int y,
                       int canvas_height, int panel_right_x) {
     int rows_per_column = std::max(1, (canvas_height - y - kMarginPixels) / kLineHeightPixels - 1);

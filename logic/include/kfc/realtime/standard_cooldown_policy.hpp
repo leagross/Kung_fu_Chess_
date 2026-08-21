@@ -4,23 +4,16 @@
 
 namespace kfc::model {
 
-/// Cooldown after an ordinary move -- a piece must not be movable again
-/// while it is still visually resting (long_rest). Longer than
-/// JumpCooldownPolicy's, since an ordinary move's rest is the "long rest"
-/// while jump-in-place only ever plays a "short rest". The value is tied to
-/// the long_rest clip's own frame-count/frames-per-sec in the active asset
-/// pack's config.json -- if that art is retimed, this needs updating too.
+/// Cooldown after an ordinary move (long_rest) -- longer than
+/// JumpCooldownPolicy's short_rest. Value tracks the long_rest clip's
+/// duration in the active asset pack's config.json.
 class StandardCooldownPolicy : public ICooldownPolicy {
 public:
     int cooldown_ms() const override;
 };
 
-/// The default StandardCooldownPolicy instance -- a named object (not a
-/// temporary) so kfc::texttests::Game can bind a reference-typed
-/// constructor parameter to it, the same pattern
-/// motion_factory.hpp's kDefaultPieceSpeedProvider already uses. A GUI app
-/// that wants config-driven cooldowns instead passes its own
-/// ICooldownPolicy implementation in Game's constructor.
+/// Named object so callers can bind a reference-typed constructor param to
+/// it; a GUI app wanting config-driven cooldowns passes its own instead.
 extern const StandardCooldownPolicy kDefaultStandardCooldownPolicy;
 
 }  // namespace kfc::model

@@ -1,9 +1,5 @@
-// The Windows implementation of IRoomPrompt: real native controls, via the
-// Win32 API. Compiled only on Windows -- see CMakeLists and room_prompt.cpp.
-//
-// This is the CTD SERVER spec's "windows message with text box and buttons".
-// Text entry is far easier through the OS than key-by-key through OpenCV's
-// waitKey, which is exactly what the portable fallback has to do instead.
+// The Windows implementation of IRoomPrompt: native controls via Win32
+// (see opencv_room_prompt.cpp for the portable fallback).
 
 #include "kfc/graphics/dialogs/room_prompt.hpp"
 
@@ -134,12 +130,7 @@ public:
         st.user_edit = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 15, 38, 305,
                                      26, hwnd, reinterpret_cast<HMENU>(kIdUserEdit), inst, nullptr);
         CreateWindowW(L"STATIC", L"Password:", WS_CHILD | WS_VISIBLE, 15, 72, 310, 20, hwnd, nullptr, inst, nullptr);
-        // ES_PASSWORD masks every character as it's typed -- a real
-        // improvement over the terminal prompt this dialog replaces, which
-        // showed nothing typed at all (see read_password_masked's own doc
-        // comment in game_session.cpp for why that used _getch() instead of
-        // an ordinary getline in the first place: never sitting in shell
-        // history is the actual requirement, not literally showing nothing).
+        // ES_PASSWORD masks each character as it's typed.
         st.pass_edit = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_PASSWORD,
                                      15, 95, 305, 26, hwnd, reinterpret_cast<HMENU>(kIdPassEdit), inst, nullptr);
         CreateWindowW(L"STATIC",

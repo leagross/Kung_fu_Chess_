@@ -8,22 +8,9 @@
 
 namespace kfc::model {
 
-/// The one place a piece enum and its written name are paired.
-///
-/// These mappings used to exist several times over -- the JSON codec carried a
-/// switch to write and an if-chain to read for each of the three enums, and the
-/// gameplay-config loader kept its own copy of the kind names on top. Every copy
-/// is another place to forget when an enumerator is added, and the compiler
-/// cannot tell you that you forgot: a missing branch shows up as a runtime
-/// "Unknown PieceKind", found by a user rather than by a build.
-///
-/// Each table is ordered to match its enum, so the two are read together, and
-/// each is followed by a static_assert that it still covers the whole enum. See
-/// kfc::util::EnumNames for why this is a table rather than a pair of functions.
-///
-/// The names are the readable full words, not the compact chess-notation letters
-/// kfc::io uses -- these go on the wire and into logs a human is expected to read
-/// while debugging, per the CTD SERVER lecture's logging requirement.
+/// The one place a piece enum and its written name are paired. A
+/// static_assert below keeps each table covering its whole enum, so a
+/// missing branch is a build error. Full words, not kfc::io's notation letters.
 
 inline constexpr kfc::util::EnumNames<PieceKind, 7> kPieceKindNames{{{
     {PieceKind::King, "King"},

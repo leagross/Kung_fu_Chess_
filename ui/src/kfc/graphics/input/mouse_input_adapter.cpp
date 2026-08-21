@@ -21,20 +21,9 @@ void MouseInputAdapter::on_mouse_event(int event, int x, int y, int /*flags*/, v
     int board_y = canvas_pixel.y - adapter->board_offset_y_;
 
     if (event == cv::EVENT_LBUTTONDBLCLK) {
-        // The first press of a double-click already reached Game::click below
-        // before this event fires. That preceding click is harmless in every
-        // real case, which is why no debounce (and the ~double-click-time of
-        // input latency it would add to *every* single click, bad for a
-        // real-time game) is used here:
-        //  - Jumping is done on one's *own* piece. Clicking an own piece only
-        //    ever selects/reselects it (Controller never treats an own-colour
-        //    cell as a move target), so no move is requested -- just a select,
-        //    then this jump.
-        //  - If the double-click lands anywhere else while a piece was
-        //    selected, the preceding click requests exactly the move the user
-        //    aimed at that cell, and this jump is then rejected (that cell
-        //    holds no own piece to jump) -- no spurious extra action.
-        // Controller::jump itself never reads or modifies the selection.
+        // The first press already reached click() below before this event
+        // fires; that's harmless (own-piece click just selects, and any
+        // other click's move request is unaffected by the jump that follows).
         adapter->game_.jump(board_x, board_y);
         return;
     }

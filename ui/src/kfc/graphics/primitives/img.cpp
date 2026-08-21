@@ -104,10 +104,8 @@ Img Img::cover_scaled(int target_width, int target_height) const {
 
     double scale =
         std::max(static_cast<double>(target_width) / img_.cols, static_cast<double>(target_height) / img_.rows);
-    // max() against the target (not just the rounded scale) guards against
-    // std::lround ever coming out one pixel short of covering the target
-    // after rounding -- cropped() would then reject a crop region that
-    // technically doesn't fit.
+    // max() against the target guards against std::lround coming out a pixel
+    // short after rounding, which would make cropped() reject the region.
     int scaled_width = std::max(target_width, static_cast<int>(std::lround(img_.cols * scale)));
     int scaled_height = std::max(target_height, static_cast<int>(std::lround(img_.rows * scale)));
     int crop_x = std::max(0, (scaled_width - target_width) / 2);
@@ -148,15 +146,9 @@ void Img::draw_on(Img& other_img, int x, int y) {
     cv::Mat roi = target_img(cv::Rect(x, y, w, h));
 
     if (source_img.channels() == 4 && has_transparency_) {
-        // Per-pixel alpha blend: result = alpha*source + (1-alpha)*background,
-        // channel by channel. Must use Mat::mul (element-wise) here, never
-        // operator* between two Mats -- that means matrix multiplication
-        // (cv::gemm) in OpenCV, which is not what per-pixel blending is.
-        // Single-precision (CV_32F), not double: the inputs are 8-bit and
-        // the result is converted straight back to 8-bit, so float carries
-        // far more than enough precision while halving the memory traffic of
-        // this per-pixel blend -- which runs for every translucent sprite,
-        // every frame, and is the render loop's hottest arithmetic.
+        // Per-pixel alpha blend. Must use Mat::mul (element-wise), not
+        // operator* (matrix multiplication in OpenCV). CV_32F, not double:
+        // 8-bit inputs need no more precision, and this runs every frame.
         std::vector<cv::Mat> source_channels;
         cv::split(source_img, source_channels);
         cv::Mat alpha;
@@ -176,15 +168,9 @@ void Img::draw_on(Img& other_img, int x, int y) {
         }
 
         if (roi.channels() == 4) {
-            // Standard "over" compositing for the destination's own alpha
-            // too, not just left as whatever it was: a translucent overlay
-            // painted onto a still-transparent region (e.g. an HUD panel
-            // drawn before any opaque background exists under it) must end
-            // up partially opaque itself, or it would stay invisible
-            // forever once this whole image is later composited onto
-            // something else. A destination that's already fully opaque
-            // (alpha 255 everywhere, the common case) is unaffected: the
-            // formula always yields 255 again regardless of the source.
+            // Standard "over" compositing for the destination's alpha too,
+            // so an overlay painted onto a still-transparent region ends up
+            // partially opaque rather than staying invisible.
             cv::Mat dst_alpha;
             roi_channels[3].convertTo(dst_alpha, CV_32F, 1.0 / 255.0);
             cv::Mat new_alpha_f = alpha + (1.0 - alpha).mul(dst_alpha);

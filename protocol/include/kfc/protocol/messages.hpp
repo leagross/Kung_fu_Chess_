@@ -67,6 +67,12 @@ struct Welcome {
     /// hand-written Welcome, still decodes -- just without names to show.
     std::string white_username;
     std::string black_username;
+    /// Each seat's rating at the moment they were seated -- fixed for the
+    /// rest of the match, not re-read live. 0 until that seat is filled,
+    /// same convention as the empty-string default above. Optional on the
+    /// wire for the same backward-compatibility reason.
+    int white_rating = 0;
+    int black_rating = 0;
 };
 
 // --- Client -> Server ---
@@ -195,6 +201,8 @@ struct OpponentDisconnected {
 struct MatchStart {
     std::string white_username;
     std::string black_username;
+    int white_rating = 0;
+    int black_rating = 0;
 };
 
 /// Sent instead of Welcome when a seating request (Play / CreateRoom /

@@ -137,7 +137,7 @@ public:
     /// with the current board snapshot. close, if given, is how this player is
     /// released once the match is decided (see release_players); a Match built
     /// without one simply leaves its players connected, which is what tests do.
-    [[nodiscard]] std::optional<kfc::model::PieceColor> join(const std::string& username, SendFn send,
+    [[nodiscard]] std::optional<kfc::model::PieceColor> join(const std::string& username, int rating, SendFn send,
                                                               CloseFn close = {});
 
     /// Registers a watcher rather than a player -- the spec's "the following

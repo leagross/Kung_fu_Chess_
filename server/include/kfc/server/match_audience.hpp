@@ -41,10 +41,11 @@ namespace kfc::server {
 class MatchAudience {
 public:
     /// Seats a player in the next free colour -- White first, then Black --
-    /// remembering their username and how to reach them. std::nullopt when both
-    /// seats are already taken; the caller decides what to do with a third
-    /// arrival (Match makes them a watcher).
-    [[nodiscard]] std::optional<kfc::model::PieceColor> seat(const std::string& username, SendFn send, CloseFn close);
+    /// remembering their username, rating and how to reach them. std::nullopt
+    /// when both seats are already taken; the caller decides what to do with a
+    /// third arrival (Match makes them a watcher).
+    [[nodiscard]] std::optional<kfc::model::PieceColor> seat(const std::string& username, int rating, SendFn send,
+                                                              CloseFn close);
 
     /// The most watchers one match will seat. Nothing about the simulation
     /// cares how many there are -- this exists purely so one attacker cannot
@@ -96,6 +97,11 @@ public:
 
     /// The username seated in that colour, or empty if nobody is.
     [[nodiscard]] std::string username_of(kfc::model::PieceColor color) const;
+
+    /// That seat's rating at the moment they were seated (a match never
+    /// re-reads it, so it stays fixed even if the account's rating changes
+    /// mid-game), or 0 if nobody is seated there yet.
+    [[nodiscard]] int rating_of(kfc::model::PieceColor color) const;
 
     /// How many watchers are currently attached. For tests and diagnostics --
     /// the game itself never behaves differently for having an audience.
@@ -178,6 +184,8 @@ private:
         std::optional<CloseFn> black_close;
         std::string white_username;
         std::string black_username;
+        int white_rating = 0;
+        int black_rating = 0;
         std::shared_ptr<const WatcherNode> watchers;  // head of the list; nullptr means empty
         std::size_t watcher_count = 0;  // tracked alongside the list so watcher_count() need not walk it
     };

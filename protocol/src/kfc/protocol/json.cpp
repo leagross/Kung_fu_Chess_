@@ -264,7 +264,9 @@ std::string encode(const ServerMessage& message) {
                                                 {"history", m.history},
                                                 {"revision", m.revision},
                                                 {"white_username", m.white_username},
-                                                {"black_username", m.black_username}});
+                                                {"black_username", m.black_username},
+                                                {"white_rating", m.white_rating},
+                                                {"black_rating", m.black_rating}});
             } else if constexpr (std::is_same_v<T, MotionStarted>) {
                 return envelope("MotionStarted", json{{"motion", m.motion}});
             } else if constexpr (std::is_same_v<T, BoardUpdate>) {
@@ -281,7 +283,9 @@ std::string encode(const ServerMessage& message) {
                 return envelope("OpponentDisconnected", json{{"seconds_remaining", m.seconds_remaining}});
             } else if constexpr (std::is_same_v<T, MatchStart>) {
                 return envelope("MatchStart", json{{"white_username", m.white_username},
-                                                    {"black_username", m.black_username}});
+                                                    {"black_username", m.black_username},
+                                                    {"white_rating", m.white_rating},
+                                                    {"black_rating", m.black_rating}});
             } else if constexpr (std::is_same_v<T, JoinFailed>) {
                 return envelope("JoinFailed", json{{"reason", m.reason}});
             } else if constexpr (std::is_same_v<T, JoinRedirect>) {
@@ -428,6 +432,8 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
             welcome.revision = payload.value("revision", std::uint64_t{0});
             welcome.white_username = payload.value("white_username", std::string{});
             welcome.black_username = payload.value("black_username", std::string{});
+            welcome.white_rating = payload.value("white_rating", 0);
+            welcome.black_rating = payload.value("black_rating", 0);
             return ServerMessage{welcome};
         }
         if (type == "MotionStarted") {
@@ -460,6 +466,8 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
             MatchStart start;
             start.white_username = payload.value("white_username", std::string{});
             start.black_username = payload.value("black_username", std::string{});
+            start.white_rating = payload.value("white_rating", 0);
+            start.black_rating = payload.value("black_rating", 0);
             return ServerMessage{start};
         }
         if (type == "JoinFailed") {

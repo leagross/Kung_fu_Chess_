@@ -131,6 +131,16 @@ public:
         return black_username_;
     }
 
+    /// Each seat's rating, alongside its username -- same fill/overwrite
+    /// timing as white_username()/black_username() (see white_username_'s
+    /// own comment).
+    [[nodiscard]] int white_rating() const {
+        return white_rating_;
+    }
+    [[nodiscard]] int black_rating() const {
+        return black_rating_;
+    }
+
     /// True once the server has signalled both players are present (MatchStart).
     /// Between a successful Welcome and this, the client is "searching" -- seated
     /// in a room but waiting for a rating-compatible opponent to be matched in.
@@ -212,6 +222,8 @@ private:
     // Black's name, since White's own Welcome was sent before Black existed.
     std::string white_username_;
     std::string black_username_;
+    int white_rating_ = 0;
+    int black_rating_ = 0;
     // How far the game had got when our Welcome's board was snapshotted, and
     // then how far we have applied. Any BoardUpdate at or below this is already
     // reflected in the board we were handed -- see apply_board_update.

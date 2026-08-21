@@ -215,7 +215,7 @@ TEST_F(HttpApiFixture, HealthReturns200WithStatusOk) {
 
 TEST_F(HttpApiFixture, MetricsReturnsPrometheusTextWithLiveGaugesAndCounters) {
     // A room, so kfc_active_rooms is not just trivially zero.
-    kfc::server::RoomManager::Seat seat = *rooms_.create_room("alice", [](const std::string&) {});
+    kfc::server::RoomManager::Seat seat = *rooms_.create_room("alice", 1200, [](const std::string&) {});
     (void)seat;
     // Register bumps kfc_messages_received_total elsewhere (ClientSession),
     // not through this HTTP-only fixture -- checked here only for the two

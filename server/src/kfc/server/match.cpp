@@ -41,8 +41,9 @@ Match::Match(kfc::model::Board board, kfc::protocol::FileLogger& logger, kfc::pr
 
 Match::~Match() = default;
 
-std::optional<kfc::model::PieceColor> Match::join(const std::string& username, SendFn send, CloseFn close) {
-    std::optional<kfc::model::PieceColor> assigned = audience_.seat(username, send, std::move(close));
+std::optional<kfc::model::PieceColor> Match::join(const std::string& username, int rating, SendFn send,
+                                                   CloseFn close) {
+    std::optional<kfc::model::PieceColor> assigned = audience_.seat(username, rating, send, std::move(close));
     if (!assigned.has_value()) {
         return std::nullopt;  // both seats taken
     }
@@ -54,8 +55,9 @@ std::optional<kfc::model::PieceColor> Match::join(const std::string& username, S
     // players are present -- tell both clients the match can begin. White, who
     // was "searching" since its own Welcome, transitions to play on this.
     if (*assigned == kfc::model::PieceColor::Black) {
-        broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::MatchStart{
-            audience_.username_of(kfc::model::PieceColor::White), username}});
+        broadcast_and_log(kfc::protocol::ServerMessage{
+            kfc::protocol::MatchStart{audience_.username_of(kfc::model::PieceColor::White), username,
+                                      audience_.rating_of(kfc::model::PieceColor::White), rating}});
     }
     return assigned;
 }
@@ -83,7 +85,8 @@ WatcherId Match::join_spectator(const std::string& username, SendFn send, CloseF
     // happened.
     if (already_started) {
         send(kfc::protocol::encode(kfc::protocol::ServerMessage{
-            kfc::protocol::MatchStart{welcome.white_username, welcome.black_username}}));
+            kfc::protocol::MatchStart{welcome.white_username, welcome.black_username, welcome.white_rating,
+                                      welcome.black_rating}}));
     }
     return watcher;
 }
@@ -101,6 +104,8 @@ kfc::protocol::Welcome Match::welcome_for(kfc::model::PieceColor color, bool spe
     kfc::protocol::Welcome welcome{color, {}, spectator, room_name_, {}, 0};
     welcome.white_username = audience_.username_of(kfc::model::PieceColor::White);
     welcome.black_username = audience_.username_of(kfc::model::PieceColor::Black);
+    welcome.white_rating = audience_.rating_of(kfc::model::PieceColor::White);
+    welcome.black_rating = audience_.rating_of(kfc::model::PieceColor::Black);
     std::lock_guard<std::mutex> board_guard(board_mutex_);
     welcome.board = kfc::protocol::snapshot_of(core_.board());
     // All three read under the one lock the tick thread also holds while it
@@ -352,7 +357,8 @@ bool Match::reconnect(kfc::model::PieceColor color, SendFn send, CloseFn close) 
 
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{welcome}));
     send(kfc::protocol::encode(kfc::protocol::ServerMessage{
-        kfc::protocol::MatchStart{welcome.white_username, welcome.black_username}}));
+        kfc::protocol::MatchStart{welcome.white_username, welcome.black_username, welcome.white_rating,
+                                  welcome.black_rating}}));
     // Clears the countdown banner the opponent has been staring at.
     broadcast_and_log(kfc::protocol::ServerMessage{kfc::protocol::OpponentReconnected{}});
     return true;

@@ -76,11 +76,24 @@ void draw_move_table(Img& image, const std::vector<kfc::model::MoveLogEntry>& en
         ++rows_in_column;
     }
 }
+/// name with its rating appended in parentheses (e.g. "alice (1245)"), or
+/// just the fallback colour name when there's no username yet -- a rating
+/// with no username to attach it to is never shown.
+std::string labeled(const std::string& username, const std::string& fallback, int rating) {
+    if (username.empty()) {
+        return fallback;
+    }
+    if (rating == 0) {
+        return username;
+    }
+    return username + " (" + std::to_string(rating) + ")";
+}
 }  // namespace
 
 void HudRenderer::draw(const kfc::model::MoveLogObserver& move_log, const kfc::model::ScoreObserver& score,
                         int board_pixel_width, int board_pixel_height, Img& canvas,
-                        const std::string& white_username, const std::string& black_username) const {
+                        const std::string& white_username, const std::string& black_username, int white_rating,
+                        int black_rating) const {
     int white_x = kMarginPixels;
     int black_x = kHudPanelWidthPixels + board_pixel_width + kMarginPixels;
     int canvas_height = board_pixel_height;
@@ -94,7 +107,7 @@ void HudRenderer::draw(const kfc::model::MoveLogObserver& move_log, const kfc::m
     canvas.put_text("White score: " + std::to_string(score.score(kfc::model::PieceColor::White)), white_x, y, 0.7,
                      kTextColor);
     y += kLineHeightPixels * 2;
-    canvas.put_text(white_username.empty() ? "White" : white_username, white_x, y, 0.65, kTextColor);
+    canvas.put_text(labeled(white_username, "White", white_rating), white_x, y, 0.65, kTextColor);
     y += kLineHeightPixels;
     draw_move_table(canvas, move_log.entries(kfc::model::PieceColor::White), white_x, y, canvas_height,
                      kHudPanelWidthPixels);
@@ -104,7 +117,7 @@ void HudRenderer::draw(const kfc::model::MoveLogObserver& move_log, const kfc::m
     canvas.put_text("Black score: " + std::to_string(score.score(kfc::model::PieceColor::Black)), black_x, y, 0.7,
                      kTextColor);
     y += kLineHeightPixels * 2;
-    canvas.put_text(black_username.empty() ? "Black" : black_username, black_x, y, 0.65, kTextColor);
+    canvas.put_text(labeled(black_username, "Black", black_rating), black_x, y, 0.65, kTextColor);
     y += kLineHeightPixels;
     int canvas_width = kHudPanelWidthPixels * 2 + board_pixel_width;
     draw_move_table(canvas, move_log.entries(kfc::model::PieceColor::Black), black_x, y, canvas_height, canvas_width);

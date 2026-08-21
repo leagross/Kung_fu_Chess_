@@ -195,13 +195,13 @@ TEST(RoomManagerTest, CreateAndJoinNamedRoomSeatWhiteThenBlackRegardlessOfRating
 
     RecordingSink alice, bob;
     // Named rooms ignore rating entirely -- that's what Play is for.
-    std::optional<RoomManager::Seat> a = rooms.create_room("alice", alice.as_send_fn());
+    std::optional<RoomManager::Seat> a = rooms.create_room("alice", 1200, alice.as_send_fn());
     ASSERT_TRUE(a.has_value());
     // The creator's Welcome carries the id the server minted; that is what the
     // second player types in.
     std::string room_id = room_id_from_welcome(alice);
     ASSERT_FALSE(room_id.empty());
-    std::optional<RoomManager::Seat> b = rooms.join_room(room_id, "bob", bob.as_send_fn());
+    std::optional<RoomManager::Seat> b = rooms.join_room(room_id, "bob", 1200, bob.as_send_fn());
 
     ASSERT_TRUE(b.has_value());
     EXPECT_EQ(a->room, b->room);
@@ -217,8 +217,8 @@ TEST(RoomManagerTest, EveryCreatedRoomGetsItsOwnGeneratedId) {
     // The client no longer names a room, so Create can never collide and never
     // fails -- each call simply mints another distinct id.
     RecordingSink s1, s2;
-    ASSERT_TRUE(rooms.create_room("alice", s1.as_send_fn()).has_value());
-    ASSERT_TRUE(rooms.create_room("bob", s2.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.create_room("alice", 1200, s1.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.create_room("bob", 1200, s2.as_send_fn()).has_value());
 
     std::string first = room_id_from_welcome(s1);
     std::string second = room_id_from_welcome(s2);
@@ -235,7 +235,7 @@ TEST(RoomManagerTest, AGeneratedRoomIdIsShortAndUnambiguousToReadOut) {
     // One player has to read this id to another, so it stays short and avoids
     // the character pairs that get misheard or misread (0/O, 1/I/L, 5/S, ...).
     RecordingSink s1;
-    ASSERT_TRUE(rooms.create_room("alice", s1.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.create_room("alice", 1200, s1.as_send_fn()).has_value());
 
     std::string id = room_id_from_welcome(s1);
     // Six, not four: five million concurrent rooms need five million live
@@ -255,7 +255,7 @@ TEST(RoomManagerTest, JoiningARoomThatDoesNotExistFailsWithAReason) {
 
     RecordingSink s1;
     std::string reason;
-    EXPECT_FALSE(rooms.join_room("ghost", "alice", s1.as_send_fn(), {}, &reason).has_value());
+    EXPECT_FALSE(rooms.join_room("ghost", "alice", 1200, s1.as_send_fn(), {}, &reason).has_value());
     EXPECT_EQ(reason, join_reasons::kNoSuchRoom);
 }
 
@@ -264,10 +264,10 @@ TEST(RoomManagerTest, JoiningARoomWhoseGameIsAlreadyOverIsRefusedNotSeated) {
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2, s3;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", s1.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, s1.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(s1);
-    ASSERT_TRUE(rooms.join_room(room_id, "bob", s2.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", 1200, s2.as_send_fn()).has_value());
 
     // Decide the game, and wait until the room has actually processed it.
     rooms.enqueue(white->room, PieceColor::White, ClientMessage{Resign{}});
@@ -276,7 +276,7 @@ TEST(RoomManagerTest, JoiningARoomWhoseGameIsAlreadyOverIsRefusedNotSeated) {
     // A latecomer must not be dropped into a board that will never move again --
     // neither as a player nor as a viewer.
     std::string reason;
-    EXPECT_FALSE(rooms.join_room(room_id, "carol", s3.as_send_fn(), {}, &reason).has_value());
+    EXPECT_FALSE(rooms.join_room(room_id, "carol", 1200, s3.as_send_fn(), {}, &reason).has_value());
     EXPECT_EQ(reason, join_reasons::kRoomNotActive);
 }
 
@@ -285,17 +285,17 @@ TEST(RoomManagerTest, TheSpectatorAfterTheLimitIsRefusedNotSeatedAndTheRoomStays
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", s1.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, s1.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(s1);
-    ASSERT_TRUE(rooms.join_room(room_id, "bob", s2.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", 1200, s2.as_send_fn()).has_value());
 
     std::vector<std::unique_ptr<RecordingSink>> sinks;
     std::optional<RoomManager::Seat> first_watcher;
     for (std::size_t i = 0; i < kfc::server::MatchAudience::kMaxSpectators; ++i) {
         sinks.push_back(std::make_unique<RecordingSink>());
         std::optional<RoomManager::Seat> seat =
-            rooms.join_room(room_id, "watcher" + std::to_string(i), sinks.back()->as_send_fn());
+            rooms.join_room(room_id, "watcher" + std::to_string(i), 1200, sinks.back()->as_send_fn());
         ASSERT_TRUE(seat.has_value()) << "spectator " << i << " should still be within the limit";
         if (i == 0) {
             first_watcher = seat;
@@ -304,7 +304,7 @@ TEST(RoomManagerTest, TheSpectatorAfterTheLimitIsRefusedNotSeatedAndTheRoomStays
 
     RecordingSink one_too_many;
     std::string reason;
-    EXPECT_FALSE(rooms.join_room(room_id, "one_too_many", one_too_many.as_send_fn(), {}, &reason).has_value());
+    EXPECT_FALSE(rooms.join_room(room_id, "one_too_many", 1200, one_too_many.as_send_fn(), {}, &reason).has_value());
     EXPECT_EQ(reason, join_reasons::kSpectatorLimitReached);
 
     // Refused, not merely uncounted -- a room stuck thinking a refused
@@ -313,7 +313,7 @@ TEST(RoomManagerTest, TheSpectatorAfterTheLimitIsRefusedNotSeatedAndTheRoomStays
     // disconnecting) must still be usable afterwards.
     rooms.on_disconnect(*first_watcher);
     RecordingSink newcomer;
-    EXPECT_TRUE(rooms.join_room(room_id, "newcomer", newcomer.as_send_fn()).has_value());
+    EXPECT_TRUE(rooms.join_room(room_id, "newcomer", 1200, newcomer.as_send_fn()).has_value());
 }
 
 TEST(RoomManagerTest, JoinersAfterTheSecondBecomeSpectatorsOfTheSameRoom) {
@@ -321,14 +321,14 @@ TEST(RoomManagerTest, JoinersAfterTheSecondBecomeSpectatorsOfTheSameRoom) {
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2, s3, s4;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", s1.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, s1.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(s1);
-    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", s2.as_send_fn());
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", 1200, s2.as_send_fn());
     // The spec: "the second person that joins the room is the Black player. The
     // following people who join are viewers."
-    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", s3.as_send_fn());
-    std::optional<RoomManager::Seat> dave = rooms.join_room(room_id, "dave", s4.as_send_fn());
+    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", 1200, s3.as_send_fn());
+    std::optional<RoomManager::Seat> dave = rooms.join_room(room_id, "dave", 1200, s4.as_send_fn());
 
     ASSERT_TRUE(black.has_value());
     EXPECT_FALSE(white->spectator);
@@ -349,10 +349,10 @@ TEST(RoomManagerTest, ASpectatorIsToldItIsWatchingAndSeesTheGameStartedAlready) 
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2, s3;
-    ASSERT_TRUE(rooms.create_room("alice", s1.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.create_room("alice", 1200, s1.as_send_fn()).has_value());
     std::string room_id = room_id_from_welcome(s1);
-    ASSERT_TRUE(rooms.join_room(room_id, "bob", s2.as_send_fn()).has_value());
-    ASSERT_TRUE(rooms.join_room(room_id, "carol", s3.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", 1200, s2.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.join_room(room_id, "carol", 1200, s3.as_send_fn()).has_value());
 
     // Its Welcome says spectator, so the client knows not to accept input...
     EXPECT_TRUE(s3.wait_for(500, [](const ServerMessage& m) {
@@ -368,11 +368,11 @@ TEST(RoomManagerTest, ASpectatorSeesTheSameBoardUpdatesThePlayersDo) {
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2, s3;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", s1.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, s1.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(s1);
-    ASSERT_TRUE(rooms.join_room(room_id, "bob", s2.as_send_fn()).has_value());
-    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", s3.as_send_fn());
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", 1200, s2.as_send_fn()).has_value());
+    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", 1200, s3.as_send_fn());
     ASSERT_TRUE(carol.has_value());
 
     // White pawn at (2,0) advances; the viewer must see the very same arrival.
@@ -389,10 +389,10 @@ TEST(RoomManagerTest, ASpectatorSeesTheSameBoardUpdatesThePlayersDo) {
 // counting down. Returns the room's generated id; the sinks are the caller's.
 std::string room_with_black_mid_countdown(RoomManager& rooms, RecordingSink& white_sink,
                                            RecordingSink& black_sink) {
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", white_sink.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, white_sink.as_send_fn());
     EXPECT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(white_sink);
-    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", black_sink.as_send_fn());
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", 1200, black_sink.as_send_fn());
     EXPECT_TRUE(black.has_value());
     rooms.on_disconnect(*black);
     // Wait until the countdown is genuinely running, so the reclaim below is
@@ -412,7 +412,7 @@ TEST(RoomManagerTest, TheDroppedPlayerReturningReclaimsTheirOwnSeatAndColor) {
     std::string room_id = room_with_black_mid_countdown(rooms, white_sink, black_sink);
 
     // Same username -> this is bob coming back, not a third party.
-    std::optional<RoomManager::Seat> back = rooms.join_room(room_id, "bob", returning.as_send_fn());
+    std::optional<RoomManager::Seat> back = rooms.join_room(room_id, "bob", 1200, returning.as_send_fn());
     ASSERT_TRUE(back.has_value());
     EXPECT_FALSE(back->spectator);
     EXPECT_EQ(back->color, PieceColor::Black);  // their own seat, not a new one
@@ -436,10 +436,10 @@ TEST(RoomManagerTest, ReturningAfterTheGraceExpiredIsRefusedRatherThanSeated) {
     RoomManager rooms(two_pawn_factory(), logger, {}, {}, /*disconnect_grace_ms=*/100);
 
     RecordingSink white_sink, black_sink, too_late;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", white_sink.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, white_sink.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(white_sink);
-    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", black_sink.as_send_fn());
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", 1200, black_sink.as_send_fn());
     ASSERT_TRUE(black.has_value());
 
     // Let the grace run all the way out, so the match is genuinely forfeit
@@ -454,7 +454,7 @@ TEST(RoomManagerTest, ReturningAfterTheGraceExpiredIsRefusedRatherThanSeated) {
     // it -- and would leak the connection count, so the room could never reach
     // zero and never be reaped.
     std::string reason;
-    EXPECT_FALSE(rooms.join_room(room_id, "bob", too_late.as_send_fn(), {}, &reason).has_value());
+    EXPECT_FALSE(rooms.join_room(room_id, "bob", 1200, too_late.as_send_fn(), {}, &reason).has_value());
     EXPECT_EQ(reason, join_reasons::kRoomNotActive);
 }
 
@@ -467,7 +467,7 @@ TEST(RoomManagerTest, AStrangerArrivingMidCountdownWatchesRatherThanTakingTheSea
 
     // A different username is just another joiner: the dropped player's seat is
     // theirs alone until their grace expires.
-    std::optional<RoomManager::Seat> seat = rooms.join_room(room_id, "carol", stranger.as_send_fn());
+    std::optional<RoomManager::Seat> seat = rooms.join_room(room_id, "carol", 1200, stranger.as_send_fn());
     ASSERT_TRUE(seat.has_value());
     EXPECT_TRUE(seat->spectator);
     EXPECT_TRUE(stranger.wait_for(1000, [](const ServerMessage& m) {
@@ -486,7 +486,7 @@ TEST(RoomManagerTest, ReturningInTimeCancelsTheForfeitAltogether) {
     RecordingSink white_sink, black_sink, returning;
     std::string room_id = room_with_black_mid_countdown(rooms, white_sink, black_sink);
 
-    ASSERT_TRUE(rooms.join_room(room_id, "bob", returning.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", 1200, returning.as_send_fn()).has_value());
 
     // The default grace is 20s; well within it, no forfeit may ever arrive.
     EXPECT_FALSE(white_sink.wait_for(500, [](const ServerMessage& m) { return std::holds_alternative<GameOver>(m); }));
@@ -498,11 +498,11 @@ TEST(RoomManagerTest, ASpectatorLeavingDoesNotForfeitThePlayersGame) {
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2, s3;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", s1.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, s1.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(s1);
-    ASSERT_TRUE(rooms.join_room(room_id, "bob", s2.as_send_fn()).has_value());
-    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", s3.as_send_fn());
+    ASSERT_TRUE(rooms.join_room(room_id, "bob", 1200, s2.as_send_fn()).has_value());
+    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", 1200, s3.as_send_fn());
     ASSERT_TRUE(carol.has_value());
 
     // A viewer walking out holds no seat, so nothing about the game changes --
@@ -521,11 +521,11 @@ TEST(RoomManagerTest, ASpectatorThatLeftIsNoLongerSentTheGame) {
     RoomManager rooms(two_pawn_factory(), logger);
 
     RecordingSink s1, s2, s3;
-    ASSERT_TRUE(rooms.create_room("alice", s1.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.create_room("alice", 1200, s1.as_send_fn()).has_value());
     std::string room_id = room_id_from_welcome(s1);
-    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", s2.as_send_fn());
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", 1200, s2.as_send_fn());
     ASSERT_TRUE(black.has_value());
-    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", s3.as_send_fn());
+    std::optional<RoomManager::Seat> carol = rooms.join_room(room_id, "carol", 1200, s3.as_send_fn());
     ASSERT_TRUE(carol.has_value());
     ASSERT_TRUE(carol->spectator);
     ASSERT_NE(carol->watcher, 0u) << "a viewer's Seat must carry the handle that identifies it";
@@ -614,7 +614,7 @@ TEST(RoomManagerTest, CreatingARoomRegistersItInTheDirectoryUnderThisWorkersUrl)
                       "ws://worker-a:8080");
 
     RecordingSink alice;
-    ASSERT_TRUE(rooms.create_room("alice", alice.as_send_fn()).has_value());
+    ASSERT_TRUE(rooms.create_room("alice", 1200, alice.as_send_fn()).has_value());
     std::string room_id = room_id_from_welcome(alice);
 
     std::optional<std::string> owner = directory.owner_of(room_id);
@@ -635,7 +635,7 @@ TEST(RoomManagerTest, JoiningANameTheDirectorySaysBelongsElsewhereRedirectsRathe
     std::string failure_reason;
     std::string redirect_url;
     std::optional<RoomManager::Seat> seat =
-        rooms.join_room("REMOTE1", "alice", s1.as_send_fn(), {}, &failure_reason, &redirect_url);
+        rooms.join_room("REMOTE1", "alice", 1200, s1.as_send_fn(), {}, &failure_reason, &redirect_url);
 
     EXPECT_FALSE(seat.has_value());
     EXPECT_EQ(redirect_url, "ws://worker-b:8080");
@@ -651,7 +651,7 @@ TEST(RoomManagerTest, ANameNoWorkerHasEverRegisteredStillFailsWithNoSuchRoom) {
     RecordingSink s1;
     std::string failure_reason;
     std::string redirect_url;
-    EXPECT_FALSE(rooms.join_room("ghost", "alice", s1.as_send_fn(), {}, &failure_reason, &redirect_url).has_value());
+    EXPECT_FALSE(rooms.join_room("ghost", "alice", 1200, s1.as_send_fn(), {}, &failure_reason, &redirect_url).has_value());
     EXPECT_EQ(failure_reason, join_reasons::kNoSuchRoom);
     EXPECT_TRUE(redirect_url.empty());
 }
@@ -663,10 +663,10 @@ TEST(RoomManagerTest, ReapingANamedRoomForgetsItInTheDirectory) {
                       "ws://worker-a:8080");
 
     RecordingSink alice, bob;
-    std::optional<RoomManager::Seat> white = rooms.create_room("alice", alice.as_send_fn());
+    std::optional<RoomManager::Seat> white = rooms.create_room("alice", 1200, alice.as_send_fn());
     ASSERT_TRUE(white.has_value());
     std::string room_id = room_id_from_welcome(alice);
-    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", bob.as_send_fn());
+    std::optional<RoomManager::Seat> black = rooms.join_room(room_id, "bob", 1200, bob.as_send_fn());
     ASSERT_TRUE(black.has_value());
     ASSERT_TRUE(directory.owner_of(room_id).has_value())
         << "test setup: must be registered before it can be forgotten";

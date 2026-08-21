@@ -39,7 +39,7 @@ public:
 TEST(MatchAudienceTest, AWatcherWhoLeftIsNoLongerBroadcastTo) {
     MatchAudience audience;
     Sink player, stays, leaves;
-    ASSERT_TRUE(audience.seat("alice", player.send_fn(), player.close_fn()).has_value());
+    ASSERT_TRUE(audience.seat("alice", 1200, player.send_fn(), player.close_fn()).has_value());
     WatcherId staying = audience.watch(stays.send_fn(), stays.close_fn());
     WatcherId leaving = audience.watch(leaves.send_fn(), leaves.close_fn());
     ASSERT_NE(staying, leaving) << "each watcher needs its own handle";
@@ -113,7 +113,7 @@ TEST(MatchAudienceTest, AStalledSendDoesNotBlockTheRestOfTheTable) {
     Sink other;
 
     ASSERT_TRUE(audience
-                    .seat("alice",
+                    .seat("alice", 1200,
                           [&](const std::string&) {
                               entered_send.set_value();
                               while (!may_finish.load()) {
@@ -152,7 +152,7 @@ TEST(MatchAudienceTest, AStalledSendDoesNotBlockTheRestOfTheTable) {
 TEST(MatchAudienceTest, AWatcherMayUnregisterItselfFromInsideItsOwnClose) {
     MatchAudience audience;
     Sink player;
-    ASSERT_TRUE(audience.seat("alice", player.send_fn(), player.close_fn()).has_value());
+    ASSERT_TRUE(audience.seat("alice", 1200, player.send_fn(), player.close_fn()).has_value());
 
     WatcherId watcher = 0;
     int closes = 0;
@@ -175,11 +175,11 @@ TEST(MatchAudienceTest, SeatsAreHandedOutWhiteThenBlackAndThenRefused) {
     MatchAudience audience;
     Sink white, black, third;
 
-    EXPECT_EQ(audience.seat("alice", white.send_fn(), white.close_fn()), PieceColor::White);
+    EXPECT_EQ(audience.seat("alice", 1200, white.send_fn(), white.close_fn()), PieceColor::White);
     EXPECT_FALSE(audience.both_seats_taken());
-    EXPECT_EQ(audience.seat("bob", black.send_fn(), black.close_fn()), PieceColor::Black);
+    EXPECT_EQ(audience.seat("bob", 1300, black.send_fn(), black.close_fn()), PieceColor::Black);
     EXPECT_TRUE(audience.both_seats_taken());
-    EXPECT_FALSE(audience.seat("carol", third.send_fn(), third.close_fn()).has_value());
+    EXPECT_FALSE(audience.seat("carol", 1400, third.send_fn(), third.close_fn()).has_value());
 
     EXPECT_EQ(audience.username_of(PieceColor::White), "alice");
     EXPECT_EQ(audience.username_of(PieceColor::Black), "bob");
@@ -189,8 +189,8 @@ TEST(MatchAudienceTest, SeatsAreHandedOutWhiteThenBlackAndThenRefused) {
 TEST(MatchAudienceTest, SendToReachesOneColourOnly) {
     MatchAudience audience;
     Sink white, black, watcher;
-    ASSERT_TRUE(audience.seat("alice", white.send_fn(), white.close_fn()).has_value());
-    ASSERT_TRUE(audience.seat("bob", black.send_fn(), black.close_fn()).has_value());
+    ASSERT_TRUE(audience.seat("alice", 1200, white.send_fn(), white.close_fn()).has_value());
+    ASSERT_TRUE(audience.seat("bob", 1300, black.send_fn(), black.close_fn()).has_value());
     (void)audience.watch(watcher.send_fn(), watcher.close_fn());
 
     audience.send_to(PieceColor::Black, "rejected");
@@ -236,7 +236,7 @@ TEST(MatchAudienceTest, LeavingBelowTheLimitFreesUpASpotForTheNextWatcher) {
 TEST(MatchAudienceTest, ReseatingKeepsTheUsernameAndRedirectsTheSends) {
     MatchAudience audience;
     Sink dropped, returned;
-    ASSERT_TRUE(audience.seat("alice", dropped.send_fn(), dropped.close_fn()).has_value());
+    ASSERT_TRUE(audience.seat("alice", 1200, dropped.send_fn(), dropped.close_fn()).has_value());
 
     audience.reseat(PieceColor::White, returned.send_fn(), returned.close_fn());
     audience.broadcast("update");

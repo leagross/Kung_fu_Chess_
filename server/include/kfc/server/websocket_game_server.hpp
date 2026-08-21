@@ -23,15 +23,10 @@ class SessionRegistry;
 class Metrics;
 class RateLimiter;
 
-/// Seconds between pings to an idle connection. IXWebSocket closes a
-/// connection that misses a pong before the next interval, so this bounds a
-/// dead connection to roughly twice its value; a real client answers pings
-/// automatically and is unaffected.
-///
-/// Kept low also because IXWebSocketTransport::poll() blocks for up to a
-/// full ping interval on a connection mid-close-handshake during shutdown,
-/// overriding its own shorter close timeout -- a vendored library bound, not
-/// fixable here, so a lower value keeps worst-case shutdown to a few seconds.
+/// Seconds between pings to an idle connection -- bounds a dead connection
+/// to roughly twice this value (IXWebSocket closes on a missed pong). Kept
+/// low also because poll() blocks up to a full interval on a connection
+/// mid-close-handshake during shutdown (a vendored library bound).
 inline constexpr int kIdlePingIntervalSecs = 5;
 
 /// ixwebsocket's own defaults (backlog 5, maxConnections 128) are sized for
@@ -43,12 +38,8 @@ inline constexpr std::size_t kMaxConnections = 100000;
 
 /// Owns the WebSocket transport for one kfc_server: connection lifecycle,
 /// turning the first Login into a room+colour via RoomManager::join_any,
-/// routing decoded messages via RoomManager::enqueue, and reporting drops
-/// via RoomManager::on_disconnect. Knows only how players talk to the
-/// server; game rules and routing live in Match/RoomManager.
-///
-/// Authenticates username+password against users before the connection is
-/// placed in a room.
+/// routing messages via RoomManager::enqueue, and reporting drops via
+/// on_disconnect. Game rules and routing live in Match/RoomManager.
 class WebSocketGameServer {
 public:
     /// rooms, users, sessions and logger must outlive this server. Does not

@@ -11,10 +11,8 @@
 namespace kfc::model {
 
 /// The public command boundary for moves and jumps -- the only entry point
-/// Controller and TextTestRunner use. Coordinates Board, RuleEngine,
-/// RealTimeArbiter, and MotionFactory; no piece-specific movement logic of
-/// its own. Implements IMoveRequester so a networked client can be driven
-/// by something else entirely without GameEngine itself changing.
+/// Controller/TextTestRunner use. Coordinates Board, RuleEngine,
+/// RealTimeArbiter and MotionFactory; no piece-specific logic of its own.
 class GameEngine : public IMoveRequester {
 public:
     /// All four dependencies must outlive this GameEngine. real_time_arbiter

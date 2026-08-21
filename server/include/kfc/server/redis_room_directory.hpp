@@ -10,15 +10,10 @@ struct redisContext;
 
 namespace kfc::server {
 
-/// The IRoomDirectory this repo runs: a thin wrapper over hiredis's
-/// synchronous API, storing "room:<name>" -> worker_url as a Redis string.
-///
-/// Entries carry a TTL as a safety net: forget_room is the normal cleanup
-/// path, but a crash between a room being reaped and forget_room running
-/// would otherwise leak the entry forever.
-///
-/// Threading: hiredis's synchronous redisContext is not safe for concurrent
-/// use, so every call here holds mutex_ for the whole round trip.
+/// The IRoomDirectory this repo runs: a thin hiredis wrapper storing
+/// "room:<name>" -> worker_url, with a TTL as a safety net against a crash
+/// before forget_room's cleanup runs. Every call holds mutex_ for the whole
+/// round trip (hiredis's redisContext isn't safe for concurrent use).
 class RedisRoomDirectory : public IRoomDirectory {
 public:
     /// Six hours: an order of magnitude past any plausible single game.

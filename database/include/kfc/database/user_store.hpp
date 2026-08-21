@@ -8,15 +8,9 @@
 namespace kfc::database {
 
 /// The account store, as everything above it sees it: authenticate a login,
-/// read a rating, and change ratings atomically. The backing database (SQLite
-/// today) is not visible from here, so swapping it is a new class, not an
-/// edit to every caller.
-///
-/// Deliberately narrow: no `execute_sql`, no cursor, no transaction handle.
-/// The compound operations take the arithmetic as a callback so the
-/// implementation can hold whatever lock/transaction it needs internally.
-///
-/// Implementations must be safe to call from many threads at once.
+/// read a rating, and change ratings atomically. No `execute_sql`, no
+/// cursor -- compound operations take the arithmetic as a callback so an
+/// implementation can hold its own lock/transaction. Must be thread-safe.
 class IUserStore {
 public:
     virtual ~IUserStore() = default;

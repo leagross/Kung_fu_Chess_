@@ -8,11 +8,9 @@
 
 namespace kfc::model {
 
-/// The one place a piece enum and its written name are paired. Each table is
-/// ordered to match its enum and followed by a static_assert that it still
-/// covers the whole enum, so a missing branch is a build error, not a runtime
-/// "Unknown PieceKind". These are readable full words, not the compact
-/// chess-notation letters kfc::io uses.
+/// The one place a piece enum and its written name are paired. A
+/// static_assert below keeps each table covering its whole enum, so a
+/// missing branch is a build error. Full words, not kfc::io's notation letters.
 
 inline constexpr kfc::util::EnumNames<PieceKind, 7> kPieceKindNames{{{
     {PieceKind::King, "King"},

@@ -8,22 +8,9 @@
 
 namespace kfc::server {
 
-/// Which usernames currently have a live connection -- one account, one session.
-///
-/// A second login is refused rather than taking over from the first: the
-/// kicked connection's close would arrive later and report a disconnect
-/// against a seat the new connection had meanwhile reclaimed.
-///
-/// Refusing does not block a reconnect: a name is released the moment its
-/// connection closes, the same moment the disconnect grace starts, so a
-/// player with a countdown running is already free to log in again.
-///
-/// Dead connections (crash, closed laptop) are caught by WebSocketGameServer's
-/// ping interval, which closes the socket and reaches on_close like any other
-/// disconnect, releasing the name normally.
-///
-/// Threading: internally synchronized. Claiming is one locked
-/// test-and-insert, so two simultaneous logins for the same name can't both succeed.
+/// Which usernames have a live connection -- one account, one session. A
+/// name releases the moment its connection closes (crash/timeout included),
+/// so a reconnect is never blocked. Internally synchronized.
 class SessionRegistry {
 public:
     /// RAII rather than a release() call, so a connection that goes away

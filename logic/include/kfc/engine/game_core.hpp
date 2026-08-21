@@ -13,15 +13,10 @@
 
 namespace kfc::model {
 
-/// Composition root of one game's core simulation:
-/// Board -> PieceRuleRegistry -> RuleEngine -> RealTimeArbiter ->
-/// MotionFactory -> GameEngine, wired identically for local and networked
-/// play. Each host layers its own concern on top (Game adds a Controller
-/// and observers; Match adds a tick thread and command queue).
-///
-/// Cooldown policies and speed provider are injected, not owned -- they
-/// must outlive this GameCore. Owns the Board itself, since the arbiter
-/// must hold the one and only mutable reference to it.
+/// Composition root of one game's core simulation: Board -> PieceRuleRegistry
+/// -> RuleEngine -> RealTimeArbiter -> MotionFactory -> GameEngine, wired
+/// identically for local and networked play. Cooldown policies/speed
+/// provider are injected (must outlive this); the Board itself is owned.
 class GameCore {
 public:
     /// board is moved in and becomes the live board. standard_policy,

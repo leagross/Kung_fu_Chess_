@@ -25,13 +25,9 @@ enum class Overlay {
 };
 
 /// Follows whole-game signals on the event bus and answers which banner goes
-/// on the board this frame. Priority: Searching outranks everything (no game
-/// yet); GameOver supersedes Countdown; Countdown outranks Intro (they can
-/// overlap) and also ends when the opponent returns, not just on game end.
-///
-/// Free of OpenCV and drawing -- says only *which* overlay, so it's testable
-/// with a bare EventBus. Subscribes on construction; read on the render
-/// thread, same as any other bus subscriber.
+/// on the board this frame. Priority: Searching > GameOver > Countdown >
+/// Intro (Countdown/Intro can overlap). Free of OpenCV -- says only *which*
+/// overlay, so it's testable with a bare EventBus.
 class MatchOverlay {
 public:
     using Clock = std::chrono::steady_clock;

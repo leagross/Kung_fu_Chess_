@@ -21,15 +21,10 @@ struct BoardSnapshot {
     std::vector<kfc::model::Piece> pieces;
 };
 
-/// Sent once, right after a successful Login: which color the server
-/// assigned this connection (first join = White, second = Black) and the
-/// board's starting position.
-///
-/// spectator marks a connection that joined a room whose two seats were
-/// already taken: it receives every broadcast like a player but owns no
-/// pieces and any command it sends is ignored. assigned_color is meaningless
-/// for a spectator (sent as White so the field stays populated) -- a client
-/// must read spectator, never the colour, to decide whether it may play.
+/// Sent once, right after a successful Login: assigned colour (first join =
+/// White, second = Black) and the board's starting position. spectator
+/// marks a viewer -- assigned_color is meaningless then (sent as White);
+/// a client must read spectator, never the colour, to decide if it may play.
 struct Welcome {
     kfc::model::PieceColor assigned_color;
     BoardSnapshot board;
@@ -43,23 +38,15 @@ struct Welcome {
     /// board with no history. Empty for a match that has not started.
     std::vector<kfc::model::ArrivalEvent> history;
     /// How far the game had got when `board` was snapshotted -- see
-    /// BoardUpdate::revision. The client ignores any update at or below this,
-    /// since the snapshot already reflects those arrivals. A joiner is
-    /// registered for broadcasts before its snapshot is taken, so it can
-    /// receive an update the snapshot already contains but never miss one.
+    /// BoardUpdate::revision. A joiner is registered for broadcasts before
+    /// its snapshot is taken, so it may see an update the snapshot already
+    /// contains (this is how it tells) but can never miss one.
     std::uint64_t revision = 0;
-    /// Both seats' usernames, for the client to show whose game this is --
-    /// the UI spec's "Presenting player names". Empty until that seat is
-    /// actually filled (a spectator arriving between the first and second
-    /// player sees black_username still empty). Optional on the wire (see
-    /// decode_server_message) so an older client/server pair, or a
-    /// hand-written Welcome, still decodes -- just without names to show.
+    /// Both seats' usernames/ratings, for the client to show whose game
+    /// this is -- empty/0 until that seat is filled. Optional on the wire
+    /// (see decode_server_message) so an older pair still decodes.
     std::string white_username;
     std::string black_username;
-    /// Each seat's rating at the moment they were seated -- fixed for the
-    /// rest of the match, not re-read live. 0 until that seat is filled,
-    /// same convention as the empty-string default above. Optional on the
-    /// wire for the same backward-compatibility reason.
     int white_rating = 0;
     int black_rating = 0;
 };
@@ -178,14 +165,9 @@ inline constexpr const char* kRoomNameTaken = "room_name_taken";
 /// The room already has as many spectators as it will take -- a resource cap
 /// against one attacker opening unbounded watch connections to a room.
 inline constexpr const char* kSpectatorLimitReached = "spectator_limit_reached";
-/// Too many Play/CreateRoom/JoinRoom attempts from this connection's remote
-/// IP in the current window -- see kfc::server::RateLimiter. A seating
-/// attempt (this connection's one and only one) always closes the
-/// connection whether it succeeds or fails, so reaching this budget takes a
-/// fresh Login -- and therefore a fresh spend of login_reasons::kRateLimited's
-/// own budget -- for every attempt; this exists as its own, separately
-/// tunable budget rather than relying on that as an accident of how sessions
-/// are torn down.
+/// Too many Play/CreateRoom/JoinRoom attempts from this remote IP in the
+/// current window (see RateLimiter) -- a separate, own budget from
+/// login_reasons::kRateLimited, not an accident of how sessions close.
 inline constexpr const char* kRateLimited = "rate_limited";
 }  // namespace join_reasons
 

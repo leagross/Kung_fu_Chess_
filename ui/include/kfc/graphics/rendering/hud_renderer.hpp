@@ -13,13 +13,9 @@ namespace kfc::graphics {
 /// top, score at bottom), black's on the right (score on top, moves below).
 class HudRenderer {
 public:
-    /// white_username/black_username label each panel (UI spec: "Presenting
-    /// player names") -- empty falls back to the plain colour name "White"/
-    /// "Black", which covers local play (no accounts at all) and the brief
-    /// window before White's own MatchStart names Black (see
-    /// GameSession::black_username's own doc comment). white_rating/
-    /// black_rating are shown alongside the name in parentheses; 0 (the
-    /// same "not known yet" convention as the username) omits it.
+    /// white_username/black_username label each panel -- empty falls back to
+    /// "White"/"Black" (local play, or before MatchStart names Black).
+    /// Ratings show in parentheses next to the name; 0 omits them.
     void draw(const kfc::model::MoveLogObserver& move_log, const kfc::model::ScoreObserver& score,
               int board_pixel_width, int board_pixel_height, Img& canvas, const std::string& white_username = {},
               const std::string& black_username = {}, int white_rating = 0, int black_rating = 0) const;

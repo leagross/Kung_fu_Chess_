@@ -84,11 +84,9 @@ int main(int argc, char** argv) {
 
         kfc::graphics::Img background_texture = background_source.cover_scaled(canvas_width, canvas_height);
 
-        // board.png carries residual near-255 alpha noise even where meant
-        // opaque, which would force draw_on's expensive blend path for no
-        // benefit; board_texture itself keeps its real alpha (pieces need
-        // it), and background_texture stays 4-channel so the HUD's
-        // translucent panels can genuinely blend onto it.
+        // board.png carries residual alpha noise even where meant opaque,
+        // which would force draw_on's expensive blend path for no benefit.
+        // background_texture stays 4-channel so the HUD's panels can blend.
         framed_board_texture.force_opaque();
 
         // Background + frame never change frame-to-frame; composed once
@@ -300,11 +298,9 @@ int main(int argc, char** argv) {
                 // copyTo path.
                 canvas.force_opaque();
 
-                // Picked up fresh every frame so resizing the window takes
-                // effect immediately. Background covers the window
-                // completely (cropped if needed); game content is scaled
-                // uniformly and centered on top. ScreenMapper's click
-                // mapping mirrors the content placement, not the background's.
+                // Picked up fresh every frame so resizing takes effect
+                // immediately. Background covers the window completely;
+                // game content is scaled uniformly, centered on top.
                 cv::Rect current_window_rect = cv::getWindowImageRect(window_name);
                 int current_window_width = current_window_rect.width > 0 ? current_window_rect.width : display_width;
                 int current_window_height =

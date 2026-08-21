@@ -103,12 +103,10 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
         }
     }
     active_motions_ = std::move(still_active);
-    // A piece captured this tick may still have had its own Move in flight
-    // (Board shows a mover at its source cell until arrival, so it stays
-    // capturable mid-flight) -- drop that stale motion and cooldown now, or
-    // it would "resurrect" on a later advance_time call. Always a Move,
-    // never a JumpInPlace: an airborne piece is PassedThroughAirborne, never
-    // EnemyCaptured (see JumpRaceTest).
+    // A piece captured this tick may still have its own Move in flight
+    // (capturable mid-flight); drop that stale motion/cooldown now or it
+    // would "resurrect" later. Always a Move, never JumpInPlace (an
+    // airborne piece is PassedThroughAirborne, never EnemyCaptured).
     for (PieceId captured_id : captured_this_batch) {
         std::erase_if(active_motions_, [captured_id](const Motion& m) {
             return m.moving_piece.id == captured_id && m.kind == MotionKind::Move;

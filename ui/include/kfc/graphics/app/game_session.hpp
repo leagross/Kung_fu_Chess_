@@ -14,21 +14,15 @@
 namespace kfc::graphics::app {
 
 /// Owns whichever concrete game backend the command line selects (local
-/// kfc::texttests::Game or networked net::ServerLink) plus everything that
-/// backend needs for its lifetime, so main() holds a single GameSession
-/// instead of several optional/unique_ptr members whose construction order
-/// must line up (Game's MotionFactory holds long-lived references into the
-/// speed provider/cooldown policies).
-///
-/// Gameplay config is loaded from the same gameplay.json the server reads,
-/// so a piece behaves the same whether local or networked.
+/// kfc::texttests::Game or networked net::ServerLink) plus everything it
+/// needs for its lifetime. Gameplay config is the same gameplay.json the
+/// server reads, so a piece behaves the same whether local or networked.
 class GameSession {
 public:
     /// Reads --server=ws://host:port from argv. Without it, starts local
-    /// single-player, no login needed. Board dimensions are known
-    /// immediately either way; networked play still needs set_credentials()
-    /// (via the Login dialog) then connect() before it actually dials out.
-    /// Throws std::runtime_error if config or the board file can't be loaded.
+    /// single-player, no login needed. Networked play still needs
+    /// set_credentials() then connect() before it dials out. Throws
+    /// std::runtime_error if config or the board file can't be loaded.
     GameSession(int argc, char** argv);
 
     /// True for a --server session (which must set_credentials() and
@@ -37,13 +31,9 @@ public:
         return networked_;
     }
 
-    /// Supplies the username/password connect() will authenticate with. Only
-    /// meaningful (and only ever called) for a networked session -- see
-    /// is_networked(). Used to live in this class's own constructor, reading
-    /// --username from argv and prompting for the password in the terminal
-    /// (with no window even open yet); moved out to a caller-supplied value
-    /// so the Login dialog can collect both graphically instead -- see
-    /// IRoomPrompt::ask_login.
+    /// Supplies the username/password connect() will authenticate with --
+    /// only meaningful for a networked session. Set from the Login dialog
+    /// (see IRoomPrompt::ask_login) before connect() is ever called.
     void set_credentials(std::string username, std::string password) {
         username_ = std::move(username);
         password_ = std::move(password);

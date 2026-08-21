@@ -6,10 +6,8 @@
 namespace kfc::server {
 
 /// Where a room lives when it may belong to another worker process, not
-/// just this one's RoomManager::named_rooms_. Lets RoomManager and its
-/// tests stay ignorant of the actual implementation (Redis today).
-///
-/// Implementations must be safe to call from many threads at once.
+/// just this one's RoomManager::named_rooms_. Lets RoomManager stay
+/// ignorant of the actual implementation (Redis today). Must be thread-safe.
 class IRoomDirectory {
 public:
     virtual ~IRoomDirectory() = default;

@@ -29,27 +29,15 @@ namespace kfc::server {
 using RoomId = int;
 
 /// Owns every live Match -- one per room -- and routes each connection to
-/// the right one, so the server can host many independent games at once.
-///
-/// A connection is placed in a room at login (join_any: fill an open seat,
-/// else open a fresh room); later messages route back by RoomId. A room is
-/// torn down once its last player disconnects.
-///
-/// Board/config: each room gets its own fresh Board and its own copy of the
-/// shared GameplayConfig, so no two games share mutable state.
-///
-/// Threading: IXWebSocket calls these from connection threads. Only the room
-/// table and its per-room counters are guarded here; Match's own methods are
-/// already internally synchronized, and calls that can block or do network
-/// I/O (join's Welcome send, on_disconnect's hand-off) happen with
-/// rooms_mutex_ released, so a slow join never stalls move routing.
+/// the right one by RoomId. Torn down once its last player disconnects.
+/// Blocking calls (Welcome sends, etc.) happen with rooms_mutex_ released,
+/// so a slow join never stalls routing.
 class RoomManager {
 public:
     /// board_factory produces a fresh starting Board per room. on_result, if
-    /// set, is forwarded to every room's Match (see Match::ResultCallback);
-    /// RoomManager itself stays unaware of ELO. directory/self_url, if
-    /// given, are where rooms register/look themselves up across workers
-    /// (see IRoomDirectory); left null, RoomManager behaves as single-worker.
+    /// set, is forwarded to every room's Match (RoomManager stays ELO-
+    /// agnostic). directory/self_url, if given, register/look up rooms
+    /// across workers; left null, this behaves as single-worker.
     RoomManager(std::function<kfc::model::Board()> board_factory, kfc::protocol::FileLogger& logger,
                 kfc::protocol::GameplayConfig config = {}, ResultCallback on_result = {},
                 int disconnect_grace_ms = kDefaultDisconnectGraceMs, IRoomDirectory* directory = nullptr,
@@ -82,14 +70,9 @@ public:
                                                    CloseFn close = {}, std::string* failure_reason = nullptr);
 
     /// Joins an existing named room: a dropped player whose grace is still
-    /// running and whose username matches reclaims their seat (see
-    /// Match::reclaimable_seat_for); else the first opponent is seated
-    /// Black; else they watch.
-    ///
-    /// nullopt if no room by that name exists or its game is already
-    /// decided. If this worker doesn't know the name but directory_ says
-    /// another worker does, redirect_url receives that worker's address
-    /// instead of failure_reason -- caller's cue to send JoinRedirect.
+    /// running reclaims their seat; else the first opponent is seated Black;
+    /// else they watch. nullopt if no such room exists or it's decided; if
+    /// another worker owns it, redirect_url gets its address instead.
     [[nodiscard]] std::optional<Seat> join_room(const std::string& name, const std::string& username, int rating,
                                                  SendFn send, CloseFn close = {},
                                                  std::string* failure_reason = nullptr,
@@ -98,12 +81,9 @@ public:
     /// No-op if the room no longer exists.
     void enqueue(RoomId room, kfc::model::PieceColor from, kfc::protocol::ClientMessage message);
 
-    /// Ends that room's game in the opponent's favour (see
-    /// Match::on_disconnect) and, once no players remain, tears the room down.
-    ///
-    /// Takes the whole Seat rather than its parts because they must agree:
-    /// passing a viewer's meaningless colour as a player's would forfeit an
-    /// innocent game.
+    /// Ends that room's game in the opponent's favour and, once no players
+    /// remain, tears it down. Takes the whole Seat (not just its parts) so a
+    /// viewer's meaningless colour can never be mistaken for a player's.
     void on_disconnect(const Seat& seat);
 
     [[nodiscard]] std::size_t room_count() const;
@@ -111,14 +91,9 @@ public:
     /// 0 once stop_all() has torn the scheduler down.
     [[nodiscard]] std::size_t worker_count() const;
 
-    /// Blocks until every worker thread has exited. Idempotent.
-    ///
-    /// **Call before shutting the socket layer down.** A frozen match's tick
-    /// broadcasts every second, which calls send() on the transport's
-    /// sockets; tearing the transport down first races a worker thread
-    /// mid-send against the socket being closed underneath it.
-    ///
-    /// The destructor calls this too.
+    /// Blocks until every worker thread has exited. Idempotent. Call before
+    /// shutting the socket layer down -- a frozen match's tick still sends
+    /// on it every second (the destructor calls this too).
     void stop_all();
 
 private:
@@ -165,15 +140,10 @@ private:
 
     Metrics* metrics_;
 
-    // Pointer (not a plain member) so stop_all() can tear it down and join
-    // its worker threads; null after that makes a second stop_all() a no-op.
-    //
-    // Guarded by scheduler_mutex_, not a bare null check: unique_ptr::reset()
-    // runs the destructor (joining every worker thread) *before* storing
-    // nullptr, so a connection thread reading scheduler_ as non-null during
-    // that window could otherwise call into a MatchScheduler mid-teardown.
-    // The mutex makes "destroy it" and "look up and call into it" mutually
-    // exclusive; the actual joins happen with the mutex released.
+    // Pointer, not a plain member, so stop_all() can tear it down (null
+    // after makes a second call a no-op). Guarded by scheduler_mutex_, not a
+    // bare null check: reset() joins every worker before storing nullptr, so
+    // the mutex is what stops a connection thread from calling in mid-teardown.
     mutable std::mutex scheduler_mutex_;
     std::unique_ptr<MatchScheduler> scheduler_;
 

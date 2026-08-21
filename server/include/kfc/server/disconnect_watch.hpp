@@ -9,11 +9,9 @@
 
 namespace kfc::server {
 
-/// Grace period a dropped player gets before the match is forfeited for them.
-///
-/// A small state machine (idle, counting down, expired) with its own
-/// thread-safety: a drop is reported from a connection thread, the countdown
-/// runs on the tick thread, and a returning player cancels it from a third.
+/// Grace period a dropped player gets before the match is forfeited for
+/// them. A small state machine (idle, counting down, expired), thread-safe:
+/// reported from a connection thread, counted down on the tick thread.
 class DisconnectWatch {
 public:
     /// grace_ms is how long a dropped player has to come back.

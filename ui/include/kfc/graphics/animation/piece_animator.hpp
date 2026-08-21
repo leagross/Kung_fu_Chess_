@@ -18,10 +18,8 @@ public:
     explicit PieceAnimator(const PieceAnimationSet& animation_set);
 
     /// Call once per render tick, per live piece. board_cell is used when
-    /// motion is empty. A Motion present last tick and gone this tick is
-    /// read as "just arrived" and triggers a state transition (checked
-    /// directly rather than via Game::is_piece_busy, since a short/zero
-    /// cooldown can make that window too narrow for a render tick to hit).
+    /// motion is empty. A Motion present last tick and gone this tick reads
+    /// as "just arrived" and triggers a state transition.
     void advance(int ms, const kfc::model::Position& board_cell, const std::optional<kfc::model::Motion>& motion);
 
     /// Interpolated between Motion's source/destination while Moving, else

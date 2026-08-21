@@ -25,11 +25,9 @@ struct Button {
 /// callers test clicks against exactly what was drawn.
 Button draw_button(Img& frame, const std::string& label, int cx, int cy, int w, int h);
 
-/// The first screen of a networked client: PLAY (matchmaking) or ROOM
-/// (create/join a named one). Blocks until the user picks something,
-/// returning the seating message to send once connected, or std::nullopt if
-/// they closed the window or pressed Esc. Draws into the window main()
-/// already created.
+/// The first screen of a networked client: PLAY or ROOM. Blocks until the
+/// user picks something, returning the seating message to send, or
+/// std::nullopt if they closed the window. Draws into main()'s own window.
 [[nodiscard]] std::optional<kfc::protocol::ClientMessage> run_home_screen(const std::string& window_name,
                                                                           const Img& background_source,
                                                                           dialogs::IRoomPrompt& prompt);

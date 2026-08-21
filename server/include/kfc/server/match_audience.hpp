@@ -13,19 +13,10 @@
 
 namespace kfc::server {
 
-/// Everyone attached to one match -- the two seated players and any number of
-/// watchers -- and the only way to reach them. Knows nothing about rules,
-/// board, or clock.
-///
-/// Threading: every method is internally synchronized. Callers pass
-/// already-encoded text rather than protocol messages, so encoding (and its
-/// logging) stays in Match.
-///
-/// **No callback is ever invoked while the lock is held**: send() can block
-/// on a slow socket, and a failed send calls back in as a disconnect, which
-/// would deadlock on a non-recursive mutex. The roster is therefore
-/// copy-on-write -- readers take a pointer under the lock and let go;
-/// writers publish a new version rather than editing the one being read.
+/// Everyone attached to one match -- the two seated players and any number
+/// of watchers -- and the only way to reach them. Internally synchronized,
+/// but no callback ever runs while the lock is held (send() can block, and
+/// a failed send re-enters as a disconnect) -- the roster is copy-on-write.
 class MatchAudience {
 public:
     /// White first, then Black, remembering username/rating/how to reach

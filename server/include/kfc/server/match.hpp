@@ -64,13 +64,9 @@ inline constexpr int kDefaultReleaseDelayMs = 3000;
 inline constexpr std::size_t kMaxQueuedCommands = 512;
 
 /// Owns one playable match: a GameCore plus a thread-safe incoming-command
-/// queue. Connection threads only ever call enqueue(); every mutation
-/// happens inside tick(), on whichever thread a MatchScheduler assigns.
-///
-/// One Match is exactly two players (first join = White, second = Black),
-/// no spectators seated, no persistence. Matchmaking across many concurrent
-/// games lives one level up in RoomManager. Commands are applied in queue
-/// order, deterministically.
+/// queue. Connection threads only call enqueue(); every mutation happens
+/// inside tick(), on whichever thread a MatchScheduler assigns. Exactly two
+/// players (first join = White, second = Black); commands apply in queue order.
 class Match {
 public:
     /// board is the starting position; logger must outlive this Match.
@@ -93,11 +89,9 @@ public:
     [[nodiscard]] std::optional<kfc::model::PieceColor> join(const std::string& username, int rating, SendFn send,
                                                               CloseFn close = {});
 
-    /// Registers a watcher rather than a player: same Welcome/broadcasts as
-    /// a player but no colour, never owns a piece, disconnect is not a
-    /// forfeit. Returns 0 if MatchAudience::kMaxSpectators is already
-    /// attached, in which case nothing is sent and the caller owes this
-    /// connection a JoinFailed.
+    /// Registers a watcher rather than a player: same Welcome/broadcasts,
+    /// no colour, disconnect is not a forfeit. Returns 0 if
+    /// MatchAudience::kMaxSpectators is already attached (caller owes a JoinFailed).
     [[nodiscard]] WatcherId join_spectator(const std::string& username, SendFn send, CloseFn close = {});
 
     /// Unknown handles are ignored.
@@ -134,12 +128,9 @@ public:
     void on_disconnect(kfc::model::PieceColor color);
 
     /// Drains the command queue, advances the simulation by elapsed_ms, and
-    /// broadcasts what happened. now/elapsed_ms come in as parameters
-    /// (not read from a clock) so one thread can drive many matches and
-    /// tests can step deterministically.
-    ///
-    /// Safe to call from any one thread at a time; two threads must not
-    /// tick the same match concurrently.
+    /// broadcasts what happened. now/elapsed_ms are parameters (not read
+    /// from a clock) so one thread can drive many matches. Not safe to call
+    /// for the same match from two threads at once.
     void tick(std::chrono::steady_clock::time_point now, int elapsed_ms);
 
     /// Callback enqueue() fires after queuing a command, so a MatchScheduler
@@ -198,11 +189,10 @@ private:
     // enqueue() (any connection thread) reads it without a lock.
     std::function<void()> wake_hook_;
 
-    // tick-thread-only game-over state; game_over_ latches so a stray
-    // command after the win never mutates a finished board. Atomic only so
-    // is_over() can be asked from a connection thread. pending_game_over_ is
-    // consumed by tick() after releasing board_mutex_, since network I/O
-    // must not hold the board lock.
+    // tick-thread-only; game_over_ latches so a stray command after the win
+    // never mutates a finished board (atomic so is_over() can be asked from
+    // any thread). pending_game_over_ is consumed by tick() after releasing
+    // board_mutex_ -- network I/O must not hold the board lock.
     std::atomic<bool> game_over_{false};
     std::optional<kfc::protocol::GameOver> pending_game_over_;
 

@@ -29,23 +29,15 @@ enum class LogLevel {
     Error,
 };
 
-/// Timestamped line-appender used by kfc_server and kfc_gui_app's ServerLink
-/// to log protocol traffic and events. Rotation is a single-generation size
-/// cap (kfc_server.log -> kfc_server.log.1, previous .1 discarded).
-///
-/// Thread-safe (one mutex): server tick thread and I/O threads can all log
-/// without external synchronization.
-///
-/// Debug is buffered (too frequent to flush per-line); Info and above are
-/// flushed immediately since they're rare and losing the last one before a
-/// crash matters. The destructor flushes whatever is left.
+/// Timestamped line-appender used by kfc_server and ServerLink. Rotation is
+/// a single-generation size cap (kfc_server.log -> .log.1). Thread-safe (one
+/// mutex). Debug is buffered; Info and above flush immediately (rare, and
+/// losing the last one before a crash matters). Destructor flushes the rest.
 class FileLogger {
 public:
     /// Opens (or creates) log_path in append mode. Throws std::runtime_error
-    /// if the file cannot be opened.
-    ///
-    /// minimum is the least severe level that will be written. max_bytes is
-    /// the size past which the file rotates.
+    /// if it can't be opened. minimum is the least severe level written;
+    /// max_bytes is the size past which the file rotates.
     explicit FileLogger(const std::filesystem::path& log_path, LogLevel minimum = LogLevel::Debug,
                         std::uintmax_t max_bytes = kDefaultMaxLogBytes);
 

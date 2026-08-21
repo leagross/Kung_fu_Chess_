@@ -14,17 +14,10 @@ namespace kfc::server {
 class Match;
 class Metrics;
 
-/// Drives many matches from a few threads (a fixed pool of workers, each
-/// ticking its own slice of matches sixty times a second) rather than one
-/// thread per match, which does not scale to the room counts targeted here.
-///
-/// Also avoids a deadlock: remove() only unregisters and never joins a
-/// thread, unlike the old per-match thread that could be joined from inside
-/// a connection callback while it was itself inside send().
-///
-/// Threading: add/remove/wake are safe from any thread. A given match is
-/// only ever ticked by its own worker, so Match::tick's one-thread-at-a-time
-/// requirement holds without an extra lock.
+/// Drives many matches from a fixed pool of worker threads (each ticking
+/// its own slice 60x/second) instead of one thread per match. add/remove/
+/// wake are safe from any thread; a given match is only ever ticked by its
+/// own worker, so Match::tick's one-at-a-time requirement holds unlocked.
 class MatchScheduler {
 public:
     /// worker_count of 0 means one per hardware core.

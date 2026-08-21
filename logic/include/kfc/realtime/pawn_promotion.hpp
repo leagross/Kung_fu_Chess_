@@ -5,11 +5,9 @@
 
 namespace kfc::model {
 
-/// A Pawn that lands on row 0 (White) or the board's last row (Black)
-/// becomes a Queen. Not PawnRule's concern: promotion is a consequence of
-/// arrival, not of move legality. Returns true if promotion happened, so the
-/// caller can record it on ArrivalEvent::was_promotion before arrived.kind
-/// stops revealing the piece was ever a pawn.
+/// A Pawn landing on row 0 (White) or the last row (Black) becomes a Queen
+/// -- a consequence of arrival, not of move legality (not PawnRule's
+/// concern). Returns true if it promoted, for ArrivalEvent::was_promotion.
 inline bool apply_pawn_promotion(Piece& arrived, const Board& board) {
     if (arrived.kind != PieceKind::Pawn) {
         return false;

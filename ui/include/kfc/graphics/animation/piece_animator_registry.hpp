@@ -17,11 +17,9 @@ public:
     /// asset_library must outlive this PieceAnimatorRegistry.
     explicit PieceAnimatorRegistry(const PieceAssetLibrary& asset_library);
 
-    /// Creates an animator for any new PieceId, advances all animators,
-    /// discards ones whose piece was captured, and rebuilds an animator
-    /// whose piece's PieceKind changed (a pawn promotion, since PieceId is
-    /// stable but kind isn't). A kind with no art in asset_library is
-    /// skipped with a stderr warning.
+    /// Creates an animator for any new PieceId, advances all, discards
+    /// captured ones, and rebuilds one whose PieceKind changed (promotion).
+    /// A kind with no art in asset_library is skipped with a stderr warning.
     void advance(int ms, const kfc::texttests::IGameView& game);
 
     /// Read-only access to the live animators, for whatever draws them.

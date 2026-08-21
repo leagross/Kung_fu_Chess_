@@ -7,11 +7,9 @@
 
 namespace kfc::model {
 
-/// Watches for a king capture and remembers who did it, for display only --
-/// never gates or rejects a move (GameEngine::is_game_over() does that
-/// independently). A second king capture only counts as a draw if its
-/// arrived_at_ms exactly matches the first's; a later timestamp means the
-/// first capture already decided the game.
+/// Watches for a king capture and remembers who did it, for display only.
+/// A second king capture only counts as a draw if its arrived_at_ms exactly
+/// matches the first's -- a later timestamp means the game was already decided.
 class GameOverObserver : public IGameObserver {
 public:
     void on_arrival(const ArrivalEvent& event) override;

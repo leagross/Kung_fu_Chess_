@@ -17,11 +17,9 @@
 
 namespace kfc::texttests {
 
-/// The local-play host for one playable game: owns a GameCore (Board ->
-/// RuleEngine -> RealTimeArbiter -> MotionFactory -> GameEngine) plus a
+/// The local-play host for one playable game: owns a GameCore plus a
 /// Controller for click routing and the event bus arrivals publish on.
-/// Implements IGameView so local and networked (ServerLink) play are
-/// interchangeable to MouseInputAdapter/PieceAnimatorRegistry.
+/// Implements IGameView so local and networked play are interchangeable.
 class Game : public IGameView {
 public:
     /// speed_provider/meters_per_cell/standard_policy/jump_policy are

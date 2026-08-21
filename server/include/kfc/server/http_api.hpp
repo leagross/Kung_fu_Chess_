@@ -25,25 +25,10 @@ class Metrics;
 
 namespace kfc::server {
 
-/// The non-realtime half of the server's public surface: register/login and
-/// match history, over plain HTTP+JSON. Uses the same SQLite-backed
-/// UserRepository the WebSocket login flow uses, so there is one account
-/// store, not two.
-///
-/// A second listening socket, not a second port on WebSocketGameServer's own
-/// server: ix::HttpServer cannot share a port with another WebSocketServer
-/// instance. Lifecycle mirrors WebSocketGameServer's (listen/start/wait/stop).
-///
-/// Register and login return a bearer token (see AuthTokenStore);
-/// GET /api/history/{username} requires that token and refuses to serve
-/// anyone else's history with it.
-///
-/// POST /api/auth/register and /api/auth/login share a RateLimiter budget
-/// with ClientSession's WebSocket Login path, so an attacker can't dodge a
-/// throttle by switching between the two.
-///
-/// GET /metrics (Prometheus scrape target) is also served here, unauthenticated
-/// like /health.
+/// The non-realtime half of the server: register/login and match history
+/// over HTTP+JSON, sharing UserRepository and the auth RateLimiter budget
+/// with ClientSession's WebSocket Login path. A second listening socket
+/// (ix::HttpServer can't share a port), also serving /metrics and /health.
 class HttpApiServer {
 public:
     /// users, rooms, sessions, metrics, auth_limiter and logger must all

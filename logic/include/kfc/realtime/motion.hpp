@@ -6,13 +6,10 @@
 
 namespace kfc::model {
 
-/// An in-flight move, tracked outside Board -- the moving piece stays put on
-/// Board until this motion resolves on arrival.
-///
-/// moving_piece is a full snapshot taken at motion start, not just an id:
-/// once two motions can race for the same destination cell, one resolving
-/// first may rewrite that cell before the other resolves, so trusting
-/// Board's current contents to identify the mover would be wrong.
+/// An in-flight move, tracked outside Board until it resolves on arrival.
+/// moving_piece is a full snapshot at motion start, not just an id -- two
+/// motions racing for one cell means Board's current contents can't be
+/// trusted to identify the mover.
 struct Motion {
     Piece moving_piece;
     Position source;

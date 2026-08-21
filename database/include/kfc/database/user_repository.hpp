@@ -30,13 +30,10 @@ struct GameRecord {
     std::string ended_at;                          // ISO-8601 UTC, ready for JSON
 };
 
-/// Server-side account store, backed by a single SQLite file. One row per
-/// user: username, Argon2id password hash (see password_hash.hpp; the salt
-/// column is unused since Argon2 carries its own salt), and ELO rating.
-///
-/// SQLite implementation of IUserStore -- right for a single machine, wrong
-/// for the load Server_Design.md targets, which is why callers hold the
-/// interface rather than this class.
+/// Server-side account store, backed by a single SQLite file: username,
+/// Argon2id password hash, ELO rating per row. SQLite implementation of
+/// IUserStore -- fine for one machine, not the scale Server_Design.md
+/// targets, which is why callers hold the interface, not this class.
 class UserRepository : public IUserStore {
 public:
     /// Opens (creating if needed) the SQLite database at db_path and ensures
@@ -48,10 +45,8 @@ public:
     UserRepository& operator=(const UserRepository&) = delete;
 
     /// Registers username with password on first sight (rating =
-    /// kStartingRating), or verifies password against the stored hash on a
-    /// return visit. reason is "wrong_password", or "invalid_username"/
-    /// "weak_password" for a new account that fails the length/character
-    /// rules -- in which case, like a wrong password, nothing is created.
+    /// kStartingRating), or verifies against the stored hash on return.
+    /// reason is "wrong_password", "invalid_username" or "weak_password".
     [[nodiscard]] AuthOutcome authenticate(const std::string& username, const std::string& password) override;
 
     /// The user's current rating, or std::nullopt if there is no such user.

@@ -6,11 +6,9 @@
 
 namespace kfc::graphics {
 
-/// Converts a mouse event's raw pixel position (in the window's current
-/// on-screen size, which changes as a resizable cv::WINDOW_NORMAL window is
-/// dragged) into fixed native canvas pixel space. The canvas is scaled
-/// uniformly to fit inside the window and centered; queries the window's
-/// current size via cv::getWindowImageRect at every click.
+/// Converts a mouse event's raw pixel position (in the window's current,
+/// resizable on-screen size) into fixed native canvas pixel space, scaled
+/// uniformly to fit and centered. Queries the window's size at every click.
 class ScreenMapper {
 public:
     /// window_name must already exist (cv::namedWindow called first).

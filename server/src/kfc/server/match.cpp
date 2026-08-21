@@ -137,14 +137,10 @@ void Match::tick(std::chrono::steady_clock::time_point now, int elapsed_ms) {
                     "Match: dropped " + std::to_string(dropped) + " command(s) -- queue full");
     }
 
-    // Board-touching work runs under board_mutex_ so a concurrent join()
-    // snapshot never reads the board mid-mutation; released before
-    // broadcasting since network I/O must not hold the board lock.
-    //
-    // engine().wait() only runs while Running (not Waiting, not Frozen, not
-    // Finished), to avoid ticking idle/finished rooms at full rate. Read
-    // once before apply() so the tick that decides the match still gets its
-    // engine().wait() call.
+    // Board-touching work runs under board_mutex_ (released before
+    // broadcasting -- network I/O must not hold it). engine().wait() only
+    // runs while Running, read once before apply() so the deciding tick
+    // still gets its wait() call.
     bool should_advance = state() == MatchState::Running;
 
     kfc::model::ArrivalEvents events;

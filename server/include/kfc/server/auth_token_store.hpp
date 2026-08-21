@@ -9,10 +9,8 @@
 namespace kfc::server {
 
 /// Issues and validates opaque bearer tokens for the HTTP API's protected
-/// endpoints. Expiry is checked lazily on username_for(); there is no
-/// background sweep and no revocation before expiry.
-///
-/// Threading: internally synchronized.
+/// endpoints. Expiry is checked lazily on username_for() -- no background
+/// sweep, no revocation before expiry. Internally synchronized.
 class AuthTokenStore {
 public:
     static constexpr std::chrono::seconds kTokenLifetime{24 * 60 * 60};

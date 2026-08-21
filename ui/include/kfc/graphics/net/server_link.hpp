@@ -25,19 +25,9 @@ class WebSocket;
 namespace kfc::graphics::net {
 
 /// The networked counterpart to kfc::texttests::Game: implements IGameView
-/// the same way, but every mutation is server-driven. board_ is a pure
-/// mirror, replaced by Welcome and updated only by replaying BoardUpdate's
-/// ArrivalEvents -- no local RealTimeArbiter.
-///
-/// motion_for() interpolates from predicted_motions_, ticked forward once a
-/// MotionStarted arrives purely so PieceAnimator has something to draw
-/// before the real BoardUpdate confirms the result.
-///
-/// Threading: IXWebSocket delivers on its own thread. Incoming messages are
-/// queued under a mutex and applied to board_ only from wait(), on the
-/// render thread, so every mutation happens on the thread that reads it.
-/// Welcome is awaited synchronously before the render loop starts, so no
-/// further synchronization is needed after that.
+/// the same way, but board_ is a pure mirror updated only by replaying
+/// BoardUpdate's ArrivalEvents -- no local RealTimeArbiter. Messages queue
+/// on IXWebSocket's thread and apply to board_ only from wait().
 class ServerLink : public kfc::texttests::IGameView, public kfc::model::IMoveRequester {
 public:
     /// Connects asynchronously to server_url and sends Login once open.
@@ -157,11 +147,9 @@ private:
     std::optional<kfc::input::BoardMapper> board_mapper_;
     std::optional<kfc::input::Controller> controller_;
     std::unordered_map<kfc::model::PieceId, kfc::model::Motion> predicted_motions_;
-    // Wall-clock instant each motion actually started, so wait() recomputes
-    // elapsed_ms as `now - this` every frame rather than accumulating a
-    // per-frame delta -- accumulation silently loses time whenever a frame's
-    // gap is clamped (e.g. this window losing focus), drifting the two
-    // clients' animations apart.
+    // Wall-clock start of each motion, so wait() recomputes elapsed_ms as
+    // `now - this` every frame instead of accumulating a per-frame delta
+    // (which drifts whenever a frame's gap is clamped, e.g. losing focus).
     std::unordered_map<kfc::model::PieceId, std::chrono::steady_clock::time_point> motion_start_times_;
 
     std::mutex incoming_mutex_;

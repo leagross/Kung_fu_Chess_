@@ -9,16 +9,9 @@
 namespace kfc::server {
 
 /// Fixed-window request-rate limiter keyed by an arbitrary string (e.g.
-/// remote IP for the HTTP register/login endpoints).
-///
-/// Fixed window rather than a sliding log or token bucket: at most 2x
-/// max_attempts can land in a rolling period straddling a window boundary,
+/// remote IP). At most 2x max_attempts can land across a window boundary --
 /// an acceptable bound for slowing credential stuffing, not an exact rate.
-///
-/// now is a parameter (not read from the clock) so tests can advance time
-/// deterministically.
-///
-/// Threading: internally synchronized.
+/// now is a parameter so tests can advance time deterministically.
 class RateLimiter {
 public:
     /// At most max_attempts calls to allow() for the same key succeed within

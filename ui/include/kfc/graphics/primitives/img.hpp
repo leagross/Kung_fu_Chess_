@@ -11,11 +11,9 @@ class Img {
 public:
     Img();
 
-    /// Loads the image at path (with alpha channel, if present) and
-    /// optionally resizes it. If size is {0, 0} (the default), the image
-    /// keeps its native pixel dimensions. keep_aspect shrinks so the longer
-    /// side fits size while preserving aspect ratio, instead of stretching
-    /// to size exactly. Throws std::runtime_error if path cannot be read.
+    /// Loads path (with alpha channel, if present) and optionally resizes.
+    /// size {0,0} keeps native dimensions; keep_aspect shrinks to fit rather
+    /// than stretching. Throws std::runtime_error if path can't be read.
     Img& read(const std::string& path, const std::pair<int, int>& size = {}, bool keep_aspect = false,
               int interpolation = cv::INTER_AREA);
 

@@ -7,13 +7,10 @@
 
 namespace kfc::server {
 
-/// Process-wide counters for GET /metrics, in Prometheus text exposition
-/// format. One instance lives in main(), shared so every connection thread
-/// increments the same atomics.
-///
-/// Deliberately holds only counters, not gauges like active connections/rooms:
-/// those already have an authoritative source (SessionRegistry, RoomManager),
-/// so render() reads them directly instead of tracking a copy that could drift.
+/// Process-wide counters for GET /metrics (Prometheus text format), shared
+/// so every connection thread increments the same atomics. Holds only
+/// counters -- gauges like active connections/rooms are read directly from
+/// their authoritative source (SessionRegistry, RoomManager) instead.
 class Metrics {
 public:
     void message_received() { messages_received_.fetch_add(1, std::memory_order_relaxed); }

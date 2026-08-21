@@ -41,11 +41,9 @@ RoomManager::~RoomManager() {
 }
 
 void RoomManager::stop_all() {
-    // Taken out under scheduler_mutex_ so a concurrent on_disconnect/enqueue
-    // either finishes its call before this runs or sees scheduler_ already
-    // null -- never a call into an object mid-destruction. Destroyed outside
-    // the lock: joining every worker thread is real time, and holding the
-    // lock across it would stall every connection thread on the hot path.
+    // Taken out under scheduler_mutex_ so a concurrent call never reaches an
+    // object mid-destruction; destroyed outside the lock since joining every
+    // worker thread is real time and would stall other connections otherwise.
     std::unique_ptr<MatchScheduler> to_destroy;
     {
         std::lock_guard<std::mutex> guard(scheduler_mutex_);

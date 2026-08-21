@@ -188,15 +188,10 @@ int main(int argc, char** argv) {
         // Shared budget across register/login/WebSocket-Login (see http_api.hpp).
         kfc::server::RateLimiter auth_limiter(10, std::chrono::minutes(1));
 
-        // A separate budget from auth_limiter's own, for Play/CreateRoom/
-        // JoinRoom -- see join_reasons::kRateLimited's doc comment for why
-        // this needs to exist at all given that a seating attempt already
-        // costs a fresh Login (and so a fresh spend of auth_limiter's
-        // budget) either way. 30/minute is generous for a real player (one
-        // successful attempt is the whole of a normal session; a few failed
-        // room-name guesses is the realistic ceiling) while still bounding
-        // how fast one IP can fill a room's MatchAudience::kMaxSpectators
-        // slots with fresh connections.
+        // A separate budget from auth_limiter's, for Play/CreateRoom/JoinRoom
+        // (see join_reasons::kRateLimited). 30/minute is generous for a real
+        // player while still bounding how fast one IP can fill a room's
+        // spectator slots with fresh connections.
         kfc::server::RateLimiter seat_limiter(30, std::chrono::minutes(1));
 
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result,

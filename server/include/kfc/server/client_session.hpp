@@ -27,13 +27,9 @@ namespace kfc::server {
 inline constexpr int kMaxMessagesPerSecond = 50;
 
 /// One connected client: authenticating, being seated, and having its
-/// gameplay messages routed to the right room. A successful Login claims the
-/// username so one account can't be in two games at once (see
-/// SessionRegistry). Order is enforced: Login, then one seating message,
-/// then Move/Jump/Resign.
-///
-/// Threading: IXWebSocket delivers one connection's callbacks on one thread,
-/// in order, so this needs no lock of its own.
+/// gameplay messages routed to the right room. A successful Login claims
+/// the username (see SessionRegistry). Order enforced: Login, one seating
+/// message, then Move/Jump/Resign. Needs no lock -- one thread, in order.
 class ClientSession {
 public:
     /// metrics, auth_limiter and seat_limiter default to null; related work

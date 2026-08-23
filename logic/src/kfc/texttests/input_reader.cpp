@@ -16,8 +16,7 @@ bool is_blank(const std::string& line) {
     return line.find_first_not_of(" \t\r\n") == std::string::npos;
 }
 
-/// Leading/trailing whitespace removed -- so a section marker written as
-/// " Board: " still matches "Board:" instead of being read as board content.
+/// So " Board: " still matches the "Board:" marker.
 std::string trim(const std::string& line) {
     std::size_t first = line.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {

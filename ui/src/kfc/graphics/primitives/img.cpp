@@ -104,8 +104,7 @@ Img Img::cover_scaled(int target_width, int target_height) const {
 
     double scale =
         std::max(static_cast<double>(target_width) / img_.cols, static_cast<double>(target_height) / img_.rows);
-    // max() against the target guards against std::lround coming out a pixel
-    // short after rounding, which would make cropped() reject the region.
+    // max() against the target guards against lround coming out a pixel short, which cropped() would reject.
     int scaled_width = std::max(target_width, static_cast<int>(std::lround(img_.cols * scale)));
     int scaled_height = std::max(target_height, static_cast<int>(std::lround(img_.rows * scale)));
     int crop_x = std::max(0, (scaled_width - target_width) / 2);
@@ -146,9 +145,7 @@ void Img::draw_on(Img& other_img, int x, int y) {
     cv::Mat roi = target_img(cv::Rect(x, y, w, h));
 
     if (source_img.channels() == 4 && has_transparency_) {
-        // Per-pixel alpha blend. Must use Mat::mul (element-wise), not
-        // operator* (matrix multiplication in OpenCV). CV_32F, not double:
-        // 8-bit inputs need no more precision, and this runs every frame.
+        // Per-pixel alpha blend; Mat::mul is element-wise, unlike OpenCV's operator*.
         std::vector<cv::Mat> source_channels;
         cv::split(source_img, source_channels);
         cv::Mat alpha;
@@ -168,9 +165,7 @@ void Img::draw_on(Img& other_img, int x, int y) {
         }
 
         if (roi.channels() == 4) {
-            // Standard "over" compositing for the destination's alpha too,
-            // so an overlay painted onto a still-transparent region ends up
-            // partially opaque rather than staying invisible.
+            // Standard "over" compositing for the destination's alpha too.
             cv::Mat dst_alpha;
             roi_channels[3].convertTo(dst_alpha, CV_32F, 1.0 / 255.0);
             cv::Mat new_alpha_f = alpha + (1.0 - alpha).mul(dst_alpha);

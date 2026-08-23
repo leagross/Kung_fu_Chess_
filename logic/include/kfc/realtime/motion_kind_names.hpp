@@ -8,10 +8,7 @@
 
 namespace kfc::model {
 
-/// MotionKind paired with its written name, for the JSON codec and for logs.
-/// Lives next to the enum rather than in the codec, for the same reason the
-/// piece tables do: one table, two directions, checked by the compiler. See
-/// kfc/model/piece_names.hpp.
+/// See kfc/model/piece_names.hpp for why this lives next to the enum.
 inline constexpr kfc::util::EnumNames<MotionKind, 2> kMotionKindNames{{{
     {MotionKind::Move, "Move"},
     {MotionKind::JumpInPlace, "JumpInPlace"},

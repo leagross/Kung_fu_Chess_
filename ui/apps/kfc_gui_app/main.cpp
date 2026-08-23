@@ -12,8 +12,7 @@
 
 #include <opencv2/opencv.hpp>
 
-// Native dialogs/audio -- the only things this client can't write once and
-// compile everywhere -- reached only through their factories (see room_prompt.hpp).
+// Native dialogs/audio, reached only through their factories (see room_prompt.hpp).
 #include "../../include/kfc/graphics/audio/sound_player_factory.hpp"
 #include "../../include/kfc/graphics/dialogs/room_prompt.hpp"
 #include "../../include/kfc/graphics/platform/screen_metrics.hpp"
@@ -68,15 +67,12 @@ int main(int argc, char** argv) {
             kfc::graphics::assets_root() / kfc::graphics::kDefaultAssetPackName / kfc::graphics::kBoardImageFilename;
         kfc::graphics::Img framed_board_texture;
         framed_board_texture.read(board_path.string(), {framed_board_width, framed_board_height});
-        // Cropped back out of the scaled framed board, so downstream drawing
-        // stays unaware the source image has a frame.
+        // Cropped back out so downstream drawing stays unaware the source image has a frame.
         kfc::graphics::Img board_texture =
             framed_board_texture.cropped(framed_board_inset_x, framed_board_inset_y, board_pixel_width,
                                           board_pixel_height);
 
-        // Read once at native resolution; every "cover"-scale use (canvas
-        // below, and per-frame window) scales fresh from this, so cropping
-        // never compounds.
+        // Read once at native resolution; every "cover"-scale use scales fresh from this.
         std::filesystem::path background_path =
             kfc::graphics::assets_root() / kfc::graphics::kDefaultAssetPackName / "background.png";
         kfc::graphics::Img background_source;
@@ -84,13 +80,10 @@ int main(int argc, char** argv) {
 
         kfc::graphics::Img background_texture = background_source.cover_scaled(canvas_width, canvas_height);
 
-        // board.png carries residual alpha noise even where meant opaque,
-        // which would force draw_on's expensive blend path for no benefit.
-        // background_texture stays 4-channel so the HUD's panels can blend.
+        // board.png's residual alpha noise would force draw_on's blend path for no benefit.
         framed_board_texture.force_opaque();
 
-        // Background + frame never change frame-to-frame; composed once
-        // instead of every frame.
+        // Background + frame never change frame-to-frame; composed once instead of every frame.
         kfc::graphics::Img static_backdrop = background_texture.clone();
         framed_board_texture.draw_on(static_backdrop, framed_board_x, framed_board_y);
 
@@ -99,8 +92,7 @@ int main(int argc, char** argv) {
         kfc::graphics::AnimatedPieceRenderer piece_renderer(/*show_rest_ring=*/true);
         kfc::graphics::HudRenderer hud_renderer;
 
-        // The canvas's logical resolution can exceed the actual screen; this
-        // is only the window's starting size, since it's resizable below.
+        // Only the window's starting size, since it's resizable below.
         kfc::graphics::platform::ScreenSize screen = kfc::graphics::platform::prepare_display_and_measure_screen();
         int screen_width = screen.width;
         int screen_height = screen.height;
@@ -111,15 +103,13 @@ int main(int argc, char** argv) {
         int display_height = static_cast<int>(std::lround(canvas_height * display_scale));
 
         const std::string window_name = "Image";
-        // WINDOW_NORMAL: user can drag-resize; content is rescaled per-frame
-        // and clicks mapped back via ScreenMapper (see the render loop).
+        // WINDOW_NORMAL: user can drag-resize; content is rescaled per-frame (see the render loop).
         cv::namedWindow(window_name, cv::WINDOW_NORMAL);
         cv::resizeWindow(window_name, display_width, display_height);
 
         kfc::graphics::ScreenMapper screen_mapper(window_name, canvas_width, canvas_height);
 
-        // No separate Register step: a username never seen before registers
-        // on first successful login. Local play skips this entirely.
+        // No separate Register step: an unseen username registers on first successful login.
         if (session.is_networked()) {
             kfc::graphics::dialogs::LoginChoice login = prompt->ask_login();
             if (login.cancelled) {
@@ -129,22 +119,18 @@ int main(int argc, char** argv) {
             session.set_credentials(login.username, login.password);
         }
 
-        // Mouse callback state for the MENU button shown after a networked
-        // game ends -- installed only then, so it never competes with
-        // MouseInputAdapter's own callback for board clicks during play.
+        // Mouse callback state for the MENU button, installed only after a networked game ends.
         struct MenuClick {
             int x = -1;
             int y = -1;
             bool clicked = false;
         };
 
-        // One game per iteration. Local play always takes the final `break`;
-        // networked play loops back here on MENU instead of quitting.
+        // One game per iteration; networked play loops back here on MENU instead of quitting.
         while (true) {
             std::string room_name;  // shown on-screen during a named-room game
             if (session.is_networked()) {
-                // Loops on a refused join (typo'd room name, etc.) rather
-                // than exiting, so the player can just try again.
+                // Loops on a refused join (typo'd room name, etc.) rather than exiting.
                 while (true) {
                     std::optional<kfc::protocol::ClientMessage> action =
                         kfc::graphics::app::run_home_screen(window_name, background_source, *prompt);
@@ -165,16 +151,13 @@ int main(int argc, char** argv) {
 
             kfc::model::MoveLogObserver move_log(game_view->board().height());
             kfc::model::ScoreObserver score(session.value_provider());
-            // Wired here, before the render loop, on this one thread (the
-            // bus is not internally synchronized).
+            // The bus is not internally synchronized, so wired here on this one thread.
             game_view->events().subscribe<kfc::model::ArrivalEvent>(
                 [&move_log](const kfc::model::ArrivalEvent& event) { move_log.on_arrival(event); });
             game_view->events().subscribe<kfc::model::ArrivalEvent>(
                 [&score](const kfc::model::ArrivalEvent& event) { score.on_arrival(event); });
 
-            // Fed straight into the observers rather than published on the
-            // bus, since these arrivals already happened and shouldn't
-            // replay sounds or animations.
+            // Fed straight into the observers rather than the bus, so past arrivals don't replay sounds.
             for (const kfc::model::ArrivalEvent& past : session.history()) {
                 move_log.on_arrival(past);
                 score.on_arrival(past);
@@ -195,11 +178,8 @@ int main(int argc, char** argv) {
 
             constexpr int kSearchTimeoutMs = 60000;
             auto search_started_at = std::chrono::steady_clock::now();
-            // Message box is shown after the loop, once the seat is given back.
-            bool search_timed_out = false;
-            // Set once MENU is clicked; checked after the render loop so it
-            // can loop back to the home screen instead of quitting.
-            bool return_to_menu = false;
+            bool search_timed_out = false;  // message box is shown after the loop, once the seat is given back
+            bool return_to_menu = false;  // set once MENU is clicked; loops back to the home screen
             MenuClick menu_click;
             bool menu_click_handler_installed = false;
 
@@ -216,9 +196,7 @@ int main(int argc, char** argv) {
                 int elapsed_ms = static_cast<int>(
                     std::chrono::duration_cast<std::chrono::milliseconds>(now - last_frame_at).count());
                 last_frame_at = now;
-                // Real delta time keeps the simulated clock tracking real
-                // time regardless of render cost; clamped so a paused/
-                // dragged window never dumps a multi-second jump into the sim.
+                // Clamped so a paused/dragged window never dumps a multi-second jump into the sim.
                 elapsed_ms = std::clamp(elapsed_ms, 1, 100);
 
                 game_view->wait(elapsed_ms);
@@ -234,8 +212,7 @@ int main(int argc, char** argv) {
 
                 kfc::graphics::Img board_frame = board_texture.clone();
                 piece_renderer.draw(animator_registry, board_frame);
-                // Read once, not per branch: current() advances timers as a
-                // side effect, so calling it twice would double that advance.
+                // Read once: current() advances timers as a side effect, so calling it twice would double it.
                 kfc::graphics::app::Overlay overlay_state = overlay.current(searching, now);
                 bool show_menu_button =
                     session.is_networked() && overlay_state == kfc::graphics::app::Overlay::GameOver;
@@ -271,8 +248,6 @@ int main(int argc, char** argv) {
                     canvas.put_text(label, (canvas_width - ts.width) / 2, 36, 1.0, cv::Scalar(255, 255, 255, 255), 2);
                 }
 
-                // Drawn in canvas coordinates (needs ScreenMapper, same as
-                // MouseInputAdapter) below the game-over banner text.
                 kfc::graphics::app::Button menu_button{};
                 if (show_menu_button) {
                     if (!menu_click_handler_installed) {
@@ -293,22 +268,16 @@ int main(int argc, char** argv) {
                     int button_cy = grid_offset_y + board_pixel_height / 2 + 90;
                     menu_button = kfc::graphics::app::draw_button(canvas, "MENU", button_cx, button_cy, 220, 60);
                 }
-                // Flattens the HUD panels' translucency so the larger
-                // per-frame resize/composite below takes draw_on's cheap
-                // copyTo path.
+                // Flattens the HUD panels' translucency so the resize/composite below takes the cheap path.
                 canvas.force_opaque();
 
-                // Picked up fresh every frame so resizing takes effect
-                // immediately. Background covers the window completely;
-                // game content is scaled uniformly, centered on top.
+                // Picked up fresh every frame so resizing takes effect immediately.
                 cv::Rect current_window_rect = cv::getWindowImageRect(window_name);
                 int current_window_width = current_window_rect.width > 0 ? current_window_rect.width : display_width;
                 int current_window_height =
                     current_window_rect.height > 0 ? current_window_rect.height : display_height;
 
-                // Scaled fresh from background_source (not the already-
-                // cropped canvas backdrop); only redone when the window
-                // size actually changed.
+                // Scaled fresh from background_source; only redone when the window size actually changed.
                 if (current_window_width != cached_window_background_width ||
                     current_window_height != cached_window_background_height) {
                     cached_window_background =
@@ -332,14 +301,12 @@ int main(int argc, char** argv) {
                 if (cv::waitKey(1) >= 0) {
                     break;
                 }
-                // Closing via the X button sends no key; without this the
-                // loop would spin on a destroyed window and never close the socket.
+                // Closing via the X button sends no key, so this catches it and closes the socket.
                 if (cv::getWindowProperty(window_name, cv::WND_PROP_VISIBLE) < 1.0) {
                     break;
                 }
 
-                // Checked last (after imshow), so the banner/button are
-                // shown for at least the frame the click landed on.
+                // Checked last so the banner/button show for at least the frame the click landed on.
                 if (show_menu_button && menu_click.clicked) {
                     menu_click.clicked = false;
                     kfc::graphics::PixelPoint clicked_at = screen_mapper.to_canvas_pixels(menu_click.x, menu_click.y);
@@ -349,9 +316,7 @@ int main(int argc, char** argv) {
                     }
                 }
 
-                // Caps this process's own frame rate so it doesn't burn a
-                // full CPU core; harmless to simulation timing since
-                // elapsed_ms is measured from real wall-clock time regardless.
+                // Caps this process's frame rate so it doesn't burn a full CPU core.
                 constexpr std::chrono::milliseconds kTargetFrameDuration{16};  // ~60 FPS
                 auto frame_duration = std::chrono::steady_clock::now() - now;
                 if (frame_duration < kTargetFrameDuration) {
@@ -360,16 +325,12 @@ int main(int argc, char** argv) {
             }
 
             if (return_to_menu) {
-                // Gives the seat back and lets the next connect() actually
-                // dial out again instead of no-op'ing.
-                session.disconnect();
+                session.disconnect();  // gives the seat back so the next connect() actually dials out
                 continue;
             }
 
             if (search_timed_out) {
-                // Seat given back before the (blocking) message box, so the
-                // next Play doesn't get matched into an abandoned room.
-                session.disconnect();
+                session.disconnect();  // before the blocking message box, so Play doesn't rejoin this room
                 prompt->show_message("Kung Fu Chess", "No opponent found within a minute. Please try again later.");
                 continue;
             }

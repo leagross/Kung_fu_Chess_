@@ -8,14 +8,10 @@
 
 namespace kfc::graphics {
 
-/// Draws two side panels (each kHudPanelWidthPixels wide) onto a canvas
-/// shaped [white panel][board][black panel]: white's on the left (moves on
-/// top, score at bottom), black's on the right (score on top, moves below).
+/// Draws [white panel][board][black panel]: white's moves on top/score at bottom, black's reversed.
 class HudRenderer {
 public:
-    /// white_username/black_username label each panel -- empty falls back to
-    /// "White"/"Black" (local play, or before MatchStart names Black).
-    /// Ratings show in parentheses next to the name; 0 omits them.
+    /// Empty username falls back to "White"/"Black"; rating 0 omits the parenthetical.
     void draw(const kfc::model::MoveLogObserver& move_log, const kfc::model::ScoreObserver& score,
               int board_pixel_width, int board_pixel_height, Img& canvas, const std::string& white_username = {},
               const std::string& black_username = {}, int white_rating = 0, int black_rating = 0) const;

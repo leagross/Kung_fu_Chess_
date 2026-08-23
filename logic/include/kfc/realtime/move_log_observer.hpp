@@ -8,31 +8,24 @@
 
 namespace kfc::model {
 
-/// One row of the timestamped move table: simulated arrival time
-/// (RealTimeArbiter's clock, same as ArrivalEvent::arrived_at_ms) plus a
-/// short algebraic-style description.
+/// time_ms is RealTimeArbiter's clock, same as ArrivalEvent::arrived_at_ms.
 struct MoveLogEntry {
     long long time_ms;
     std::string notation;
 };
 
-/// Keeps a human-readable move history per side, one line per arrival.
-/// Pure text bookkeeping; screen formatting is a renderer's job.
+/// Human-readable move history per side, one line per arrival.
 class MoveLogObserver : public IGameObserver {
 public:
-    /// board_height turns a Position's row into a chess rank for
-    /// entries()'s notation; moves() doesn't use it.
+    /// board_height turns a Position's row into a chess rank for entries()'s notation.
     explicit MoveLogObserver(int board_height = 8);
 
     void on_arrival(const ArrivalEvent& event) override;
 
-    /// This side's moves so far, oldest first: "<piece token>
-    /// <source>-><destination>", with " x<captured token>" on a capture.
+    /// "<piece token> <source>-><destination>", with " x<captured token>" on a capture.
     [[nodiscard]] const std::vector<std::string>& moves(PieceColor color) const;
 
-    /// This side's moves so far, oldest first, as timestamp plus a
-    /// simplified algebraic notation -- not full SAN: no check/mate marks,
-    /// no disambiguation, no en passant or castling.
+    /// Simplified algebraic notation, not full SAN (no check/mate, disambiguation, en passant, castling).
     [[nodiscard]] const std::vector<MoveLogEntry>& entries(PieceColor color) const;
 
 private:

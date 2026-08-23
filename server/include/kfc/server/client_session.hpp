@@ -21,21 +21,15 @@ class IUserStore;
 
 namespace kfc::server {
 
-/// Max inbound WebSocket frames per connection per second before it is
-/// dropped. A legitimate client cannot move faster than pieces come off
-/// cooldown, so hitting this implies a hostile or looping client.
+/// Max inbound WebSocket frames per connection per second; hitting this implies a hostile or looping client.
 inline constexpr int kMaxMessagesPerSecond = 50;
 
-/// One connected client: authenticating, being seated, and having its
-/// gameplay messages routed to the right room. A successful Login claims
-/// the username (see SessionRegistry). Order enforced: Login, one seating
-/// message, then Move/Jump/Resign. Needs no lock -- one thread, in order.
+/// One connected client. Order enforced: Login, one seating message, then Move/Jump/Resign.
+/// Needs no lock -- one thread, in order.
 class ClientSession {
 public:
-    /// metrics, auth_limiter and seat_limiter default to null; related work
-    /// (counters, rate limits) is skipped when null. auth_limiter shares its
-    /// budget with the HTTP login/register endpoints; seat_limiter is a
-    /// separate budget for Play/CreateRoom/JoinRoom (see RateLimiter).
+    /// auth_limiter shares its budget with the HTTP login/register endpoints; seat_limiter is
+    /// a separate budget for Play/CreateRoom/JoinRoom.
     ClientSession(std::string connection_id, SendFn send, CloseFn close, RoomManager& rooms,
                   kfc::database::IUserStore& users, SessionRegistry& sessions,
                   kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr,
@@ -44,23 +38,18 @@ public:
 
     void on_open();
 
-    /// Forfeits the game if this client held a seat, and lets the room be
-    /// reaped once nobody is left in it.
+    /// Forfeits the game if this client held a seat.
     void on_close();
 
-    /// Refused without parsing if longer than kfc::protocol::kMaxMessageBytes;
-    /// dropped if it does not decode.
+    /// Refused without parsing if longer than kfc::protocol::kMaxMessageBytes; dropped if it does not decode.
     void on_text(const std::string& text);
 
-    /// Where this client is seated, once it is. For tests and diagnostics.
     [[nodiscard]] const std::optional<RoomManager::Seat>& seat() const { return seat_; }
 
-    /// Whether a Login has been accepted for this connection.
     [[nodiscard]] bool authenticated() const { return pending_.has_value() || seat_.has_value(); }
 
 private:
-    // A connection that has authenticated but not yet chosen how to be seated.
-    // Held between Login and the Play / CreateRoom / JoinRoom that seats it.
+    // Authenticated but not yet seated; held between Login and the Play/CreateRoom/JoinRoom that seats it.
     struct AuthedUser {
         std::string username;
         int rating = 0;
@@ -71,8 +60,7 @@ private:
     [[nodiscard]] bool handle_seating(const kfc::protocol::ClientMessage& message);
     void handle_gameplay(const kfc::protocol::ClientMessage& message);
 
-    // redirect_url is set instead of failure_reason when the room exists but
-    // lives on a different worker (JoinRoom only); caller sends JoinRedirect.
+    // redirect_url is set instead of failure_reason when the room lives on a different worker (JoinRoom only).
     [[nodiscard]] std::optional<RoomManager::Seat> seat_for(const kfc::protocol::ClientMessage& message,
                                                             const AuthedUser& user, std::string& failure_reason,
                                                             std::string& redirect_url);
@@ -95,8 +83,7 @@ private:
     std::optional<AuthedUser> pending_;
     std::optional<RoomManager::Seat> seat_;
 
-    // Current one-second rate-limit window; reset lazily on the first
-    // message past its end (see on_text), not by a timer.
+    // Reset lazily on the first message past its end (see on_text), not by a timer.
     std::chrono::steady_clock::time_point rate_window_start_;
     int messages_in_window_ = 0;
 };

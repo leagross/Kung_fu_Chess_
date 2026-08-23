@@ -30,16 +30,13 @@ std::string algebraic_notation(const ArrivalEvent& event, int board_height) {
     std::string destination = algebraic_square(event.destination, board_height);
 
     if (event.kind == MotionKind::JumpInPlace) {
-        // Marked "(J)" so a jump landing back on its own square (source ==
-        // destination) is never mistaken for a chess move like "Ne4".
+        // "(J)" marks it so a jump isn't mistaken for a chess move like "Ne4".
         return algebraic_piece_prefix(event.moved_piece.kind) + destination + "(J)";
     }
 
     bool captured = event.captured_piece.has_value();
 
     if (event.was_promotion) {
-        // Only a pawn promotes: rendered pawn-style (source file on a
-        // capture) then "=Q", e.g. "e8=Q" or "exd8=Q".
         std::string base =
             captured ? std::string(1, algebraic_file(event.source.col)) + "x" + destination : destination;
         return base + "=" + std::string(1, kfc::io::letter_for_kind(event.moved_piece.kind));

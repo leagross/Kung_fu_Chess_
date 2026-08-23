@@ -25,14 +25,11 @@ class Metrics;
 
 namespace kfc::server {
 
-/// The non-realtime half of the server: register/login and match history
-/// over HTTP+JSON, sharing UserRepository and the auth RateLimiter budget
-/// with ClientSession's WebSocket Login path. A second listening socket
-/// (ix::HttpServer can't share a port), also serving /metrics and /health.
+/// The non-realtime half of the server: register/login and match history over HTTP+JSON,
+/// sharing the auth RateLimiter budget with ClientSession's WebSocket Login path.
 class HttpApiServer {
 public:
-    /// users, rooms, sessions, metrics, auth_limiter and logger must all
-    /// outlive this server. Does not bind the port -- call listen() for that.
+    /// Does not bind the port -- call listen() for that.
     HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms, SessionRegistry& sessions,
                  Metrics& metrics, RateLimiter& auth_limiter, kfc::protocol::FileLogger& logger);
     ~HttpApiServer();

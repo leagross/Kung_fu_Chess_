@@ -8,16 +8,13 @@
 namespace kfc::model {
 
 /// Watches for a king capture and remembers who did it, for display only.
-/// A second king capture only counts as a draw if its arrived_at_ms exactly
-/// matches the first's -- a later timestamp means the game was already decided.
 class GameOverObserver : public IGameObserver {
 public:
     void on_arrival(const ArrivalEvent& event) override;
 
     [[nodiscard]] bool is_game_over() const;
 
-    /// The color that captured the opposing king. std::nullopt until
-    /// is_game_over() is true, and also std::nullopt if is_draw() is true.
+    /// nullopt until is_game_over(), and also nullopt if is_draw().
     [[nodiscard]] std::optional<PieceColor> winner() const;
 
     /// True if both kings were captured at the exact same simulated instant.

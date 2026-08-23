@@ -1,5 +1,4 @@
-// The Windows implementation of IRoomPrompt: native controls via Win32
-// (see opencv_room_prompt.cpp for the portable fallback).
+// Windows implementation of IRoomPrompt via Win32 (see opencv_room_prompt.cpp for the fallback).
 
 #include "kfc/graphics/dialogs/room_prompt.hpp"
 
@@ -33,9 +32,6 @@ struct LoginState {
     HWND pass_edit = nullptr;
 };
 
-// GetWindowTextW + WideCharToMultiByte, in one place -- both edit controls in
-// login_proc below need exactly this, and State's own proc has no equivalent
-// helper because it only ever reads one control.
 std::string read_edit_utf8(HWND edit) {
     wchar_t wide[256] = {};
     GetWindowTextW(edit, wide, 256);
@@ -144,10 +140,7 @@ public:
 
         MSG msg;
         while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-            // Enter submits from either field, Tab moves between them --
-            // neither works for free the way it would inside a real dialog
-            // box (this is a plain window, not a DS_CONTROL dialog template),
-            // so both are handled by hand here rather than left broken.
+            // This plain window has no DS_CONTROL dialog template, so Enter/Tab are handled by hand.
             if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN) {
                 SendMessageW(hwnd, WM_COMMAND, kIdLogin, 0);
                 continue;

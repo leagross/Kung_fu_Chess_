@@ -31,8 +31,7 @@ WinSoundPlayer::WinSoundPlayer(std::filesystem::path sounds_dir) : sounds_dir_(s
 
 void WinSoundPlayer::play(kfc::audio::Sound sound) {
     std::filesystem::path path = sounds_dir_ / file_name_for(sound);
-    // SND_ASYNC: don't stall the render loop. SND_NODEFAULT: stay silent
-    // rather than beep if the .wav is absent.
+    // SND_ASYNC: don't stall the render loop. SND_NODEFAULT: stay silent if the .wav is absent.
     PlaySoundW(path.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 }
 

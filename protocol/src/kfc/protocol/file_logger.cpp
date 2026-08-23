@@ -15,8 +15,7 @@ namespace kfc::protocol {
 
 namespace {
 
-// The tag written in front of each line, and the names the command-line flag
-// accepts.
+// The tag written in front of each line, and the names the command-line flag accepts.
 constexpr kfc::util::EnumNames<LogLevel, 4> kLevelNames{{{
     {LogLevel::Debug, "debug"},
     {LogLevel::Info, "info"},
@@ -26,8 +25,7 @@ constexpr kfc::util::EnumNames<LogLevel, 4> kLevelNames{{{
 
 static_assert(kLevelNames.covers_through(LogLevel::Error), "every LogLevel needs a name");
 
-// "2026-07-28 14:03:11.482", written into a caller-owned buffer. snprintf
-// instead of ostringstream/put_time since this runs once per logged line.
+// "2026-07-28 14:03:11.482"; snprintf since this runs once per logged line.
 void write_timestamp(std::array<char, 32>& out) {
     auto now = std::chrono::system_clock::now();
     std::time_t seconds = std::chrono::system_clock::to_time_t(now);
@@ -52,8 +50,7 @@ FileLogger::FileLogger(const std::filesystem::path& log_path, LogLevel minimum, 
     if (!file_) {
         throw std::runtime_error("FileLogger: cannot open log file: " + log_path.string());
     }
-    // Start the byte count from any pre-existing content so rotation still
-    // triggers at max_bytes_ total across restarts.
+    // Count pre-existing content so rotation still triggers correctly across restarts.
     std::error_code ec;
     std::uintmax_t existing_size = std::filesystem::file_size(log_path, ec);
     bytes_written_ = ec ? 0 : existing_size;
@@ -81,8 +78,7 @@ void FileLogger::log(LogLevel level, const std::string& line) {
         return;
     }
 
-    // Formatted before the lock is taken; built into one string so its size
-    // is known for bytes_written_ without a tellp() call.
+    // Formatted before the lock is taken, into one string so its size is known upfront.
     std::array<char, 32> timestamp{};
     write_timestamp(timestamp);
     std::string_view tag = kLevelNames.name_of(level);

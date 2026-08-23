@@ -6,24 +6,17 @@
 
 namespace kfc::model {
 
-/// What a mover finds waiting for it at its destination cell, decided
-/// without touching Board -- only RealTimeArbiter actually mutates it.
+/// What a mover finds at its destination; decided without touching Board.
 enum class CollisionKind {
-    /// Destination was empty, or (for a jump-in-place) held only the mover.
-    VacatedCell,
-    /// An enemy piece is there -- it gets captured.
+    VacatedCell,          // empty, or (for a jump-in-place) held only the mover
     EnemyCaptured,
-    /// A friendly piece is there -- the mover is blocked and stays put.
     FriendlyBlocked,
-    /// The occupant is mid-jump (PieceState::Airborne) and isn't really
-    /// there yet, so the mover passes through uneventfully.
-    PassedThroughAirborne,
+    PassedThroughAirborne,  // occupant is mid-jump, not really there yet
 };
 
 struct CollisionResult {
     CollisionKind kind;
-    /// Set only when kind == EnemyCaptured, already marked PieceState::Captured.
-    std::optional<Piece> captured_piece;
+    std::optional<Piece> captured_piece;  // set only when kind == EnemyCaptured
 };
 
 /// Decides what one mover finds at one destination cell.

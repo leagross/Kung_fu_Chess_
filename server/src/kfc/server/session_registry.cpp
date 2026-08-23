@@ -15,8 +15,7 @@ SessionRegistry::Lease::~Lease() {
 
 SessionRegistry::Lease::Lease(Lease&& other) noexcept
     : registry_(other.registry_), username_(std::move(other.username_)) {
-    // Cleared, so the moved-from lease's destructor releases nothing -- both
-    // releasing would free a name its new owner is still using.
+    // Cleared, so the moved-from lease's destructor releases nothing.
     other.registry_ = nullptr;
 }
 

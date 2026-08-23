@@ -8,13 +8,10 @@
 
 namespace kfc::graphics {
 
-/// Draws every animator PieceAnimatorRegistry currently holds, at its
-/// current animated frame and position. Cache is keyed by full sprite path
-/// (not piece folder) since which file is needed changes as the frame cycles.
+/// Cache is keyed by full sprite path (not piece folder) since it changes as the frame cycles.
 class AnimatedPieceRenderer {
 public:
-    /// show_rest_ring toggles the draining "hourglass" overlay over a
-    /// resting piece's cell.
+    /// show_rest_ring toggles the draining "hourglass" overlay over a resting piece's cell.
     explicit AnimatedPieceRenderer(bool show_rest_ring = true);
 
     void draw(const PieceAnimatorRegistry& registry, Img& board_image);

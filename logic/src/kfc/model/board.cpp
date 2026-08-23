@@ -4,14 +4,11 @@
 
 namespace kfc::model {
 
-
 Board::Board(int width, int height)
     : width_(width),
       height_(height),
       cells_((width < 0 || height < 0)
-                 // Guard before the size_t multiply below: a negative int
-                 // wraps to an enormous size_t, which would ask the vector to
-                 // allocate gigabytes instead of failing cleanly.
+                 // Guards against a negative int wrapping to an enormous size_t below.
                  ? throw std::invalid_argument("Board: width and height must be non-negative")
                  : static_cast<std::size_t>(width) * static_cast<std::size_t>(height)) {}
 

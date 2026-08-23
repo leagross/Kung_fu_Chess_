@@ -52,10 +52,7 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
         }
     }
 
-    // Motions crossing their arrival threshold this call, paired with how
-    // far into the call (0..ms) each arrived -- sorted below so resolution
-    // order doesn't depend on the caller's step size (e.g. advance_time(1300)
-    // must behave like advance_time(1000) then advance_time(300)).
+    // Sorted below so resolution order doesn't depend on the caller's step size.
     struct PendingArrival {
         Motion motion;
         int time_into_tick_ms;
@@ -76,10 +73,7 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
     });
 
     ArrivalEvents events;
-    // On a head-on collision within the same call, pending is sorted
-    // chronologically so whichever arrives first captures the other; the
-    // loser's own motion (already queued in this batch) must be skipped so
-    // it can't land using its now-stale pre-capture snapshot.
+    // A piece captured earlier in this batch must skip its own queued arrival.
     std::unordered_set<PieceId> captured_this_batch;
     for (const PendingArrival& pending_arrival : pending) {
         const Motion& motion = pending_arrival.motion;
@@ -93,8 +87,7 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
         }
         events.push_back(resolved.event);
         if (resolved.piece_actually_arrived && motion.cooldown_ms > 0) {
-            // Only the remainder of this call's ms has elapsed against the
-            // fresh cooldown, since the piece arrived mid-tick.
+            // Piece arrived mid-tick, so only the remainder of ms counts against cooldown.
             int time_left_in_tick_ms = ms - pending_arrival.time_into_tick_ms;
             int remaining_cooldown_ms = motion.cooldown_ms - time_left_in_tick_ms;
             if (remaining_cooldown_ms > 0) {
@@ -103,10 +96,7 @@ ArrivalEvents RealTimeArbiter::advance_time(int ms) {
         }
     }
     active_motions_ = std::move(still_active);
-    // A piece captured this tick may still have its own Move in flight
-    // (capturable mid-flight); drop that stale motion/cooldown now or it
-    // would "resurrect" later. Always a Move, never JumpInPlace (an
-    // airborne piece is PassedThroughAirborne, never EnemyCaptured).
+    // Drop a captured piece's own in-flight Move so it can't "resurrect" later.
     for (PieceId captured_id : captured_this_batch) {
         std::erase_if(active_motions_, [captured_id](const Motion& m) {
             return m.moving_piece.id == captured_id && m.kind == MotionKind::Move;
@@ -122,8 +112,7 @@ RealTimeArbiter::ResolvedArrival RealTimeArbiter::resolve_arrival(const Motion& 
     CollisionResult collision = CollisionResolver::resolve(motion.moving_piece, occupant);
 
     if (collision.kind == CollisionKind::FriendlyBlocked) {
-        // Mover stays at its source cell (start_motion never relocated it);
-        // only its Moving flag needs undoing.
+        // Mover stays put; only its Moving flag needs undoing.
         board_.set_piece_state(motion.source, PieceState::Idle);
         Piece stayed = motion.moving_piece;
         stayed.state = PieceState::Idle;
@@ -132,13 +121,9 @@ RealTimeArbiter::ResolvedArrival RealTimeArbiter::resolve_arrival(const Motion& 
     }
 
     if (collision.kind == CollisionKind::EnemyCaptured || collision.kind == CollisionKind::PassedThroughAirborne) {
-        // PassedThroughAirborne also clears the cell: Board still holds the
-        // airborne piece's stale record there since it never actually left.
         board_.remove_piece(motion.destination);
     }
 
-    // Uses the mover's own snapshot, not Board's current source cell -- see
-    // Motion's comment for why that matters once motions race for a cell.
     board_.remove_piece(motion.source);
     Piece arrived = motion.moving_piece;
     arrived.cell = motion.destination;

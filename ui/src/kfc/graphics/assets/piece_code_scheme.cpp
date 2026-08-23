@@ -6,8 +6,7 @@ namespace kfc::graphics {
 
 namespace {
 
-// No entry for PieceKind::Drone (no art in pieces_mine); folder_name()
-// throwing via .at() lets callers detect and skip an unsupported kind.
+// No entry for PieceKind::Drone (no art in pieces_mine); .at() throws so callers can skip it.
 const std::unordered_map<kfc::model::PieceKind, char> kKindLetters = {
     {kfc::model::PieceKind::King, 'K'},  {kfc::model::PieceKind::Queen, 'Q'},
     {kfc::model::PieceKind::Rook, 'R'},  {kfc::model::PieceKind::Bishop, 'B'},

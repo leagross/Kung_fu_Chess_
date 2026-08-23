@@ -39,8 +39,7 @@ void ClientSession::on_close() {
         rooms_.on_disconnect(*seat_);
     }
 
-    // Released now (not at destruction) so a player whose disconnect grace
-    // is running can log in again immediately to reclaim their seat.
+    // Released now so a player whose disconnect grace is running can log in again to reclaim their seat.
     username_lease_.reset();
 }
 
@@ -74,8 +73,7 @@ void ClientSession::on_text(const std::string& text) {
         metrics_->message_received();
     }
 
-    // Guarded: redact_for_log rebuilds the whole message, not worth doing
-    // when this line will be dropped.
+    // Guarded: redact_for_log rebuilds the whole message, not worth doing if this line is dropped.
     if (logger_.enabled(kfc::protocol::LogLevel::Debug)) {
         logger_.log(kfc::protocol::LogLevel::Debug,
                     "Received from " + connection_id_ + ": " + kfc::protocol::redact_for_log(text));

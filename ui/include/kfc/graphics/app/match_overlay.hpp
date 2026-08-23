@@ -9,42 +9,31 @@
 
 namespace kfc::graphics::app {
 
-/// How long the "KUNG FU CHESS" intro splash takes to fade out.
 inline constexpr int kDefaultIntroDurationMs = 1500;
 
-/// What the board should be wearing right now, if anything.
 enum class Overlay {
     None,
-    /// Networked, seated, still waiting for a rating-compatible opponent.
-    Searching,
-    /// The first moment of a match: the title, fading out.
-    Intro,
-    /// A dropped opponent's grace period, counting down.
-    Countdown,
+    Searching,  // networked, seated, waiting for a rating-compatible opponent
+    Intro,      // first moment of a match: the title, fading out
+    Countdown,  // a dropped opponent's grace period
     GameOver,
 };
 
-/// Follows whole-game signals on the event bus and answers which banner goes
-/// on the board this frame. Priority: Searching > GameOver > Countdown >
-/// Intro (Countdown/Intro can overlap). Free of OpenCV -- says only *which*
-/// overlay, so it's testable with a bare EventBus.
+/// Priority: Searching > GameOver > Countdown > Intro (Countdown/Intro can overlap).
 class MatchOverlay {
 public:
     using Clock = std::chrono::steady_clock;
 
-    /// bus must outlive this object. intro_duration_ms is how long the intro
-    /// splash lingers.
+    /// bus must outlive this object.
     explicit MatchOverlay(kfc::events::EventBus& bus, int intro_duration_ms = kDefaultIntroDurationMs);
 
-    /// searching is the caller's own signal (not on the bus, since nothing
-    /// publishes it). now is passed in so the intro is testable without a wait.
+    /// searching is the caller's own signal, since nothing publishes it on the bus.
     [[nodiscard]] Overlay current(bool searching, Clock::time_point now) const;
 
     /// 1.0 at match start, fading to 0.0. Only meaningful while current() is Intro.
     [[nodiscard]] double intro_opacity(Clock::time_point now) const;
 
-    /// Winner of a decided match; std::nullopt for a draw. Only meaningful
-    /// while current() is GameOver.
+    /// std::nullopt for a draw. Only meaningful while current() is GameOver.
     [[nodiscard]] std::optional<kfc::model::PieceColor> winner() const { return winner_; }
 
     /// Only meaningful while current() is Countdown.

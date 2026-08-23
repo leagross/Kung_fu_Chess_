@@ -4,9 +4,7 @@
 
 namespace kfc::model {
 
-/// Steps 1 or 2 cells along one cardinal direction, never diagonal --
-/// jumps straight to the destination, ignoring what's in between (like a
-/// knight). Slower than other pieces (see MotionFactory).
+/// Steps 1-2 cells along one cardinal direction, jumping straight to the destination like a knight.
 class DroneRule : public IMovementRule {
 public:
     std::vector<Position> legal_destinations(const Board& board, const Piece& piece) const override;

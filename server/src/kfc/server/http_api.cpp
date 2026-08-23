@@ -27,9 +27,7 @@ using nlohmann::json;
 
 constexpr std::string_view kHistoryPrefix = "/api/history/";
 
-// ixwebsocket's HttpServer has no request-body-size option and always reads
-// the full body before this callback runs; this only stops an oversized body
-// from being parsed and handed to UserRepository.
+// ixwebsocket has no request-body-size option; this only stops an oversized body being parsed further.
 constexpr std::size_t kMaxHttpBodyBytes = 64 * 1024;
 
 std::string reason_phrase(int status) {
@@ -89,9 +87,7 @@ ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, AuthTo
                                     const json& request) {
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
-    // authenticate() is one atomic lookup-or-insert (not user_exists() then
-    // authenticate()), avoiding a race where two concurrent registrations of
-    // the same new username both insert and one throws on the PRIMARY KEY.
+    // One atomic lookup-or-insert, avoiding a race where two concurrent registrations both insert.
     kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
     if (auth.newly_registered) {
         return json_response(201, auth_body(username, auth.rating, tokens.issue(username)));
@@ -154,8 +150,7 @@ ix::HttpResponsePtr handle_history(kfc::database::UserRepository& users, AuthTok
     return json_response(200, games);  // 200 [] for an unknown username too, not a 404.
 }
 
-// Liveness check: confirms the account store is actually answering queries,
-// not just that the process exists. The placeholder username never exists.
+// Liveness check: confirms the account store is actually answering queries, not just that the process exists.
 ix::HttpResponsePtr handle_health(kfc::database::UserRepository& users) {
     try {
         (void)users.rating_of("__kfc_health_check__");

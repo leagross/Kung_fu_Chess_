@@ -4,8 +4,7 @@
 
 namespace kfc::model {
 
-/// Rook movement combined with bishop movement -- slides in all eight
-/// directions until blocked, exactly like RookRule and BishopRule combined.
+/// RookRule and BishopRule combined: slides in all eight directions until blocked.
 class QueenRule : public IMovementRule {
 public:
     std::vector<Position> legal_destinations(const Board& board, const Piece& piece) const override;

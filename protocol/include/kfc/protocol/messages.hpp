@@ -13,38 +13,27 @@
 
 namespace kfc::protocol {
 
-/// A flattened, ordered read of a Board's occupancy -- a wire/snapshot
-/// concern only, kept out of Board's own public surface.
+/// Wire/snapshot-only flattening of a Board's occupancy.
 struct BoardSnapshot {
     int width;
     int height;
     std::vector<kfc::model::Piece> pieces;
 };
 
-/// Sent once, right after a successful Login: assigned colour (first join =
-/// White, second = Black) and the board's starting position. spectator
-/// marks a viewer -- assigned_color is meaningless then (sent as White);
-/// a client must read spectator, never the colour, to decide if it may play.
+/// Sent once after a successful Login. spectator marks a viewer; a client
+/// must read it (not assigned_color) to decide if it may play.
 struct Welcome {
     kfc::model::PieceColor assigned_color;
     BoardSnapshot board;
     bool spectator = false;
-    /// The room's id, for the client to display. Empty for a Play
-    /// (matchmaking) room. Authoritative even for Join, where it beats
-    /// echoing back whatever the player typed.
+    /// Empty for a Play (matchmaking) room; authoritative for Join.
     std::string room;
-    /// Every arrival this match has already seen, oldest first -- lets a
-    /// spectator or reconnecting player see the move list/score instead of a
-    /// board with no history. Empty for a match that has not started.
+    /// Every arrival this match has already seen, oldest first.
     std::vector<kfc::model::ArrivalEvent> history;
-    /// How far the game had got when `board` was snapshotted -- see
-    /// BoardUpdate::revision. A joiner is registered for broadcasts before
-    /// its snapshot is taken, so it may see an update the snapshot already
-    /// contains (this is how it tells) but can never miss one.
+    /// See BoardUpdate::revision; a joiner may see an update its own
+    /// snapshot already contains, but never miss one.
     std::uint64_t revision = 0;
-    /// Both seats' usernames/ratings, for the client to show whose game
-    /// this is -- empty/0 until that seat is filled. Optional on the wire
-    /// (see decode_server_message) so an older pair still decodes.
+    /// Both seats' usernames/ratings; empty/0 until that seat is filled.
     std::string white_username;
     std::string black_username;
     int white_rating = 0;
@@ -53,9 +42,7 @@ struct Welcome {
 
 // --- Client -> Server ---
 
-/// A connection's opening message: who is logging in, and their password.
-/// First login for a username registers it; later logins must match. Travels
-/// in the clear over ws://localhost (TLS is deliberately off, local-only).
+/// First login for a username registers it; later logins must match.
 struct Login {
     std::string username;
     std::string password;
@@ -70,37 +57,26 @@ struct JumpRequest {
     kfc::model::Position cell;
 };
 
-/// Post-login "find me any opponent" (the Play button): seats the sender into
-/// rating-based matchmaking.
+/// Post-login "find me any opponent": seats the sender into matchmaking.
 struct Play {};
 
-/// Post-login "open a room for me" (Create): the server makes a new room,
-/// generates its id, and seats the sender as White. Carries no name -- the id
-/// is the server's to mint; the client learns it from Welcome::room.
+/// Post-login "open a room for me": server mints the id and seats sender as White.
 struct CreateRoom {};
 
-/// Post-login "join the room whose id is `name`" (Join): seats the sender
-/// into that room -- Black if it's their first opponent, otherwise a
-/// spectator. Fails (JoinFailed, connection dropped) if no such room, or its
-/// game is already decided.
+/// Post-login "join the room named `name`": Black if first opponent, else spectator.
 struct JoinRoom {
     std::string name;
 };
 
-/// The sender forfeits the game; the server ends the match immediately and
-/// awards the win to the opponent. Carries no fields -- who resigned is the
-/// connection's own assigned colour. A disconnecting player raises the same
-/// outcome, so a dropped connection and a deliberate resign end identically.
+/// Forfeits the game; who resigned is the connection's own colour.
 struct Resign {};
 
-/// Every message shape a client ever sends.
 using ClientMessage = std::variant<Login, Play, CreateRoom, JoinRoom, MoveRequest, JumpRequest, Resign>;
 
 // --- Server -> Client ---
 
-/// Broadcast the instant the server starts a Move/JumpInPlace motion, not on
-/// arrival (unlike BoardUpdate) -- lets a networked client predict the
-/// glide/jump animation before the real BoardUpdate confirms how it ended.
+/// Broadcast the instant a Move/JumpInPlace starts, not on arrival, so a
+/// client can predict the glide/jump animation before BoardUpdate confirms it.
 struct MotionStarted {
     kfc::model::Motion motion;
 };
@@ -108,37 +84,26 @@ struct MotionStarted {
 /// Broadcast after any server tick that produced arrivals.
 struct BoardUpdate {
     std::vector<kfc::model::ArrivalEvent> arrival_events;
-    /// How far the game has got after applying these arrivals; monotonic
-    /// within a match, so a client can tell an update it already accounted
-    /// for from one it hasn't -- see Welcome::revision.
+    /// Monotonic within a match; see Welcome::revision.
     std::uint64_t revision = 0;
 };
 
-/// Mirrors MoveResult::reason when a Move/JumpRequest was rejected. Never
-/// sent for an accepted request -- acceptance is silent, confirmed later by
-/// the resulting BoardUpdate.
+/// Mirrors MoveResult::reason; never sent for an accepted request.
 struct MoveRejected {
     std::string reason;
 };
 
-/// winner is std::nullopt for a draw (both kings captured at the exact same
-/// simulated instant).
+/// winner is nullopt for a draw (both kings captured simultaneously).
 struct GameOver {
     std::optional<kfc::model::PieceColor> winner;
 };
 
-/// Broadcast to the still-connected player once per second while a dropped
-/// opponent's grace period counts down (20, 19, ..., 1). If the opponent
-/// doesn't return in time a GameOver follows; there is no separate
-/// "reconnected" message, the countdown simply stops.
+/// Broadcast once per second during a dropped opponent's grace countdown.
 struct OpponentDisconnected {
     int seconds_remaining;
 };
 
-/// Broadcast the instant both seats of a room are filled and play can begin.
-/// A player who joined first sits on Welcome but "searching" until this
-/// arrives; the second player gets Welcome and this together. Carries both
-/// usernames/ratings again since White's own Welcome predates Black existing.
+/// Broadcast once both seats are filled and play can begin.
 struct MatchStart {
     std::string white_username;
     std::string black_username;
@@ -146,62 +111,43 @@ struct MatchStart {
     int black_rating = 0;
 };
 
-/// Sent instead of Welcome when a seating request (Play / CreateRoom /
-/// JoinRoom) could not be honoured, carrying why in a stable machine-readable
-/// reason (see join_reasons). The connection is closed right after.
+/// Sent instead of Welcome when a seating request could not be honoured;
+/// the connection is closed right after.
 struct JoinFailed {
     std::string reason;
 };
 
-/// The reasons a JoinFailed can carry. Stable strings, same convention as
-/// kfc::model::move_reasons.
+/// Stable machine-readable reasons for JoinFailed.
 namespace join_reasons {
-/// JoinRoom named a room that does not exist.
 inline constexpr const char* kNoSuchRoom = "no_such_room";
-/// The room exists but its game is already decided.
 inline constexpr const char* kRoomNotActive = "room_not_active";
-/// CreateRoom named a room that already exists.
 inline constexpr const char* kRoomNameTaken = "room_name_taken";
-/// The room already has as many spectators as it will take -- a resource cap
-/// against one attacker opening unbounded watch connections to a room.
+/// Resource cap against unbounded watch connections to one room.
 inline constexpr const char* kSpectatorLimitReached = "spectator_limit_reached";
-/// Too many Play/CreateRoom/JoinRoom attempts from this remote IP in the
-/// current window (see RateLimiter) -- a separate, own budget from
-/// login_reasons::kRateLimited, not an accident of how sessions close.
+/// Own budget, separate from login_reasons::kRateLimited.
 inline constexpr const char* kRateLimited = "rate_limited";
 }  // namespace join_reasons
 
-/// Sent instead of Welcome or JoinFailed when JoinRoom named a room that is
-/// real but lives on a different kfc_server worker. url is that worker's
-/// client-facing address; the client reconnects there and resends Login and
-/// the seating request. The connection this arrived on is closed right after.
+/// Sent when JoinRoom named a room living on a different kfc_server worker;
+/// client reconnects to url and resends Login plus the seating request.
 struct JoinRedirect {
     std::string url;
 };
 
-/// Sent when Login was rejected, carrying the account store's own reason
-/// (e.g. "wrong_password"). The connection is closed right after.
+/// Sent when Login was rejected; connection is closed right after.
 struct LoginFailed {
     std::string reason;
 };
 
-/// The reasons a LoginFailed can carry, beyond the account store's own.
-/// Same convention as join_reasons.
 namespace login_reasons {
-/// This username already has a live connection.
 inline constexpr const char* kAlreadyLoggedIn = "already_logged_in";
-/// Too many Login attempts from this connection's remote IP in the current
-/// window; shared with the HTTP login/register budget so splitting an attack
-/// across WebSocket and HTTP paths does not double it.
+/// Shared with the HTTP login/register budget.
 inline constexpr const char* kRateLimited = "rate_limited";
 }  // namespace login_reasons
 
-/// Broadcast when a player who dropped came back before their grace ran out,
-/// so the opponent's countdown stops. No payload: who returned is whoever the
-/// countdown was for, which only the server knows.
+/// Broadcast when a dropped player returns before their grace ran out.
 struct OpponentReconnected {};
 
-/// Every message shape a client ever receives.
 using ServerMessage = std::variant<Welcome, MotionStarted, BoardUpdate, MoveRejected, GameOver, OpponentDisconnected,
                                    MatchStart, JoinFailed, JoinRedirect, LoginFailed, OpponentReconnected>;
 

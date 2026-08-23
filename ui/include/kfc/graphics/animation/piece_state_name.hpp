@@ -7,9 +7,7 @@
 
 namespace kfc::graphics {
 
-/// Presentation states, distinct from kfc::model::PieceState's game-logic
-/// lifecycle flag (e.g. Move and Jump are both "Moving" to the engine but
-/// animate differently).
+/// Presentation states; e.g. Move and Jump are both "Moving" to the engine but animate differently.
 enum class PieceStateName {
     Idle,
     Move,

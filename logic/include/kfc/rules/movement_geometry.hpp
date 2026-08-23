@@ -9,14 +9,11 @@
 
 namespace kfc::model {
 
-/// Shared sliding-movement geometry used by Rook, Bishop, and Queen: walks
-/// each direction one cell at a time, stopping at the board edge, a
-/// friendly piece (excluded), or an enemy piece (included, then stops).
+/// Shared by Rook/Bishop/Queen: walks each direction until the board edge, a friendly piece, or a captured enemy.
 [[nodiscard]] std::vector<Position> sliding_destinations(const Board& board, const Piece& piece,
                                                          const std::vector<std::pair<int, int>>& directions);
 
-/// Shared single-step geometry used by Knight, King, and Drone: checks each
-/// offset exactly once, ignoring what lies between.
+/// Shared by Knight/King/Drone: checks each offset once, ignoring what lies between.
 [[nodiscard]] std::vector<Position> stepping_destinations(const Board& board, const Piece& piece,
                                                           const std::vector<std::pair<int, int>>& offsets);
 

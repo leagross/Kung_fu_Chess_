@@ -9,10 +9,7 @@ namespace kfc::server {
 
 namespace {
 
-// CSPRNG (Mbed TLS CTR_DRBG) for unguessable tokens -- not std::mt19937_64,
-// whose internal state can be reconstructed from a few hundred outputs.
-// One process-wide context guarded by a mutex; CTR_DRBG isn't safe to call
-// concurrently and re-seeding per call would be wasteful.
+// CSPRNG for unguessable tokens -- not std::mt19937_64, whose state can be reconstructed from outputs.
 class TokenRandom {
 public:
     TokenRandom() {

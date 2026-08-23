@@ -21,9 +21,7 @@ void MouseInputAdapter::on_mouse_event(int event, int x, int y, int /*flags*/, v
     int board_y = canvas_pixel.y - adapter->board_offset_y_;
 
     if (event == cv::EVENT_LBUTTONDBLCLK) {
-        // The first press already reached click() below before this event
-        // fires; that's harmless (own-piece click just selects, and any
-        // other click's move request is unaffected by the jump that follows).
+        // The first press already reached click() below; harmless since it only selects.
         adapter->game_.jump(board_x, board_y);
         return;
     }

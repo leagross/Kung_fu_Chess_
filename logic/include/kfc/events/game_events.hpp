@@ -6,25 +6,19 @@
 
 namespace kfc::events {
 
-/// Published once, the moment a game becomes playable. Carries no data.
 struct GameStarted {};
 
-/// Published once, the moment a game is decided. winner is std::nullopt for a draw.
+/// winner is nullopt for a draw.
 struct GameEnded {
     std::optional<kfc::model::PieceColor> winner;
 };
 
-/// Published (networked play only) each second while a dropped opponent's grace
-/// period counts down. If the opponent never returns, a GameEnded follows.
+/// Networked play only: published each second during a dropped opponent's grace period.
 struct OpponentCountdown {
     int seconds_remaining;
 };
 
-/// Published (networked play only) when a dropped opponent reconnects before
-/// their grace period runs out, clearing the OpponentCountdown.
+/// Networked play only: published when a dropped opponent reconnects in time.
 struct OpponentReturned {};
-
-// Per-move "arrived/captured" events use kfc::model::ArrivalEvent directly on
-// the bus; only whole-game start/end signals are defined here.
 
 }  // namespace kfc::events

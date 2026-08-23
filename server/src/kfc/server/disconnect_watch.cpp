@@ -13,8 +13,7 @@ void DisconnectWatch::report_disconnect(kfc::model::PieceColor color) {
 DisconnectWatch::Tick DisconnectWatch::advance(std::chrono::steady_clock::time_point now) {
     std::lock_guard<std::mutex> guard(mutex_);
 
-    // Turn a freshly reported drop into a live countdown. Only one at a time --
-    // a second drop while one is running is ignored.
+    // Turn a freshly reported drop into a live countdown; a second drop while one runs is ignored.
     if (pending_.has_value() && !watching_.has_value()) {
         watching_ = pending_;
         deadline_ = now + std::chrono::milliseconds(grace_ms_);
@@ -35,8 +34,7 @@ DisconnectWatch::Tick DisconnectWatch::advance(std::chrono::steady_clock::time_p
         return tick;
     }
 
-    // Ceil, so the display runs N..1 and then the match ends -- never a
-    // lingering "0" on screen.
+    // Ceil, so the display runs N..1 and then the match ends, never a lingering "0".
     int seconds_remaining = (remaining_ms + 999) / 1000;
     if (seconds_remaining == last_reported_second_) {
         return {};  // same whole second as last tick; nothing new to say

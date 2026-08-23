@@ -48,8 +48,7 @@ std::optional<kfc::protocol::ClientMessage> run_home_screen(const std::string& w
         },
         &click);
 
-    // Detach the callback from `click` (a local) before returning, so nothing
-    // dereferences it during the connect() that follows.
+    // Detaches the callback from `click` (a local) before returning.
     auto finish = [&window_name](std::optional<kfc::protocol::ClientMessage> result) {
         cv::setMouseCallback(window_name, [](int, int, int, int, void*) {}, nullptr);
         return result;

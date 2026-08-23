@@ -13,13 +13,9 @@
 
 using nlohmann::json;
 
-// nlohmann::json finds to_json/from_json via ADL in the type's own namespace,
-// so every kfc::model type's hooks must live in kfc::model here, even though
-// kfc_core itself stays JSON-free.
+// nlohmann::json finds to_json/from_json via ADL, so kfc::model's hooks must live here.
 namespace kfc::model {
 
-// Forward-declared for the ArrivalEvent (de)serializers below; defined
-// further down next to Motion's.
 void to_json(json& j, MotionKind kind);
 void from_json(const json& j, MotionKind& kind);
 
@@ -34,14 +30,12 @@ void from_json(const json& j, Position& pos) {
 
 namespace {
 
-// Views the parsed string rather than copying it via get<std::string>().
-// Throws when the value isn't a string; decode_* turns that into nullopt.
+// Views the parsed string rather than copying it; throws if it isn't a string.
 [[nodiscard]] std::string_view text_of(const json& j) {
     return j.get_ref<const std::string&>();
 }
 
-// Reads one enum written as its name. Throws rather than returning nullopt;
-// the decoders turn the exception into nullopt for the caller.
+// Reads one enum written as its name; throws on an unknown name (decoders turn that into nullopt).
 template <typename Enum, std::size_t N>
 [[nodiscard]] Enum read_named(const json& j, const kfc::util::EnumNames<Enum, N>& names, std::string_view what) {
     std::string_view text = text_of(j);
@@ -54,9 +48,7 @@ template <typename Enum, std::size_t N>
 
 }  // namespace
 
-// Every enum on the wire is written as its readable name (from the tables in
-// piece_names.hpp/motion_kind_names.hpp), not the compact notation kfc::io
-// uses, since this traffic is read by humans while debugging.
+// Every enum on the wire is its readable name, not kfc::io's compact notation, for human debugging.
 
 void to_json(json& j, PieceColor color) {
     j = name_of(color);
@@ -161,8 +153,6 @@ void from_json(const json& j, Motion& motion) {
 
 namespace kfc::protocol {
 
-// Same ADL requirement as the kfc::model hooks above: must be at plain
-// kfc::protocol scope, not nested in an anonymous namespace.
 void to_json(json& j, const BoardSnapshot& snapshot) {
     j = json{{"width", snapshot.width}, {"height", snapshot.height}, {"pieces", snapshot.pieces}};
 }
@@ -179,14 +169,11 @@ json envelope(std::string_view type, json payload) {
     return json{{"type", type}, {"payload", std::move(payload)}};
 }
 
-// The "type" tag as a view onto the parsed message, not a copy. Throws if the
-// field is absent or not a string; decode_* reports that as undecodable.
 [[nodiscard]] std::string_view type_of(const json& j) {
     return j.at("type").get_ref<const std::string&>();
 }
 
-// Length check happens before parsing, so an oversized frame never reaches
-// the JSON parser.
+// Length check happens before parsing, so an oversized frame never reaches the JSON parser.
 [[nodiscard]] json parse_envelope(const std::string& text) {
     if (text.size() > kMaxMessageBytes) {
         throw std::runtime_error("message of " + std::to_string(text.size()) + " bytes exceeds the limit");
@@ -324,8 +311,6 @@ std::optional<ClientMessage> decode_client_message(const std::string& text) {
 
 std::string redact_for_log(const std::string& text) {
     // Scanned rather than parsed, so it still works on text we can't decode.
-    // The key/value are located tolerantly (whitespace around the colon
-    // allowed) since this must handle traffic from peers we didn't encode.
     static constexpr std::string_view kKey = "\"password\"";
 
     auto skip_whitespace = [&text](std::size_t from) {
@@ -347,7 +332,7 @@ std::string redact_for_log(const std::string& text) {
 
         std::size_t cursor = skip_whitespace(key + kKey.size());
         if (cursor >= text.size() || text[cursor] != ':') {
-            // "password" appearing as a value, not a key; nothing to redact.
+            // "password" as a value, not a key: nothing to redact.
             out.append(text, at, cursor - at);
             at = cursor;
             continue;
@@ -356,24 +341,20 @@ std::string redact_for_log(const std::string& text) {
 
         if (cursor < text.size() && text[cursor] == '"') {
             std::size_t value = cursor + 1;
-            // Step over backslash escapes so an escaped quote in the password
-            // doesn't end the scan early.
+            // Step over backslash escapes so an escaped quote doesn't end the scan early.
             std::size_t end = value;
             while (end < text.size() && text[end] != '"') {
                 end += (text[end] == '\\') ? 2 : 1;
             }
             out.append(text, at, value - at).append("***");
             if (end >= text.size()) {
-                // Truncated message: drop the remainder rather than risk
-                // emitting a partial password.
-                return out;
+                return out;  // truncated message: drop the remainder
             }
             at = end;
             continue;
         }
 
-        // A password that isn't a quoted string (number, null, ...) -- still
-        // redact everything up to whatever ends the value.
+        // Non-string password value (number, null, ...): redact up to whatever ends it.
         std::size_t end = cursor;
         while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']') {
             ++end;
@@ -393,8 +374,7 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
             Welcome welcome;
             payload.at("assigned_color").get_to(welcome.assigned_color);
             payload.at("board").get_to(welcome.board);
-            // Optional on the wire: absent means "a player".
-            welcome.spectator = payload.value("spectator", false);
+            welcome.spectator = payload.value("spectator", false);  // absent means "a player"
             welcome.room = payload.value("room", std::string{});
             if (payload.contains("history")) {
                 payload.at("history").get_to(welcome.history);

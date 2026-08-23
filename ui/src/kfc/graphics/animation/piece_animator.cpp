@@ -30,9 +30,7 @@ void PieceAnimator::advance(int ms, const kfc::model::Position& board_cell,
     }
 
     if (had_motion && (current_state_ == PieceStateName::Move || current_state_ == PieceStateName::Jump)) {
-        // Motion in flight last tick, gone this tick: it arrived. Detected
-        // directly rather than via is_piece_busy since a very short cooldown
-        // can make "busy but no Motion" too narrow a window to catch.
+        // Motion in flight last tick, gone this tick: it arrived.
         transition_to(animation_set_.clip(current_state_).next_state_when_finished);
         return;
     }

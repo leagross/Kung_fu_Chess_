@@ -41,9 +41,7 @@ RoomManager::~RoomManager() {
 }
 
 void RoomManager::stop_all() {
-    // Taken out under scheduler_mutex_ so a concurrent call never reaches an
-    // object mid-destruction; destroyed outside the lock since joining every
-    // worker thread is real time and would stall other connections otherwise.
+    // Destroyed outside the lock: joining every worker thread is real time and would stall routing.
     std::unique_ptr<MatchScheduler> to_destroy;
     {
         std::lock_guard<std::mutex> guard(scheduler_mutex_);
@@ -58,8 +56,7 @@ RoomManager::Room& RoomManager::open_room(RoomId& id_out, std::string room_name)
     room.match = std::make_shared<Match>(board_factory_(), logger_, config_, on_result_, disconnect_grace_ms_,
                                           kDefaultReleaseDelayMs, room_name);
     room.name = std::move(room_name);
-    // weak_ptr: a captured shared_ptr would keep the Match alive forever via
-    // its own wake hook.
+    // weak_ptr: a captured shared_ptr would keep the Match alive forever via its own wake hook.
     std::weak_ptr<Match> weak_match = room.match;
     room.match->set_wake_hook([this, weak_match] {
         if (std::shared_ptr<Match> match = weak_match.lock()) {
@@ -83,8 +80,7 @@ std::string RoomManager::generate_room_id() {
     static constexpr char kAlphabet[] = "34679ACDEFGHJKMNPQRTUVWXY";
     static constexpr int kAlphabetSize = sizeof(kAlphabet) - 1;
 
-    // 25^6 = 244 million ids, kept a few percent full at the target concurrent
-    // room count so the retry loop below stays rare.
+    // 25^6 = 244 million ids, so the retry loop below stays rare.
     static constexpr int kLength = 6;
 
     // Not deterministic across runs, so ids aren't guessable from a past session.
@@ -103,8 +99,7 @@ std::string RoomManager::generate_room_id() {
 }
 
 std::optional<RoomId> RoomManager::closest_waiting_room(int rating) const {
-    // Sorted by rating: nothing farther out can beat the two entries
-    // adjacent to lower_bound(rating).
+    // Sorted by rating: nothing farther out can beat the two entries adjacent to lower_bound(rating).
     std::optional<std::pair<int, RoomId>> best;  // {gap, room}
     auto consider = [&](std::multimap<int, RoomId>::const_iterator it) {
         if (it == waiting_by_rating_.end()) {
@@ -162,19 +157,16 @@ std::optional<RoomManager::Seat> RoomManager::join_any(const std::string& userna
                         std::to_string(rating) + " waiting)");
         }
 
-        // Reserved under the lock so two simultaneous joins can't grab the
-        // same last seat; colour itself comes from Match::join below.
+        // Reserved under the lock so two simultaneous joins can't grab the same last seat.
         ++target->seats_taken;
         ++target->connected;
         match = target->match;
     }
 
-    // Outside the lock: join()'s Welcome send is network I/O and must not
-    // block enqueue()'s routing. The shared_ptr taken above keeps the Match alive.
+    // Outside the lock: join()'s Welcome send is network I/O and must not block routing.
     std::optional<kfc::model::PieceColor> color = match->join(username, rating, std::move(send), std::move(close));
     if (!color.has_value()) {
-        // Cannot happen -- seats_taken caps a room at two joiners -- but undo
-        // the reservation defensively and reap the room if it's now empty.
+        // Defensive only -- seats_taken caps a room at two joiners -- but undo the reservation anyway.
         std::shared_ptr<Match> reaped;
         {
             std::lock_guard<std::mutex> guard(rooms_mutex_);
@@ -261,8 +253,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
 
             reclaimed = match->reclaimable_seat_for(username);
             if (!reclaimed.has_value()) {
-                // match->join_spectator below is what actually enforces
-                // MatchAudience::kMaxSpectators.
+                // join_spectator below is what actually enforces MatchAudience::kMaxSpectators.
                 as_spectator = it->second.seats_taken >= 2;
                 if (!as_spectator) {
                     ++it->second.seats_taken;
@@ -273,8 +264,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
     }
 
     if (!found_locally) {
-        // Directory lookup is network I/O; checked outside rooms_mutex_ so
-        // it doesn't hold up routing for every other room.
+        // Directory lookup is network I/O; checked outside rooms_mutex_ so it doesn't hold up routing.
         if (directory_ != nullptr) {
             std::optional<std::string> owner = directory_->owner_of(name);
             if (owner.has_value()) {
@@ -290,9 +280,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
 
     if (reclaimed.has_value()) {
         if (!match->reconnect(*reclaimed, std::move(send), std::move(close))) {
-            // Grace expired between reclaimable_seat_for saying yes and this
-            // call. Give back the connection counted above, or the room
-            // would never be reaped.
+            // Grace expired since reclaimable_seat_for said yes; give back the connection counted above.
             {
                 std::lock_guard<std::mutex> guard(rooms_mutex_);
                 auto it = rooms_.find(room_id);
@@ -310,7 +298,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
     if (as_spectator) {
         WatcherId watcher = match->join_spectator(username, std::move(send), std::move(close));
         if (watcher == 0) {
-            // At MatchAudience::kMaxSpectators; give back the connection counted above.
+            // At MatchAudience::kMaxSpectators.
             {
                 std::lock_guard<std::mutex> guard(rooms_mutex_);
                 auto it = rooms_.find(room_id);
@@ -334,9 +322,7 @@ std::optional<RoomManager::Seat> RoomManager::join_room(const std::string& name,
 }
 
 void RoomManager::enqueue(RoomId room, kfc::model::PieceColor from, kfc::protocol::ClientMessage message) {
-    // rooms_mutex_ covers only the lookup: Match::enqueue() also runs the
-    // wake hook, which reaches into MatchScheduler's own locks, and holding
-    // this mutex across that would serialize routing for every room behind it.
+    // rooms_mutex_ covers only the lookup: enqueue()'s wake hook reaches into MatchScheduler's own locks.
     std::shared_ptr<Match> match;
     {
         std::lock_guard<std::mutex> guard(rooms_mutex_);
@@ -385,18 +371,13 @@ void RoomManager::on_disconnect(const Seat& seat) {
         }
     }
     if (reaped) {
-        // scheduler_mutex_ makes "take scheduler_ out to destroy it" and
-        // "look up scheduler_ and call into it" mutually exclusive, so this
-        // never calls into a MatchScheduler mid-teardown (see scheduler_'s
-        // own doc comment).
         {
             std::lock_guard<std::mutex> guard(scheduler_mutex_);
             if (scheduler_) {
                 scheduler_->remove(reaped);
             }
         }
-        // Best-effort: the directory's own TTL is what actually guarantees a
-        // stale entry doesn't outlive its room forever.
+        // Best-effort: the directory's own TTL guarantees a stale entry doesn't outlive its room.
         if (directory_ != nullptr && !reaped_name.empty()) {
             directory_->forget_room(reaped_name);
         }

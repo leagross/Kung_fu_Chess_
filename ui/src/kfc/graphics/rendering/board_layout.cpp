@@ -13,14 +13,11 @@ constexpr int kBoardSourceGridInsetLeft = 116;
 constexpr int kBoardSourceGridInsetTop = 116;
 constexpr int kBoardSourceGridWidth = 748;
 constexpr int kBoardSourceGridHeight = 736;
-// Background visible around the framed board once it's centered on
-// background.png -- a layout/pacing choice for this app, tune freely.
 constexpr int kBoardBackgroundMarginPixels = 50;
 }  // namespace
 
 BoardLayout compute_board_layout(int board_pixel_width, int board_pixel_height) {
-    // Scale board.png so its inner grid (not the full image) comes out to
-    // exactly board_pixel_width x board_pixel_height.
+    // Scale so board.png's inner grid (not the full image) matches the requested pixel size.
     double board_scale_x = static_cast<double>(board_pixel_width) / kBoardSourceGridWidth;
     double board_scale_y = static_cast<double>(board_pixel_height) / kBoardSourceGridHeight;
 
@@ -30,8 +27,7 @@ BoardLayout compute_board_layout(int board_pixel_width, int board_pixel_height) 
     layout.framed_board_inset_x = static_cast<int>(std::lround(kBoardSourceGridInsetLeft * board_scale_x));
     layout.framed_board_inset_y = static_cast<int>(std::lround(kBoardSourceGridInsetTop * board_scale_y));
 
-    // Background fills the entire canvas (panels included), not just the
-    // board's own column.
+    // Background fills the entire canvas, including the HUD panels.
     layout.board_column_width = layout.framed_board_width + 2 * kBoardBackgroundMarginPixels;
     layout.board_column_height = layout.framed_board_height + 2 * kBoardBackgroundMarginPixels;
     layout.board_offset_x = kHudPanelWidthPixels;

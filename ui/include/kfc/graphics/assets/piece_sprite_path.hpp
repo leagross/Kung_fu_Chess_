@@ -7,9 +7,7 @@
 
 namespace kfc::graphics {
 
-/// Path to a piece's idle-state first sprite frame, e.g.
-/// .../pieces_mine/wK/states/idle/sprites/1.png. Delegates folder naming to
-/// scheme; only knows the shared states/<state>/sprites/<frame> layout.
+/// e.g. .../pieces_mine/wK/states/idle/sprites/1.png.
 std::filesystem::path idle_sprite_path(const IPieceCodeScheme& scheme, kfc::model::PieceKind kind,
                                         kfc::model::PieceColor color);
 

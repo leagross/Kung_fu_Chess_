@@ -6,9 +6,7 @@
 
 namespace kfc::graphics::audio {
 
-/// Windows-only ISoundPlayer: maps each Sound cue to a .wav file and plays
-/// it asynchronously via PlaySound (winmm). Missing files stay silent rather
-/// than crashing or beeping.
+/// Plays each Sound cue asynchronously via PlaySound (winmm); missing files stay silent.
 class WinSoundPlayer : public kfc::audio::ISoundPlayer {
 public:
     explicit WinSoundPlayer(std::filesystem::path sounds_dir);

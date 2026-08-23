@@ -17,9 +17,7 @@ public:
     /// scheme must outlive this PieceAssetLibrary.
     explicit PieceAssetLibrary(const IPieceCodeScheme& scheme);
 
-    /// Loads from disk on first request. Throws whatever
-    /// AnimationConfigLoader::load or scheme.folder_name throw; callers
-    /// decide whether to skip that piece rather than abort.
+    /// Loads from disk on first request.
     const PieceAnimationSet& animation_set_for(kfc::model::PieceKind kind, kfc::model::PieceColor color) const;
 
 private:

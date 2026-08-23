@@ -2,16 +2,13 @@
 
 namespace kfc::database {
 
-/// Initial rating for every new account.
 inline constexpr int kStartingRating = 1200;
-
-/// Standard chess K-factor.
 inline constexpr int kDefaultKFactor = 32;
 
-/// Flat rating hit for a disconnect/timeout loss, applied instead of an ELO exchange.
+/// Flat penalty applied instead of a normal ELO exchange.
 inline constexpr int kDisconnectPenalty = 10;
 
-/// Matchmaking only pairs players whose ratings are within this many points.
+/// Matchmaking only pairs ratings within this gap.
 inline constexpr int kMatchmakingRatingGap = 100;
 
 /// Probability (0..1) that `rating` scores against `opponent_rating`, per the ELO logistic curve.

@@ -18,8 +18,7 @@ namespace {
 constexpr std::size_t kSaltBytes = 16;
 constexpr std::size_t kHashBytes = 32;
 
-// random_device, not a PRNG like mt19937: salt uniqueness must not be
-// predictable from observed output.
+// random_device, not a PRNG: salt uniqueness must not be predictable from observed output.
 std::vector<std::uint8_t> random_salt() {
     std::random_device source;
     std::vector<std::uint8_t> salt(kSaltBytes);

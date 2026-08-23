@@ -26,8 +26,7 @@ void PieceAnimatorRegistry::advance(int ms, const kfc::texttests::IGameView& gam
             auto animator = animators_.find(piece->id);
             bool kind_changed = animator != animators_.end() && animator_kinds_.at(piece->id) != piece->kind;
             if (animator != animators_.end() && kind_changed) {
-                // Same PieceId, different kind: a pawn promoted. Discard so
-                // the block below rebuilds against the right AnimationSet.
+                // Same PieceId, different kind: a pawn promoted. Discard so it rebuilds below.
                 animators_.erase(animator);
                 animator = animators_.end();
             }
@@ -49,10 +48,7 @@ void PieceAnimatorRegistry::advance(int ms, const kfc::texttests::IGameView& gam
     }
 
     for (auto it = animators_.begin(); it != animators_.end();) {
-        // A piece missing from the board but still busy (e.g. an Airborne
-        // defender an attacker's Move provisionally occupies, per
-        // RealTimeArbiter::resolve_arrival) is mid-jump, not captured; keep
-        // its animator so it resumes once it reappears instead of resetting.
+        // A piece missing from the board but still busy is mid-jump, not captured; keep its animator.
         if (seen.count(it->first) == 0 && !game.is_piece_busy(it->first)) {
             animator_kinds_.erase(it->first);
             it = animators_.erase(it);

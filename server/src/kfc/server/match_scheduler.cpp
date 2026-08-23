@@ -13,8 +13,7 @@ namespace {
 
 constexpr int kTickIntervalMs = 16;  // ~60 Hz
 
-// Clamped so elapsed time is never 0 (simulation must move forward) and
-// never huge (a stalled process can't dump seconds into one tick).
+// Clamped so elapsed time is never 0 and never huge (a stall can't dump seconds into one tick).
 constexpr int kMinTickAdvanceMs = 1;
 constexpr int kMaxTickAdvanceMs = 200;
 
@@ -108,8 +107,7 @@ void MatchScheduler::remove(const std::shared_ptr<Match>& match) {
         owner->matches.erase(it);
         owner->load.fetch_sub(1, std::memory_order_relaxed);
     }
-    // Nothing joined: if the worker is mid-tick on this match, it holds its
-    // own shared_ptr copy for the duration (see run), so this returns immediately.
+    // Nothing joined: a mid-tick worker holds its own shared_ptr copy (see run), so this returns immediately.
 }
 
 void MatchScheduler::wake(const std::shared_ptr<Match>& match) {
@@ -143,8 +141,7 @@ void MatchScheduler::run(Worker& worker) {
     while (running_.load()) {
         {
             std::unique_lock<std::mutex> lock(worker.mutex);
-            // Wait out the interval, or leave early when a command arrives or the
-            // scheduler is shutting down.
+            // Wait out the interval, or leave early on a nudge or shutdown.
             worker.wakeup.wait_for(lock, std::chrono::milliseconds(kTickIntervalMs),
                                    [this, &worker] { return worker.nudged || !running_.load(); });
             worker.nudged = false;
@@ -159,9 +156,7 @@ void MatchScheduler::run(Worker& worker) {
         last_tick_at = now;
         elapsed_ms = std::clamp(elapsed_ms, kMinTickAdvanceMs, kMaxTickAdvanceMs);
 
-        // Copied out under the lock, then ticked without it: a tick's
-        // broadcast can re-enter this scheduler (disconnect -> reap ->
-        // remove), which would deadlock if the worker's mutex were still held.
+        // Copied out under the lock, then ticked without it: a tick's broadcast can re-enter this scheduler.
         std::vector<std::shared_ptr<Match>> due;
         {
             std::lock_guard<std::mutex> guard(worker.mutex);

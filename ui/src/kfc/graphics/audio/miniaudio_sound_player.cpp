@@ -1,7 +1,4 @@
 // The ISoundPlayer for every platform except Windows (see win_sound_player.cpp).
-// Compiled only off Windows. miniaudio opens whatever audio API the machine
-// has (ALSA/PulseAudio/CoreAudio) via dlopen at runtime, needing no -dev
-// package to build against.
 
 #include <filesystem>
 #include <string>

@@ -5,78 +5,52 @@
 
 namespace kfc::graphics {
 
-/// OpenCV-backed image wrapper. Everything downstream in kfc::graphics
-/// builds on this instead of touching cv::Mat directly.
+/// OpenCV-backed image wrapper used throughout kfc::graphics instead of cv::Mat directly.
 class Img {
 public:
     Img();
 
-    /// Loads path (with alpha channel, if present) and optionally resizes.
-    /// size {0,0} keeps native dimensions; keep_aspect shrinks to fit rather
-    /// than stretching. Throws std::runtime_error if path can't be read.
+    /// size {0,0} keeps native dimensions; keep_aspect shrinks to fit rather than stretching.
     Img& read(const std::string& path, const std::pair<int, int>& size = {}, bool keep_aspect = false,
               int interpolation = cv::INTER_AREA);
 
-    /// Draws this image onto other_img with its top-left corner at (x, y),
-    /// alpha-blending if this image has a fourth (alpha) channel. Throws
-    /// std::runtime_error if either image is unloaded or this image would
-    /// not fit inside other_img at that position.
+    /// Alpha-blends onto other_img at (x, y) if this image has an alpha channel.
     void draw_on(Img& other_img, int x, int y);
 
-    /// Draws txt with its baseline's left edge at (x, y).
     void put_text(const std::string& txt, int x, int y, double font_size,
                   const cv::Scalar& color = cv::Scalar(255, 255, 255, 255), int thickness = 1);
 
-    /// Opens a window showing the image and blocks until any key is pressed.
     void show();
 
-    /// The underlying OpenCV matrix, for callers that need raw pixel access.
     const cv::Mat& get_mat() const {
         return img_;
     }
 
-    /// Deep copy of this image's pixels. Needed because Img's compiler-
-    /// generated copy constructor only copies cv::Mat's reference-counted
-    /// handle, so it would still share the source's pixel buffer.
+    /// Deep copy; cv::Mat's default copy would only share the reference-counted pixel buffer.
     Img clone() const;
 
-    /// A new Img of the given size, filled with color.
     static Img blank(int width, int height, const cv::Scalar& color = cv::Scalar(0, 0, 0, 255));
 
-    /// Deep copy of the width x height region starting at (x, y). Throws
-    /// std::runtime_error if that region doesn't fit inside this image.
     Img cropped(int x, int y, int width, int height) const;
 
-    /// Deep copy of this image, resized to width x height.
     Img resized(int width, int height) const;
 
-    /// CSS background-size:cover equivalent: scales up so both dimensions
-    /// meet or exceed the target (aspect preserved), then center-crops to
-    /// target_width x target_height.
+    /// CSS background-size:cover equivalent: scale to cover, then center-crop to target size.
     Img cover_scaled(int target_width, int target_height) const;
 
-    /// Drops the alpha channel and marks the image fully opaque, so
-    /// draw_on's per-pixel blend can be skipped for a layer that should
-    /// always paste as a hard backdrop even if its source PNG carries
-    /// near-255 alpha noise (e.g. anti-aliased edges).
+    /// Drops alpha and marks fully opaque, skipping draw_on's blend for near-255-alpha PNGs.
     void force_opaque();
 
-    /// Draws a translucent overlay across the bottom fraction (0..1) of a
-    /// cell_size x cell_size cell at (cell_x, cell_y), pinned to the bottom
-    /// edge -- an hourglass-sand stand-in with no art asset needed.
+    /// Bottom-fraction translucent overlay on a cell, standing in for an hourglass-sand effect.
     void draw_hourglass_overlay(int cell_x, int cell_y, int cell_size, double fraction, const cv::Scalar& color);
 
-    /// False until read() has successfully loaded an image.
     bool is_loaded() const {
         return !img_.empty();
     }
 
 private:
     cv::Mat img_;
-    // True only if img_ has a 4th channel with values below 255 somewhere;
-    // computed once on load so draw_on can skip its per-pixel blend for
-    // images that are nominally alpha but fully opaque.
-    bool has_transparency_ = false;
+    bool has_transparency_ = false;  // computed once on load so draw_on can skip its blend
     void update_transparency_flag();
 };
 

@@ -31,14 +31,10 @@ GameSession::GameSession(int argc, char** argv)
     : gameplay_config_(kfc::protocol::load_gameplay_config(KFC_GAMEPLAY_CONFIG_FILE)) {
     value_provider_.emplace(gameplay_config_);
 
-    // --server=ws://host:port switches to a thin networked client (see
-    // ServerLink). Username/password come later via set_credentials(),
-    // once the Login dialog collects them.
+    // --server=ws://host:port switches to a thin networked client (see ServerLink).
     std::optional<std::string> server_url = find_flag(argc, argv, "--server");
 
-    // Board is read from the default file in both modes: locally it's the
-    // game board; for networked play it only provides dimensions before we
-    // ever connect (the server's board is the same one).
+    // For networked play, only provides dimensions before we ever connect (server's board is the same).
     std::vector<std::string> board_lines = read_board_lines(default_board_file());
     kfc::model::Board initial_board = kfc::io::BoardParser().parse(board_lines);
     board_width_ = initial_board.width();
@@ -47,10 +43,7 @@ GameSession::GameSession(int argc, char** argv)
     if (server_url.has_value()) {
         networked_ = true;
         server_url_ = *server_url;
-        // Username/password aren't known yet -- set_credentials() supplies
-        // them later, from the Login dialog, before connect() is ever
-        // called.
-        return;  // connect() dials out later, from the Play button
+        return;  // connect() dials out later, from the Play button, once set_credentials() runs
     }
 
     std::cout << "Loaded board: " << board_width_ << "x" << board_height_ << "\n";

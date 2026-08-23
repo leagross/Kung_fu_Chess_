@@ -22,8 +22,7 @@ kfc::input::ControllerResult Game::jump(int x, int y) {
 }
 
 void Game::wait(int ms) {
-    // Published here rather than the constructor so subscribers wired up
-    // after construction don't miss it.
+    // Published here, not the constructor, so subscribers wired up after construction don't miss it.
     if (!started_) {
         started_ = true;
         events_.publish(kfc::events::GameStarted{});

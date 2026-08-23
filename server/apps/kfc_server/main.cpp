@@ -35,8 +35,7 @@ constexpr std::string_view kRedisPortFlag = "--redis-port=";
 constexpr std::string_view kWorkerUrlFlag = "--worker-url=";
 constexpr int kDefaultRedisPort = 6379;
 
-// Avoids std::stoi's throw-on-unparsable, which would take the process down
-// before the log file is even open.
+// Avoids std::stoi's throw-on-unparsable, which would take the process down before the log file is open.
 std::optional<int> parse_port(const std::string& text) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
         return std::nullopt;
@@ -49,8 +48,7 @@ std::optional<int> parse_port(const std::string& text) {
     }
 }
 
-// Set from a signal handler: an atomic store only, nothing that could
-// deadlock mid-signal. main() polls this from an ordinary thread instead.
+// Set from a signal handler: an atomic store only, nothing that could deadlock mid-signal.
 std::atomic<bool> g_shutdown_requested{false};
 
 void request_shutdown(int /*signal*/) {
@@ -79,8 +77,7 @@ int main(int argc, char** argv) {
     int http_port = 8081;
     // Debug logs message-by-message traffic; --log-level=info turns that off.
     kfc::protocol::LogLevel log_level = kfc::protocol::LogLevel::Debug;
-    // Unset means single-worker mode: no IRoomDirectory. Set together with
-    // --worker-url, this worker shares room lookup across others via Redis.
+    // Unset means single-worker mode; set with --worker-url to share room lookup via Redis.
     std::string redis_host;
     int redis_port = kDefaultRedisPort;
     std::string worker_url;
@@ -188,10 +185,7 @@ int main(int argc, char** argv) {
         // Shared budget across register/login/WebSocket-Login (see http_api.hpp).
         kfc::server::RateLimiter auth_limiter(10, std::chrono::minutes(1));
 
-        // A separate budget from auth_limiter's, for Play/CreateRoom/JoinRoom
-        // (see join_reasons::kRateLimited). 30/minute is generous for a real
-        // player while still bounding how fast one IP can fill a room's
-        // spectator slots with fresh connections.
+        // Separate budget from auth_limiter's, for Play/CreateRoom/JoinRoom.
         kfc::server::RateLimiter seat_limiter(30, std::chrono::minutes(1));
 
         kfc::server::RoomManager rooms(board_factory, logger, std::move(gameplay), on_result,
@@ -213,8 +207,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        // A signal handler can't safely call server.stop() itself (it takes
-        // a mutex), so a small thread polls the flag instead.
+        // A signal handler can't safely call server.stop() itself (it takes a mutex).
         std::signal(SIGINT, request_shutdown);
         std::signal(SIGTERM, request_shutdown);
         std::thread shutdown_watcher([&server] {
@@ -232,8 +225,7 @@ int main(int argc, char** argv) {
         shutdown_watcher.join();
         logger.log("kfc_server shutting down");
 
-        // Rooms must go quiet before the socket layer comes down, or a
-        // frozen match's tick thread can broadcast into a closing socket.
+        // Rooms must go quiet before the socket layer comes down, or a frozen match can broadcast into it.
         http_server.stop();
         rooms.stop_all();
     } catch (const std::exception& e) {

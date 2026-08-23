@@ -5,9 +5,7 @@
 
 namespace kfc::io {
 
-/// Thrown by BoardParser::parse on invalid input. code() is a stable,
-/// machine-readable identifier (e.g. "UNKNOWN_TOKEN") -- callers decide how
-/// to present it (main.cpp prints "ERROR " + code).
+/// Thrown by BoardParser::parse; code() is a stable machine-readable identifier.
 class ParseError : public std::runtime_error {
 public:
     explicit ParseError(std::string code);

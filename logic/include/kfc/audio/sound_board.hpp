@@ -5,12 +5,10 @@
 
 namespace kfc::audio {
 
-/// Maps game events to sound cues via an injected ISoundPlayer. Holds no
-/// game state -- it only reacts to bus events.
+/// Maps game events to sound cues via an injected ISoundPlayer; holds no game state.
 class SoundBoard {
 public:
-    /// Both bus and player must outlive this SoundBoard (subscriptions
-    /// capture player by reference).
+    /// Both bus and player must outlive this SoundBoard.
     SoundBoard(kfc::events::EventBus& bus, ISoundPlayer& player);
 };
 

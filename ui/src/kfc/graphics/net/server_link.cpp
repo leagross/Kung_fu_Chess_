@@ -3,8 +3,7 @@
 #include <algorithm>
 #include <chrono>
 
-// IXWebSocket's Windows headers pull in <windows.h>, whose min/max macros
-// would otherwise swallow std::min/std::max below.
+// Prevents windows.h (pulled in by IXWebSocket) from swallowing std::min/std::max below.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -20,9 +19,7 @@ ServerLink::ServerLink(std::string server_url, std::string username, std::string
                        kfc::protocol::ClientMessage seating_action, kfc::protocol::FileLogger& logger)
     : username_(std::move(username)), password_(std::move(password)), seating_action_(std::move(seating_action)),
       logger_(logger) {
-    // Windows needs WSAStartup (what this wraps) before any socket use; safe
-    // to call from multiple instances, each paired with uninitNetSystem().
-    ix::initNetSystem();
+    ix::initNetSystem();  // wraps WSAStartup; safe to call from multiple instances
     connect_to(server_url);
 }
 
@@ -80,8 +77,7 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
-    // Woken through the same slot Welcome uses, so wait_for_welcome() returns
-    // immediately instead of sitting out its timeout.
+    // Woken through the same slot as Welcome, so wait_for_welcome() doesn't sit out its timeout.
     if (std::holds_alternative<kfc::protocol::JoinFailed>(*decoded)) {
         std::lock_guard<std::mutex> lock(welcome_mutex_);
         join_failure_ = std::get<kfc::protocol::JoinFailed>(*decoded).reason;
@@ -89,9 +85,7 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
-    // Only the flag is set here; reconnecting must happen from
-    // wait_for_welcome() on the main thread, not this callback's thread
-    // (which stopping this same socket would try to join).
+    // Only the flag is set here; reconnecting must happen on the main thread in wait_for_welcome().
     if (std::holds_alternative<kfc::protocol::JoinRedirect>(*decoded)) {
         std::lock_guard<std::mutex> lock(welcome_mutex_);
         pending_redirect_url_ = std::get<kfc::protocol::JoinRedirect>(*decoded).url;
@@ -99,8 +93,7 @@ void ServerLink::on_message(const std::string& text) {
         return;
     }
 
-    // Prefixed so the caller can tell a rejected login apart from a rejected
-    // room -- they need different wording.
+    // Prefixed so the caller can tell a rejected login apart from a rejected room.
     if (std::holds_alternative<kfc::protocol::LoginFailed>(*decoded)) {
         std::lock_guard<std::mutex> lock(welcome_mutex_);
         join_failure_ = kLoginFailurePrefix + std::get<kfc::protocol::LoginFailed>(*decoded).reason;
@@ -113,8 +106,7 @@ void ServerLink::on_message(const std::string& text) {
 }
 
 bool ServerLink::wait_for_welcome(int timeout_ms) {
-    // At most two passes: the original attempt and one redirect retry. A
-    // second redirect is treated as failure so a bad deployment can't loop.
+    // At most two passes: the original attempt and one redirect retry.
     for (int attempt = 0; attempt < 2; ++attempt) {
         std::unique_lock<std::mutex> lock(welcome_mutex_);
         bool arrived = welcome_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] {
@@ -126,12 +118,11 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
 
         if (pending_redirect_url_.has_value()) {
             if (attempt == 1) {
-                return false;  // a second redirect in the same call -- see above
+                return false;  // a second redirect in the same call
             }
             std::string redirect_url = *pending_redirect_url_;
             pending_redirect_url_.reset();
-            // Must not hold welcome_mutex_ while stopping: it joins
-            // IXWebSocket's thread, which on_message also locks this mutex on.
+            // Must not hold welcome_mutex_ while stopping: it joins the thread that locks this mutex.
             lock.unlock();
             logger_.log("ServerLink: room is on another worker, reconnecting to " + redirect_url);
             socket_->stop();
@@ -160,8 +151,7 @@ bool ServerLink::wait_for_welcome(int timeout_ms) {
         }
         board_ = std::move(board);
         board_mapper_.emplace(board_->width(), board_->height());
-        // Restrict click-selection to this client's own color, matching the
-        // server's ownership check.
+        // Restricts click-selection to this client's own color, matching the server's ownership check.
         controller_.emplace(*board_, static_cast<kfc::model::IMoveRequester&>(*this), *board_mapper_,
                             assigned_color_);
 
@@ -235,13 +225,8 @@ void ServerLink::wait(int ms) {
                 } else if constexpr (std::is_same_v<T, kfc::protocol::JoinFailed>) {
                     logger_.log("ServerLink: join failed: " + m.reason);
                 } else if constexpr (std::is_same_v<T, kfc::protocol::MatchStart>) {
-                    // Publish now, not on mere connection, so the intro splash
-                    // and start sound land at the true match start.
                     match_started_ = true;
-                    // White's own Welcome couldn't have named Black yet (Black
-                    // hadn't joined) -- this is where White finally learns it.
-                    // A no-op overwrite for Black, whose Welcome already had
-                    // both.
+                    // Where White finally learns Black's name/rating; a no-op overwrite for Black.
                     white_username_ = m.white_username;
                     black_username_ = m.black_username;
                     white_rating_ = m.white_rating;
@@ -256,8 +241,7 @@ void ServerLink::wait(int ms) {
             message);
     }
 
-    // Clamped to duration_ms so a slow network never lets a predicted piece
-    // visually overshoot before the real BoardUpdate confirms it arrived.
+    // Clamped so a slow network never lets a predicted piece visually overshoot its motion.
     auto now = std::chrono::steady_clock::now();
     for (auto& [id, motion] : predicted_motions_) {
         int real_elapsed_ms = static_cast<int>(
@@ -269,9 +253,7 @@ void ServerLink::wait(int ms) {
 void ServerLink::handle_motion_started(const kfc::protocol::MotionStarted& started) {
     kfc::model::PieceId id = started.motion.moving_piece.id;
     predicted_motions_[id] = started.motion;
-    // Anchored to when the motion actually began (subtracting the server's
-    // own elapsed_ms), so this client's prediction stays aligned with the
-    // instant the server -- and the other client -- started counting from.
+    // Anchored to when the motion actually began, aligning with the server's own elapsed_ms.
     motion_start_times_[id] = std::chrono::steady_clock::now() - std::chrono::milliseconds(started.motion.elapsed_ms);
 }
 
@@ -280,9 +262,7 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
         return;
     }
 
-    // The server snapshots its board after registering us for broadcasts, so
-    // the first update or two may already be reflected in the snapshot;
-    // replaying one would move a piece twice and diverge from the server.
+    // The snapshot may already reflect the first update or two; replaying one would diverge.
     if (update.revision != 0 && update.revision <= revision_) {
         logger_.log(kfc::protocol::LogLevel::Debug,
                     "ServerLink: skipping update " + std::to_string(update.revision) +
@@ -292,16 +272,12 @@ void ServerLink::apply_board_update(const kfc::protocol::BoardUpdate& update) {
     revision_ = update.revision;
 
     for (const kfc::model::ArrivalEvent& event : update.arrival_events) {
-        // Destination is cleared unconditionally, not just on capture: the
-        // server also clears it when the mover passed through an airborne
-        // enemy with no capture, whose stale record would otherwise make
-        // add_piece below throw on an "occupied" cell.
+        // Destination is cleared unconditionally: a pass-through with no capture leaves a stale
+        // record there too, which would otherwise make add_piece below throw on "occupied".
         board_->remove_piece(event.destination);
         board_->remove_piece(event.source);
         board_->add_piece(event.moved_piece);
 
-        // The real outcome has arrived, so any prediction for this piece
-        // (or a captured piece caught mid-flight) is now stale.
         predicted_motions_.erase(event.moved_piece.id);
         motion_start_times_.erase(event.moved_piece.id);
         if (event.captured_piece.has_value()) {
@@ -332,9 +308,7 @@ std::optional<kfc::model::Motion> ServerLink::motion_for(kfc::model::PieceId pie
 }
 
 bool ServerLink::is_piece_busy(kfc::model::PieceId piece_id) const {
-    // Doubles as PieceAnimatorRegistry's animator-retention signal: a piece
-    // with an open prediction must keep its animator alive even when board_
-    // doesn't currently show it.
+    // Doubles as PieceAnimatorRegistry's animator-retention signal for pieces with an open prediction.
     return predicted_motions_.count(piece_id) > 0;
 }
 

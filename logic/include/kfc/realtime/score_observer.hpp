@@ -6,12 +6,10 @@
 
 namespace kfc::model {
 
-/// Tallies material score per side, crediting whichever side made the
-/// capturing move. Point values come from an injected IPieceValueProvider.
+/// Tallies material score per side, crediting whichever side made the capturing move.
 class ScoreObserver : public IGameObserver {
 public:
-    /// values must outlive this ScoreObserver. Defaults to the standard
-    /// chess material values.
+    /// values must outlive this ScoreObserver.
     explicit ScoreObserver(const IPieceValueProvider& values = kDefaultPieceValueProvider);
 
     void on_arrival(const ArrivalEvent& event) override;

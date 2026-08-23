@@ -3,10 +3,7 @@
 namespace kfc::model {
 
 namespace {
-// Must be >= the long_rest clip's own natural duration (currently 5 frames
-// at 2 frames/sec = 2500ms across every piece in the active asset pack) --
-// otherwise the piece becomes movable again while it is still visually
-// resting. See PieceAnimator::advance's natural_duration_ms computation.
+// Must be >= the long_rest clip's natural duration, or the piece looks movable while still resting.
 constexpr int kStandardCooldownMs = 2500;
 }  // namespace
 

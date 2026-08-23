@@ -2,8 +2,7 @@
 
 namespace kfc::audio {
 
-/// A closed set of sound cue *meanings*, not file names -- what a cue sounds
-/// like is entirely the ISoundPlayer's business.
+/// Cue meanings, not file names -- what a cue sounds like is ISoundPlayer's business.
 enum class Sound {
     Move,
     Capture,
@@ -11,8 +10,7 @@ enum class Sound {
     GameEnd,
 };
 
-/// Abstracted so the event->sound mapping can be unit-tested with a fake,
-/// keeping the real audio backend out of the headless core.
+/// Abstracted so event->sound mapping can be unit-tested without the real audio backend.
 class ISoundPlayer {
 public:
     virtual ~ISoundPlayer() = default;

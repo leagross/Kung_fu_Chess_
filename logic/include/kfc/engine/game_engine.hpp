@@ -10,31 +10,21 @@
 
 namespace kfc::model {
 
-/// The public command boundary for moves and jumps -- the only entry point
-/// Controller/TextTestRunner use. Coordinates Board, RuleEngine,
-/// RealTimeArbiter and MotionFactory; no piece-specific logic of its own.
+/// Public command boundary for moves/jumps; coordinates Board, RuleEngine, RealTimeArbiter, MotionFactory.
 class GameEngine : public IMoveRequester {
 public:
-    /// All four dependencies must outlive this GameEngine. real_time_arbiter
-    /// should be wrapping the same board.
+    /// All four dependencies must outlive this GameEngine.
     GameEngine(const Board& board, const RuleEngine& rule_engine, RealTimeArbiter& real_time_arbiter,
                const MotionFactory& motion_factory);
 
-    /// Rejects with "game_over" or "motion_in_progress" (per piece);
-    /// otherwise delegates legality to RuleEngine and starts the move.
     MoveResult request_move(const Position& source, const Position& destination) override;
 
-    /// Bypasses RuleEngine entirely -- a jump is not a chess move, it has
-    /// its own timing (see MotionFactory).
+    /// Bypasses RuleEngine -- a jump isn't a chess move, it has its own timing.
     MoveResult request_jump(const Position& cell) override;
 
-    /// Advances simulated time by ms via RealTimeArbiter; marks game over
-    /// if any arrival captured a king. Returns arrivals for the caller to
-    /// forward to observers -- this class never touches an observer list.
+    /// Returns arrivals for the caller to forward to observers.
     ArrivalEvents wait(int ms);
 
-    /// True once a king has been captured. Once true, request_move and
-    /// request_jump always reject with "game_over".
     [[nodiscard]] bool is_game_over() const;
 
 private:

@@ -18,14 +18,10 @@ ScreenMapper::ScreenMapper(std::string window_name, int canvas_width, int canvas
 PixelPoint ScreenMapper::to_canvas_pixels(int display_x, int display_y) const {
     cv::Rect displayed = cv::getWindowImageRect(window_name_);
     if (displayed.width <= 0 || displayed.height <= 0) {
-        // Window not currently displayable (e.g. minimized): no valid mapping.
-        // Return an off-board point so the click is rejected downstream.
-        return PixelPoint{-1, -1};
+        return PixelPoint{-1, -1};  // not displayable (e.g. minimized): reject the click downstream
     }
 
-    // Scaling here must match main.cpp's render loop exactly, or clicks land
-    // in the wrong place. lround plus clamping guards against float rounding
-    // pushing the "fit" size a pixel past the window (negative offset).
+    // Must match main.cpp's render loop's scaling exactly, or clicks land in the wrong place.
     double scale = std::min(static_cast<double>(displayed.width) / canvas_width_,
                              static_cast<double>(displayed.height) / canvas_height_);
     int rendered_width = std::min(displayed.width, static_cast<int>(std::lround(canvas_width_ * scale)));

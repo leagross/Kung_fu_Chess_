@@ -7,9 +7,7 @@
 namespace kfc::model {
 
 /// An in-flight move, tracked outside Board until it resolves on arrival.
-/// moving_piece is a full snapshot at motion start, not just an id -- two
-/// motions racing for one cell means Board's current contents can't be
-/// trusted to identify the mover.
+/// moving_piece is a full snapshot, since two motions can race for one cell.
 struct Motion {
     Piece moving_piece;
     Position source;
@@ -17,9 +15,7 @@ struct Motion {
     MotionKind kind;
     int duration_ms;
     int elapsed_ms;
-    /// Computed once by MotionFactory; RealTimeArbiter just carries it
-    /// forward to start the piece's cooldown on arrival.
-    int cooldown_ms;
+    int cooldown_ms;  // computed once by MotionFactory, carried forward by RealTimeArbiter
 };
 
 }  // namespace kfc::model

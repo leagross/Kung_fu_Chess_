@@ -13,8 +13,6 @@ public:
     /// clips must have an entry for every PieceStateName value.
     explicit PieceAnimationSet(std::unordered_map<PieceStateName, AnimationClip> clips);
 
-    /// Throws std::out_of_range if state has no entry (a loader bug, not a
-    /// normal runtime condition).
     const AnimationClip& clip(PieceStateName state) const;
 
 private:

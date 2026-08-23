@@ -21,8 +21,7 @@ std::string to_iso8601(std::chrono::system_clock::time_point tp) {
     return std::format("{:%Y-%m-%dT%H:%M:%SZ}", std::chrono::floor<std::chrono::seconds>(tp));
 }
 
-// Only applied to a username being registered for the first time; an
-// existing account's login is a password check, not this validation.
+// Only applied to first-time registration, not to an existing account's login.
 bool is_valid_new_username(const std::string& username) {
     constexpr std::size_t kMinLength = 3;
     constexpr std::size_t kMaxLength = 24;
@@ -45,8 +44,7 @@ bool is_valid_new_password(const std::string& password) {
 
 UserRepository::UserRepository(const std::string& db_path)
     : db_(std::make_unique<SQLite::Database>(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)) {
-    // WAL + synchronous=NORMAL: one fsync per write instead of two, durable
-    // against a process crash but not a full OS crash -- an acceptable trade here.
+    // WAL + synchronous=NORMAL: durable against a process crash but not a full OS crash.
     db_->exec("PRAGMA journal_mode=WAL");
     db_->exec("PRAGMA synchronous=NORMAL");
     db_->exec(
@@ -87,8 +85,7 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
         return AuthOutcome{true, "", rating, false};
     }
 
-    // First time we've seen this username -> register it, once it and the
-    // password clear the new-account rules. Neither failure creates anything.
+    // New username -> register it once it and the password clear the new-account rules.
     if (!is_valid_new_username(username)) {
         return AuthOutcome{false, "invalid_username", 0, false};
     }

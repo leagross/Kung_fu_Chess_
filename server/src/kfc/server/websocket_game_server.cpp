@@ -26,8 +26,7 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
       metrics_(metrics),
       auth_limiter_(auth_limiter),
       seat_limiter_(seat_limiter) {
-    // Windows needs WSAStartup (what this wraps) before any socket use;
-    // paired with uninitNetSystem() in the destructor.
+    // Windows needs WSAStartup (what this wraps); paired with uninitNetSystem() in the destructor.
     ix::initNetSystem();
     server_ = std::make_unique<ix::WebSocketServer>(port_, "0.0.0.0", kTcpBacklog, kMaxConnections);
 
@@ -38,20 +37,16 @@ WebSocketGameServer::WebSocketGameServer(int port, RoomManager& rooms, kfc::data
             return;
         }
 
-        // Off by default in IXWebSocket; ensures a connection that sends
-        // nothing (never logs in, hangs mid-handshake) is eventually closed.
+        // Off by default in IXWebSocket; ensures a connection that never logs in is eventually closed.
         socket->setPingInterval(kIdlePingIntervalSecs);
 
-        // weak, not shared: send may be called long after this connection
-        // went away (a room broadcasting to a dropped player), and a strong
-        // reference would keep the dead socket alive.
+        // weak, not shared: a strong reference would keep a dead socket alive after a room broadcast.
         auto send = [weak_socket](const std::string& text) {
             if (auto live = weak_socket.lock()) {
                 live->send(text);
             }
         };
-        // The close comes back through the Close branch below as an
-        // ordinary disconnect, reaping the finished room.
+        // Comes back through the Close branch below as an ordinary disconnect.
         auto close_connection = [weak_socket]() {
             if (auto live = weak_socket.lock()) {
                 live->close();

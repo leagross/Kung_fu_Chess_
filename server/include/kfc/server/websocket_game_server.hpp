@@ -10,8 +10,7 @@ namespace kfc::protocol {
 class FileLogger;
 }
 
-// The account store lives in its own layer (database/), not here -- the server
-// uses it, never defines it.
+// The account store lives in its own layer (database/), not here.
 namespace kfc::database {
 class IUserStore;
 }
@@ -23,27 +22,19 @@ class SessionRegistry;
 class Metrics;
 class RateLimiter;
 
-/// Seconds between pings to an idle connection -- bounds a dead connection
-/// to roughly twice this value (IXWebSocket closes on a missed pong). Kept
-/// low also because poll() blocks up to a full interval on a connection
-/// mid-close-handshake during shutdown (a vendored library bound).
+/// Bounds a dead connection to roughly twice this value; kept low also because poll() blocks
+/// up to a full interval on a connection mid-close-handshake during shutdown.
 inline constexpr int kIdlePingIntervalSecs = 5;
 
-/// ixwebsocket's own defaults (backlog 5, maxConnections 128) are sized for
-/// a demo; a k6 load test stopped scaling at ~128 concurrent connections
-/// nowhere near CPU/memory-bound. backlog is the OS TCP SYN queue depth;
-/// maxConnections is ixwebsocket's accepted-but-not-yet-handed-off cap.
+/// ixwebsocket's defaults (backlog 5, maxConnections 128) are sized for a demo; a k6 load
+/// test stopped scaling at ~128 concurrent connections nowhere near CPU/memory-bound.
 inline constexpr int kTcpBacklog = 1024;
 inline constexpr std::size_t kMaxConnections = 100000;
 
-/// Owns the WebSocket transport for one kfc_server: connection lifecycle,
-/// turning the first Login into a room+colour via RoomManager::join_any,
-/// routing messages via RoomManager::enqueue, and reporting drops via
-/// on_disconnect. Game rules and routing live in Match/RoomManager.
+/// Owns the WebSocket transport for one kfc_server. Game rules and routing live in Match/RoomManager.
 class WebSocketGameServer {
 public:
-    /// rooms, users, sessions and logger must outlive this server. Does not
-    /// bind the port -- call listen() for that.
+    /// rooms, users, sessions and logger must outlive this server. Does not bind the port -- call listen().
     WebSocketGameServer(int port, RoomManager& rooms, kfc::database::IUserStore& users,
                         SessionRegistry& sessions, kfc::protocol::FileLogger& logger, Metrics* metrics = nullptr,
                         RateLimiter* auth_limiter = nullptr, RateLimiter* seat_limiter = nullptr);

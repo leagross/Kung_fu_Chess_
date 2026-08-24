@@ -38,8 +38,7 @@ std::optional<kfc::model::PieceColor> MatchAudience::seat(const std::string& use
     }
 
     roster_ = std::move(next);
-    // Released after the roster is published, so a thread that sees the count
-    // reach two also sees the seats that made it two.
+    // Released after publishing, so seeing the count reach two also sees the seats.
     seats_filled_.fetch_add(1, std::memory_order_release);
     return assigned;
 }
@@ -51,8 +50,7 @@ WatcherId MatchAudience::watch(SendFn send, CloseFn close) {
     }
     std::shared_ptr<Roster> next = editable_copy();
     WatcherId id = next_watcher_id_++;
-    // Consed onto the existing list, not copied into a new one -- see
-    // WatcherNode's own comment for why this is what keeps watch() O(1).
+    // Consed onto the existing list, not copied -- keeps watch() O(1).
     next->watchers = std::make_shared<const WatcherNode>(
         WatcherNode{Watcher{id, std::move(send), std::move(close)}, std::move(next->watchers)});
     next->watcher_count = roster_->watcher_count + 1;
@@ -63,8 +61,7 @@ WatcherId MatchAudience::watch(SendFn send, CloseFn close) {
 void MatchAudience::unwatch(WatcherId id) {
     std::lock_guard<std::mutex> guard(mutex_);
 
-    // Walk the list once, remembering every node before the one being
-    // removed (head first) and where the list continues right after it.
+    // Nodes before the removed one, and where the list continues right after it.
     std::vector<const WatcherNode*> before;
     std::shared_ptr<const WatcherNode> after;
     bool found = false;
@@ -76,16 +73,12 @@ void MatchAudience::unwatch(WatcherId id) {
         }
         before.push_back(node.get());
     }
-    // Checked before copying anything: an id that is not there (a double
-    // close, or a close after release_all) must not cost a copy, and must
-    // not publish a new version that nothing actually changed.
+    // An unknown id (double close, or after release_all) must not publish a no-op version.
     if (!found) {
         return;
     }
 
-    // Only the prefix before the removed node is rebuilt -- each new node
-    // points at what follows it, ending at `after`, which (and everything
-    // beyond it) is reused unchanged by structural sharing, not copied.
+    // Only the prefix before the removed node is rebuilt; the rest is reused via structural sharing.
     std::shared_ptr<const WatcherNode> rebuilt = after;
     for (auto it = before.rbegin(); it != before.rend(); ++it) {
         rebuilt = std::make_shared<const WatcherNode>(WatcherNode{(*it)->watcher, rebuilt});
@@ -107,7 +100,7 @@ void MatchAudience::reseat(kfc::model::PieceColor color, SendFn send, CloseFn cl
         next->black_send = std::move(send);
         next->black_close = std::move(close);
     }
-    // Username deliberately untouched: reseating is the same player returning.
+    // Username deliberately untouched.
     roster_ = std::move(next);
 }
 
@@ -126,8 +119,6 @@ std::size_t MatchAudience::watcher_count() const {
 }
 
 void MatchAudience::broadcast(const std::string& encoded) const {
-    // The whole point of the copy-on-write roster: the sends below happen with
-    // no lock held at all. See the class comment.
     std::shared_ptr<const Roster> roster = current();
     if (roster->white_send.has_value()) {
         (*roster->white_send)(encoded);
@@ -150,10 +141,7 @@ void MatchAudience::send_to(kfc::model::PieceColor color, const std::string& enc
 }
 
 void MatchAudience::release_all() const {
-    // Same rule as broadcast, and here it is not merely a slowdown that is at
-    // stake: closing a socket comes back to the Match as an ordinary
-    // disconnect, which re-enters this table -- and would deadlock on mutex_ if
-    // it were still held.
+    // A close re-enters this table as a disconnect, which would deadlock on mutex_ if still held.
     std::shared_ptr<const Roster> roster = current();
     if (roster->white_close.has_value()) {
         (*roster->white_close)();

@@ -8,12 +8,8 @@ namespace kfc::model {
 const FixedPieceSpeedProvider kDefaultPieceSpeedProvider;
 
 namespace {
-// How long a jump-in-place keeps its piece Airborne (see CollisionResolver
-// and RealTimeArbiter::resolve_arrival for what that protects against: an
-// attacker arriving mid-jump passes through instead of capturing, and the
-// defender's own landing moments later captures the attacker back). 300ms
-// proved too short for a human to react to and double-click within once an
-// incoming attack is noticed; widened to give a real chance to respond.
+// How long a jump-in-place keeps its piece Airborne. 300ms proved too short
+// for a human to react to and double-click within; widened to 700ms.
 constexpr int kJumpDurationMs = 700;
 
 int cell_step_distance(const Position& source, const Position& destination) {

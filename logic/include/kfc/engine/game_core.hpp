@@ -13,72 +13,31 @@
 
 namespace kfc::model {
 
-/// The shared composition root of one game's core simulation:
-/// Board -> PieceRuleRegistry -> RuleEngine -> RealTimeArbiter ->
-/// MotionFactory -> GameEngine, wired identically for local play
-/// (kfc::texttests::Game) and networked play (kfc::server::Match). Before
-/// this class existed, both assembled that exact same five-object chain by
-/// hand, so any change to the wiring (e.g. injecting a promotion or
-/// win-condition policy) had to be made in two places and kept in sync.
-/// Now each host owns one GameCore and layers only its own distinct concern
-/// on top: Game adds a Controller and an observer list; Match adds a tick
-/// thread and a command queue.
-///
-/// The cooldown policies and speed provider are injected, not owned -- they
-/// must outlive this GameCore -- so each host decides where those come from
-/// (the fixed backend constants, or the GUI's config.json-driven ones)
-/// without GameCore having to care. Owns the Board itself, since the arbiter
-/// inside must hold the one and only mutable reference to it.
+/// Composition root of one game's core simulation, wired identically for local and networked play.
 class GameCore {
 public:
-    /// board is moved in and becomes the live board. standard_policy,
-    /// jump_policy, and speed_provider must all outlive this GameCore --
-    /// they are forwarded straight into the internal MotionFactory (see its
-    /// own constructor for what meters_per_cell means and why these default
-    /// the way they do).
+    /// standard_policy, jump_policy, and speed_provider must outlive this GameCore.
     GameCore(Board board, const ICooldownPolicy& standard_policy, const ICooldownPolicy& jump_policy,
              const IPieceSpeedProvider& speed_provider = kDefaultPieceSpeedProvider,
              double meters_per_cell = kDefaultMetersPerCell);
 
-    /// Neither copyable nor movable, and that is not a restriction to work
-    /// around -- it is what makes this type safe to hold.
-    ///
-    /// The members below refer to each other: RuleEngine holds a reference to
-    /// registry_, RealTimeArbiter to board_, GameEngine to board_, rule_engine_
-    /// and arbiter_. A compiler-generated move would copy those references
-    /// verbatim, so the moved-to GameCore's engine would still be driving the
-    /// moved-*from* object's board. That compiles, and then reads freed memory
-    /// the moment the source goes out of scope.
-    ///
-    /// Deleting both turns what would be a silent use-after-move into a
-    /// compile error at the call site, which is where the mistake actually is.
-    /// Hold one by value in the object that owns it, or via unique_ptr -- never
-    /// return one by value or put one in a container that reallocates.
+    /// Members hold references into each other, so move/copy would leave dangling references.
     GameCore(const GameCore&) = delete;
     GameCore& operator=(const GameCore&) = delete;
     GameCore(GameCore&&) = delete;
     GameCore& operator=(GameCore&&) = delete;
 
-    /// The live board. Non-const overload exists for symmetry with the
-    /// arbiter's own mutable access; read-only callers should take the
-    /// const one.
     Board& board() { return board_; }
     const Board& board() const { return board_; }
 
-    /// The command boundary (request_move/request_jump/wait/is_game_over).
     GameEngine& engine() { return engine_; }
     const GameEngine& engine() const { return engine_; }
 
-    /// In-flight motion / cooldown / busy state -- for a renderer or a host
-    /// that needs to read a just-started Motion back out (see Match).
     RealTimeArbiter& arbiter() { return arbiter_; }
     const RealTimeArbiter& arbiter() const { return arbiter_; }
 
 private:
-    // Declaration order is construction order, and every member below
-    // depends on the ones before it (rule_engine_ on registry_, arbiter_ on
-    // board_, motion_factory_ on the injected policies, engine_ on all of
-    // them) -- do not reorder.
+    // Declaration order is construction order; do not reorder.
     Board board_;
     PieceRuleRegistry registry_;
     RuleEngine rule_engine_;

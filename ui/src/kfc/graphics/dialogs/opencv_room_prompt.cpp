@@ -1,17 +1,4 @@
-// The portable implementation of IRoomPrompt, for every platform that is not
-// Windows. Compiled only there -- see CMakeLists and win_room_prompt.cpp.
-//
-// Drawn with OpenCV, which the client already depends on and which builds on
-// Linux and macOS as readily as on Windows. That is the whole reason for
-// choosing it over a native toolkit here: it adds no new dependency at all.
-//
-// The cost is text entry. Win32 gives an EDIT control that handles typing,
-// caret, selection and clipboard for free; here the room id has to be
-// assembled key by key from cv::waitKey, which is why this file has an input
-// loop and the Windows one does not. Room ids are six characters from a
-// deliberately unambiguous alphabet (see RoomManager::generate_room_id), so
-// that is a fair trade -- but if a richer dialog is ever wanted on Linux, this
-// is the file to replace with tinyfiledialogs or SDL.
+// Portable IRoomPrompt for non-Windows platforms (see win_room_prompt.cpp), drawn with OpenCV.
 
 #include "kfc/graphics/dialogs/room_prompt.hpp"
 
@@ -75,11 +62,7 @@ public:
         LoginChoice choice;
         std::string username;
         std::string password;
-        // Which field the next keystroke goes into -- Tab or a click on
-        // either box switches this, the same idea as the Win32 version's
-        // SetFocus between two real EDIT controls, just tracked by hand since
-        // there is no OS focus concept for a plain cv::Mat window.
-        bool editing_password = false;
+        bool editing_password = false;  // which field the next keystroke goes into; Tab or a click switches it
 
         while (true) {
             cv::Mat frame(240, kWidth, CV_8UC3, cv::Scalar(240, 240, 240));
@@ -95,8 +78,6 @@ public:
                 cv::rectangle(frame, box, cv::Scalar(255, 255, 255), cv::FILLED);
                 cv::rectangle(frame, box, active ? cv::Scalar(60, 120, 220) : cv::Scalar(120, 120, 120),
                               active ? 2 : 1);
-                // Every character shown as '*' for the password box -- the same
-                // masking ES_PASSWORD gives the Win32 dialog for free.
                 std::string shown = is_password ? std::string(text.size(), '*') : text;
                 cv::putText(frame, shown + (active && caret_on ? "_" : ""), {box.x + 10, box.y + 28},
                             cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(20, 20, 20), 2, cv::LINE_AA);
@@ -138,9 +119,7 @@ public:
                 }
             } else if (key > 32 && key < 127) {
                 std::string& field = editing_password ? password : username;
-                // 24/128: the same username/password length ceilings
-                // UserRepository::authenticate enforces server-side -- typing
-                // past them here would only be rejected later, less clearly.
+                // Same length ceilings UserRepository::authenticate enforces server-side.
                 std::size_t max_length = editing_password ? 128 : 24;
                 if (field.size() < max_length) {
                     field.push_back(static_cast<char>(key));
@@ -239,12 +218,10 @@ public:
             if (key == kKeyBackspace && !typed.empty()) {
                 typed.pop_back();
             } else if (key > 32 && key < 127 && static_cast<int>(typed.size()) < kMaxIdLength) {
-                // Room ids are generated uppercase, so accept either case and
-                // normalise -- nobody should fail to join over a capital.
+                // Room ids are generated uppercase; accept either case.
                 typed.push_back(static_cast<char>(std::toupper(key)));
             }
 
-            // The user closed the dialog with its own X button.
             if (cv::getWindowProperty(window, cv::WND_PROP_VISIBLE) < 1.0) {
                 choice.action = RoomChoice::Action::Cancel;
                 break;
@@ -270,9 +247,7 @@ public:
         }
 
         cv::destroyWindow(window);
-        // Pump the event loop so the window is really gone before the caller
-        // draws anything else -- HighGUI tears down lazily otherwise.
-        cv::waitKey(1);
+        cv::waitKey(1);  // pump the event loop so the window is really gone
         return choice;
     }
 
@@ -280,8 +255,7 @@ public:
         const std::string window = title;
         cv::namedWindow(window, cv::WINDOW_AUTOSIZE);
 
-        // Wrapped by hand: OpenCV's putText draws a single line and knows
-        // nothing about wrapping, and these messages are full sentences.
+        // Wrapped by hand: OpenCV's putText has no line-wrapping of its own.
         std::vector<std::string> lines = wrap(text, 52);
         int height = 90 + static_cast<int>(lines.size()) * 28;
 

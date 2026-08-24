@@ -19,10 +19,7 @@ bool Controller::selection_is_stale() const {
     if (!selected_cell_.has_value()) {
         return false;
     }
-    // selected_piece_id_ is always set in lockstep with selected_cell_ (both
-    // written together, both cleared together in clear_selection), so a
-    // selected cell without a remembered id would be a logic error, not a
-    // runtime input case.
+    // selected_piece_id_ is always set in lockstep with selected_cell_.
     assert(selected_piece_id_.has_value());
     std::optional<kfc::model::Piece> piece = board_.piece_at(*selected_cell_);
     return !piece.has_value() || piece->id != *selected_piece_id_;
@@ -50,10 +47,6 @@ ControllerResult Controller::click(int x, int y) {
 
     if (!selected_cell_.has_value()) {
         std::optional<kfc::model::Piece> piece = board_.piece_at(*cell);
-        // Only pick up a piece this client is allowed to command -- in
-        // networked play that excludes the opponent's pieces, so clicking one
-        // is ignored here instead of being sent and bounced back as
-        // "not_your_piece". can_control is always true in local hot-seat play.
         if (piece.has_value() && can_control(piece->color)) {
             selected_cell_ = *cell;
             selected_piece_id_ = piece->id;
@@ -62,14 +55,7 @@ ControllerResult Controller::click(int x, int y) {
         return ControllerResult{ClickOutcome::Ignored, std::nullopt};
     }
 
-    // A second click landing on another piece of the same color replaces
-    // the selection instead of requesting a move -- moving onto your own
-    // piece is never legal, so treating it as a move request would just be
-    // an expensive way to reselect. An empty cell or an enemy piece still
-    // goes through request_move as usual, whether or not that move is legal.
-    // selection_is_stale() already guaranteed the piece at selected_cell_
-    // is still the one that was selected, by id, not just whatever is
-    // sitting on that cell now.
+    // Clicking another same-color piece reselects instead of requesting a move.
     std::optional<kfc::model::Piece> selected_piece = board_.piece_at(*selected_cell_);
     std::optional<kfc::model::Piece> target_piece = board_.piece_at(*cell);
     if (target_piece.has_value() && target_piece->color == selected_piece->color) {
@@ -91,16 +77,7 @@ ControllerResult Controller::jump(int x, int y) {
         return ControllerResult{ClickOutcome::Ignored, std::nullopt};
     }
 
-    // The same gate click() applies, for the same reason: an empty cell has
-    // nothing to jump, and an opponent's piece is not this client's to command.
-    // Both were being sent to the server and bounced back as "not_your_piece",
-    // which costs a round trip to learn something the client already knows from
-    // the board in front of it.
-    //
-    // This is a convenience filter, never the enforcement. The server checks
-    // ownership itself (Match::owns_piece_at, against the colour in the Seat)
-    // because a client is free to send whatever it likes -- but every request
-    // filtered here is one the server never has to receive, decode and refuse.
+    // Convenience filter only; the server re-checks ownership authoritatively.
     std::optional<kfc::model::Piece> piece = board_.piece_at(*cell);
     if (!piece.has_value() || !can_control(piece->color)) {
         return ControllerResult{ClickOutcome::Ignored, std::nullopt};

@@ -48,8 +48,7 @@ std::optional<kfc::protocol::ClientMessage> run_home_screen(const std::string& w
         },
         &click);
 
-    // Detach the callback from `click` (a local) before returning, so nothing
-    // dereferences it during the connect() that follows.
+    // Detaches the callback from `click` (a local) before returning.
     auto finish = [&window_name](std::optional<kfc::protocol::ClientMessage> result) {
         cv::setMouseCallback(window_name, [](int, int, int, int, void*) {}, nullptr);
         return result;
@@ -87,8 +86,7 @@ std::optional<kfc::protocol::ClientMessage> run_home_screen(const std::string& w
 
         RoomChoice choice = prompt.ask_room();
         if (choice.action == RoomChoice::Action::Create) {
-            // No name: the server generates the id (see the dialog's own
-            // comment) and reports it back in the Welcome.
+            // No name: the server generates one and reports it in Welcome.
             return finish(kfc::protocol::CreateRoom{});
         }
         if (choice.action == RoomChoice::Action::Join && !choice.room_id.empty()) {

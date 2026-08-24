@@ -2,10 +2,7 @@
 
 namespace kfc::model {
 
-/// Distinguishes an ordinary move from a jump-in-place. Both are tracked as
-/// Motion objects by RealTimeArbiter -- the kind only affects how
-/// MotionFactory computes duration and cooldown, and nothing else needs to
-/// branch on it.
+/// Only affects how MotionFactory computes duration and cooldown.
 enum class MotionKind {
     Move,
     JumpInPlace,

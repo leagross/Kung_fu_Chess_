@@ -15,8 +15,7 @@ SessionRegistry::Lease::~Lease() {
 
 SessionRegistry::Lease::Lease(Lease&& other) noexcept
     : registry_(other.registry_), username_(std::move(other.username_)) {
-    // Cleared, so the moved-from lease's destructor releases nothing -- both
-    // releasing would free a name its new owner is still using.
+    // Cleared, so the moved-from lease's destructor releases nothing.
     other.registry_ = nullptr;
 }
 
@@ -34,8 +33,6 @@ SessionRegistry::Lease& SessionRegistry::Lease::operator=(Lease&& other) noexcep
 
 std::optional<SessionRegistry::Lease> SessionRegistry::claim(const std::string& username) {
     std::lock_guard<std::mutex> guard(mutex_);
-    // One locked test-and-insert: two connections logging in as the same name at
-    // the same instant would both pass a separate "is it free?" check.
     auto [it, inserted] = live_.insert(username);
     if (!inserted) {
         return std::nullopt;

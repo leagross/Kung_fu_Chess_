@@ -21,9 +21,6 @@ void put_centered(const std::string& text, int board_pixel_width, int y, double 
 
 void draw_game_over_banner(std::optional<kfc::model::PieceColor> winner, int board_pixel_width,
                             int board_pixel_height, Img& board_image) {
-    // A dark, semi-transparent (alpha 170/255) overlay across the board
-    // only, drawn via draw_on so its 4th channel actually blends instead of
-    // just replacing the board underneath.
     Img overlay = Img::blank(board_pixel_width, board_pixel_height, cv::Scalar(0, 0, 0, 170));
     overlay.draw_on(board_image, 0, 0);
 
@@ -44,9 +41,7 @@ void draw_intro_banner(int board_pixel_width, int board_pixel_height, double opa
         return;
     }
 
-    // Both the dark overlay and the title scale with opacity, so the whole
-    // splash fades out together as the caller ramps opacity 1 -> 0 across the
-    // intro window.
+    // Overlay and title both scale with opacity so the splash fades as one.
     int overlay_alpha = static_cast<int>(opacity * 160.0);
     Img overlay = Img::blank(board_pixel_width, board_pixel_height, cv::Scalar(0, 0, 0, overlay_alpha));
     overlay.draw_on(board_image, 0, 0);

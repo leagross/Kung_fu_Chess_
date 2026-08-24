@@ -8,16 +8,13 @@
 
 namespace kfc::model {
 
-/// Maps each PieceKind to the IMovementRule that knows how it moves. Adding
-/// a new piece kind's behavior means registering one rule here -- no other
-/// class in the model or rules layer needs to change.
+/// Maps each PieceKind to the IMovementRule that knows how it moves.
 class PieceRuleRegistry {
 public:
-    /// Binds kind to rule, replacing any rule previously registered for it.
+    /// Replaces any rule previously registered for kind.
     void register_rule(PieceKind kind, std::unique_ptr<IMovementRule> rule);
 
-    /// The rule registered for kind. Throws std::out_of_range if none was
-    /// registered.
+    /// Throws std::out_of_range if none was registered.
     const IMovementRule& rule_for(PieceKind kind) const;
 
 private:

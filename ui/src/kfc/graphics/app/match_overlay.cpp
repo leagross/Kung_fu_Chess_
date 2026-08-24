@@ -15,25 +15,20 @@ MatchOverlay::MatchOverlay(kfc::events::EventBus& bus, int intro_duration_ms)
     bus.subscribe<kfc::events::GameEnded>([this](const kfc::events::GameEnded& event) {
         ended_ = true;
         winner_ = event.winner;
-        // The countdown asked "will they come back?"; this answers it. Left
-        // set, both banners would want the board at once.
         countdown_seconds_.reset();
     });
 
     bus.subscribe<kfc::events::OpponentCountdown>(
         [this](const kfc::events::OpponentCountdown& event) { countdown_seconds_ = event.seconds_remaining; });
 
-    // The other way a countdown ends: they returned in time, so play carries on
-    // (GameEnded above covers the case where they did not). Without this the
-    // countdown would sit frozen on screen for the rest of a normal game.
+    // The other way a countdown ends: they returned in time.
     bus.subscribe<kfc::events::OpponentReturned>([this](const kfc::events::OpponentReturned&) {
         countdown_seconds_.reset();
     });
 }
 
 Overlay MatchOverlay::current(bool searching, Clock::time_point now) const {
-    // The order is the priority, and it is the whole content of this function.
-    // See the header for why each one outranks the next.
+    // Order is priority; see the header for why each outranks the next.
     if (searching) {
         return Overlay::Searching;
     }

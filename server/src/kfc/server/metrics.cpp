@@ -34,10 +34,7 @@ std::string Metrics::render(std::size_t active_connections, std::size_t active_r
                 "Client frames that were neither valid JSON nor a known message type.", messages_undecodable());
     emit_counter(out, "kfc_moves_processed_total", "Move and jump requests routed to a Match.", moves_processed());
 
-    // Seconds, not the nanoseconds record_tick stores internally -- Prometheus
-    // convention for a *_seconds metric, and floating point so a sum well
-    // under a second (the expected case) still shows as a real number rather
-    // than truncating to 0.
+    // Seconds (Prometheus convention), floating point so sub-second sums don't truncate to 0.
     double total_seconds = static_cast<double>(tick_total_ns()) / 1e9;
     double max_seconds = static_cast<double>(tick_max_ns()) / 1e9;
     out << "# HELP kfc_tick_duration_seconds_sum Total wall time MatchScheduler workers have spent ticking their "

@@ -3,11 +3,8 @@
 #include <stdexcept>
 #include <utility>
 
-// Not <hiredis/hiredis.h>: FetchContent builds straight from hiredis's own
-// source tree, which has no install step and therefore no hiredis/ subdir --
-// the "hiredis/" prefix only exists once headers are actually installed
-// system-wide (see hiredis's own CMakeLists.txt, $<INSTALL_INTERFACE:include>
-// vs. $<BUILD_INTERFACE:...>).
+// Not <hiredis/hiredis.h>: FetchContent builds from hiredis's source tree
+// directly, which has no install step and so no hiredis/ subdir.
 #include <hiredis.h>
 
 namespace kfc::server {

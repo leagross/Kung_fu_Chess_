@@ -6,12 +6,9 @@
 
 namespace kfc::io {
 
-/// The io/ layer counterpart to BoardParser: turns a kfc::model::Board back
-/// into text. Read-only with respect to Board.
+/// Inverse of BoardParser::parse: turns a Board back into grid text.
 class BoardPrinter {
 public:
-    /// One row per line, tokens separated by a single space, "." for an
-    /// empty cell. The exact inverse of BoardParser::parse.
     std::string print(const kfc::model::Board& board) const;
 };
 

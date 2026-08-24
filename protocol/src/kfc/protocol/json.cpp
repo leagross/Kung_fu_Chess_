@@ -13,18 +13,9 @@
 
 using nlohmann::json;
 
-// nlohmann::json's automatic (de)serialization for a type -- including
-// implicitly, whenever that type shows up as a field value or inside a
-// std::vector<T> -- finds to_json/from_json via ADL in the *type's own*
-// namespace, not the namespace of whatever code happens to call it. Every
-// kfc::model type's hooks therefore have to live in kfc::model here, even
-// though kfc_core itself stays JSON-free -- this translation unit is the
-// one place that pairing exists, and it's the only place it needs to.
+// nlohmann::json finds to_json/from_json via ADL, so kfc::model's hooks must live here.
 namespace kfc::model {
 
-// Forward-declared so the ArrivalEvent (de)serializers below can reference
-// the MotionKind ones, whose definitions live further down this file next to
-// Motion's.
 void to_json(json& j, MotionKind kind);
 void from_json(const json& j, MotionKind& kind);
 
@@ -39,18 +30,12 @@ void from_json(const json& j, Position& pos) {
 
 namespace {
 
-// The string a json value holds, without copying it out. get<std::string>()
-// allocates a duplicate of a value we only ever compare against a handful of
-// fixed names; get_ref hands back the parsed string itself. It throws when the
-// value is not a string at all -- which is exactly as unusable as an unknown
-// name, and decode_* below turns either into std::nullopt.
+// Views the parsed string rather than copying it; throws if it isn't a string.
 [[nodiscard]] std::string_view text_of(const json& j) {
     return j.get_ref<const std::string&>();
 }
 
-// Reads one enum written as its name. Throws rather than returning nullopt: a
-// field we cannot read makes the whole message unusable, and the decoders turn
-// the exception into nullopt for the caller.
+// Reads one enum written as its name; throws on an unknown name (decoders turn that into nullopt).
 template <typename Enum, std::size_t N>
 [[nodiscard]] Enum read_named(const json& j, const kfc::util::EnumNames<Enum, N>& names, std::string_view what) {
     std::string_view text = text_of(j);
@@ -63,12 +48,7 @@ template <typename Enum, std::size_t N>
 
 }  // namespace
 
-// Every enum on the wire is written as its name from the tables in
-// kfc/model/piece_names.hpp and kfc/realtime/motion_kind_names.hpp -- the
-// readable full words, not the compact chess-notation letters kfc::io uses,
-// because this traffic is what a human reads in the logs while debugging (the
-// CTD SERVER lecture's logging requirement). Writing is a table lookup
-// returning a view of a literal, so none of these hooks allocates a name.
+// Every enum on the wire is its readable name, not kfc::io's compact notation, for human debugging.
 
 void to_json(json& j, PieceColor color) {
     j = name_of(color);
@@ -173,9 +153,6 @@ void from_json(const json& j, Motion& motion) {
 
 namespace kfc::protocol {
 
-// Same ADL requirement as the kfc::model hooks above: must be at plain
-// kfc::protocol scope (not nested in an anonymous namespace), or nlohmann's
-// internal adl_serializer calls fail to find them.
 void to_json(json& j, const BoardSnapshot& snapshot) {
     j = json{{"width", snapshot.width}, {"height", snapshot.height}, {"pieces", snapshot.pieces}};
 }
@@ -188,24 +165,15 @@ void from_json(const json& j, BoardSnapshot& snapshot) {
 
 namespace {
 
-// Every call site passes a literal, so the parameter is a view: a const
-// std::string& bound one freshly built std::string per encoded message purely
-// to be copied into the json a line later.
 json envelope(std::string_view type, json payload) {
     return json{{"type", type}, {"payload", std::move(payload)}};
 }
 
-// The "type" tag of a decoded envelope, as a view onto the parsed message
-// rather than a copy of it -- see text_of above. Throws if the field is absent
-// or not a string, which decode_* reports as an undecodable message.
 [[nodiscard]] std::string_view type_of(const json& j) {
     return j.at("type").get_ref<const std::string&>();
 }
 
-// Parses one wire text. The length check comes first, and without parsing: the
-// whole point is to not hand an arbitrary number of bytes to the JSON parser.
-// Throws, like json::parse itself does, so both failures leave the decoders
-// below by the one path they already have.
+// Length check happens before parsing, so an oversized frame never reaches the JSON parser.
 [[nodiscard]] json parse_envelope(const std::string& text) {
     if (text.size() > kMaxMessageBytes) {
         throw std::runtime_error("message of " + std::to_string(text.size()) + " bytes exceeds the limit");
@@ -342,16 +310,7 @@ std::optional<ClientMessage> decode_client_message(const std::string& text) {
 }
 
 std::string redact_for_log(const std::string& text) {
-    // Scanned rather than parsed: see the header for why a message we cannot
-    // decode still has to come out redacted.
-    //
-    // The key and its value are located tolerantly, not by matching the exact
-    // byte sequence our own encoder happens to emit. JSON allows whitespace
-    // around a colon, and this ran against real traffic that had it -- a peer
-    // sending `"password": "hunter2"`, which any pretty-printing or
-    // hand-written client does, wrote the password straight into the log. The
-    // whole point of this function is to be correct for messages we did not
-    // produce, so it cannot assume our own formatting.
+    // Scanned rather than parsed, so it still works on text we can't decode.
     static constexpr std::string_view kKey = "\"password\"";
 
     auto skip_whitespace = [&text](std::size_t from) {
@@ -373,8 +332,7 @@ std::string redact_for_log(const std::string& text) {
 
         std::size_t cursor = skip_whitespace(key + kKey.size());
         if (cursor >= text.size() || text[cursor] != ':') {
-            // "password" appearing as a value rather than a key. Nothing to
-            // redact; copy what we scanned and carry on past it.
+            // "password" as a value, not a key: nothing to redact.
             out.append(text, at, cursor - at);
             at = cursor;
             continue;
@@ -383,26 +341,20 @@ std::string redact_for_log(const std::string& text) {
 
         if (cursor < text.size() && text[cursor] == '"') {
             std::size_t value = cursor + 1;
-            // Walk to the closing quote, stepping over backslash escapes -- a
-            // password containing a quote is escaped on the wire, and stopping
-            // at it would leave the rest of the password in the log.
+            // Step over backslash escapes so an escaped quote doesn't end the scan early.
             std::size_t end = value;
             while (end < text.size() && text[end] != '"') {
                 end += (text[end] == '\\') ? 2 : 1;
             }
             out.append(text, at, value - at).append("***");
             if (end >= text.size()) {
-                // Truncated message: drop the remainder rather than risk
-                // emitting a partial password.
-                return out;
+                return out;  // truncated message: drop the remainder
             }
             at = end;
             continue;
         }
 
-        // A password that is not a quoted string -- a number, or null, from a
-        // client that built the message loosely. Still a secret, so it goes
-        // too: everything up to whatever ends the value.
+        // Non-string password value (number, null, ...): redact up to whatever ends it.
         std::size_t end = cursor;
         while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']') {
             ++end;
@@ -422,9 +374,7 @@ std::optional<ServerMessage> decode_server_message(const std::string& text) {
             Welcome welcome;
             payload.at("assigned_color").get_to(welcome.assigned_color);
             payload.at("board").get_to(welcome.board);
-            // Optional on the wire: a Welcome from before spectators existed
-            // (or any hand-written one) simply means "a player".
-            welcome.spectator = payload.value("spectator", false);
+            welcome.spectator = payload.value("spectator", false);  // absent means "a player"
             welcome.room = payload.value("room", std::string{});
             if (payload.contains("history")) {
                 payload.at("history").get_to(welcome.history);

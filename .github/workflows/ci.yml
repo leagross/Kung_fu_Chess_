@@ -74,3 +74,59 @@ jobs:
           ASAN_OPTIONS: abort_on_error=1:halt_on_error=1
           UBSAN_OPTIONS: abort_on_error=1:halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir build-asan --output-on-failure
+
+  # ThreadSanitizer instead of ASan/UBSan -- this project's own server is one
+  # WebSocket connection per thread plus a MatchScheduler worker pool, all
+  # sharing RoomManager/Match/RateLimiter/AuthTokenStore state behind mutexes.
+  # A missing lock or a benign-looking read outside one is exactly what ASan
+  # and a passing test both miss and TSan is built to catch. Its own job, not
+  # combined with asan-ubsan above: TSan and ASan can't be linked together,
+  # and TSan's own instrumentation overhead makes this job the slower of the two.
+  tsan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install a C++20 toolchain, CMake and OpenCV
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ libopencv-dev
+
+      - name: Configure (Debug, ThreadSanitizer)
+        run: |
+          cmake -S . -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
+            -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+
+      - name: Build every target
+        run: cmake --build build-tsan
+
+      - name: Run the full suite (unit + integration)
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-tsan --output-on-failure
+
+  # Same suite on the platform every player-facing kfc_gui_app.exe actually
+  # ships on (see CMakeLists.txt's third_party/OpenCV_451 branch) -- a Linux-only
+  # CI would let an MSVC-only compile error (a different standard library, no
+  # POSIX headers) reach main undetected. OpenCV is not installed here: without
+  # it kfc_gui_app is simply skipped (see KFC_HAVE_OPENCV in CMakeLists.txt),
+  # same as any Linux dev machine without libopencv-dev -- the backend, server
+  # and full test suite still build and run.
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Configure (Debug)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build every target
+        run: cmake --build build --config Debug
+
+      - name: Run the full suite (unit + integration)
+        run: ctest --test-dir build --build-config Debug --output-on-failure

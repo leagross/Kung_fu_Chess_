@@ -9,6 +9,7 @@
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/protocol/messages.hpp"
 #include "kfc/database/elo.hpp"
+#include "kfc/server/csprng.hpp"
 
 namespace kfc::server {
 
@@ -83,14 +84,14 @@ std::string RoomManager::generate_room_id() {
     // 25^6 = 244 million ids, so the retry loop below stays rare.
     static constexpr int kLength = 6;
 
-    // Not deterministic across runs, so ids aren't guessable from a past session.
-    static std::mt19937 generator(std::random_device{}());
+    // CSPRNG, not std::mt19937: a room id can double as an invite secret, so it must not be
+    // guessable even by someone who has observed other ids this process has minted.
     std::uniform_int_distribution<int> pick(0, kAlphabetSize - 1);
 
     while (true) {
         std::string id(kLength, '\0');
         for (char& c : id) {
-            c = kAlphabet[pick(generator)];
+            c = kAlphabet[pick(Csprng::shared())];
         }
         if (named_rooms_.count(id) == 0) {
             return id;

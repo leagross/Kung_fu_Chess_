@@ -8,9 +8,17 @@ services:
   server:
     build: ..
     image: kfc-server
+    # Caddy's address is pinned below so kfc_server can tell "this connection is
+    # Caddy, trust its X-Forwarded-For" from "this connection is some other
+    # container/host, don't" -- see resolve_client_ip()'s own comment. Without
+    # this every client's rate-limit/log identity would collapse to Caddy's own
+    # address, since it's the only TCP peer kfc_server ever actually sees here.
+    command: ["kfc_server", "8080", "--http-port=8081", "--log-level=info", "--trusted-proxy=172.28.0.2"]
     volumes:
       - kfc-data:/data
     restart: unless-stopped
+    networks:
+      - kfc-net
     # No `ports:` here on purpose -- only Caddy is reachable from the
     # internet. Caddy reaches this container over the compose network by
     # service name (server:8080, server:8081), the same way any two
@@ -30,6 +38,17 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     restart: unless-stopped
+    networks:
+      kfc-net:
+        ipv4_address: 172.28.0.2
+
+networks:
+  # Fixed subnet so Caddy's address (used by --trusted-proxy above) is stable
+  # across restarts/rebuilds instead of whatever Docker's default bridge hands out.
+  kfc-net:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
 
 volumes:
   kfc-data:

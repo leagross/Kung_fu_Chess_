@@ -40,6 +40,11 @@ public:
     /// Registers username on first sight, else verifies against the stored hash.
     [[nodiscard]] AuthOutcome authenticate(const std::string& username, const std::string& password) override;
 
+    /// Login-only: unlike authenticate(), never creates an account. Runs a real Argon2 verify against
+    /// a fixed dummy hash even for an unknown username, so "no such user" and "wrong password" cost the
+    /// same wall-clock time -- otherwise the two are distinguishable by timing.
+    [[nodiscard]] AuthOutcome verify_login(const std::string& username, const std::string& password);
+
     [[nodiscard]] std::optional<int> rating_of(const std::string& username) override;
 
     /// Overwrites the rating directly; use rerate/rerate_pair instead if the new value depends on the old one.

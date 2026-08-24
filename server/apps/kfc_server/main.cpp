@@ -6,9 +6,11 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "kfc/io/board_parser.hpp"
@@ -33,7 +35,21 @@ constexpr std::string_view kHttpPortFlag = "--http-port=";
 constexpr std::string_view kRedisHostFlag = "--redis-host=";
 constexpr std::string_view kRedisPortFlag = "--redis-port=";
 constexpr std::string_view kWorkerUrlFlag = "--worker-url=";
+constexpr std::string_view kTrustedProxyFlag = "--trusted-proxy=";
 constexpr int kDefaultRedisPort = 6379;
+
+// Comma-separated addresses, e.g. "--trusted-proxy=172.20.0.3,172.20.0.4" for a multi-node Caddy tier.
+std::unordered_set<std::string> parse_trusted_proxies(const std::string& text) {
+    std::unordered_set<std::string> result;
+    std::stringstream stream(text);
+    std::string ip;
+    while (std::getline(stream, ip, ',')) {
+        if (!ip.empty()) {
+            result.insert(ip);
+        }
+    }
+    return result;
+}
 
 // Avoids std::stoi's throw-on-unparsable, which would take the process down before the log file is open.
 std::optional<int> parse_port(const std::string& text) {
@@ -81,6 +97,7 @@ int main(int argc, char** argv) {
     std::string redis_host;
     int redis_port = kDefaultRedisPort;
     std::string worker_url;
+    std::unordered_set<std::string> trusted_proxies;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -121,11 +138,15 @@ int main(int argc, char** argv) {
             worker_url = arg.substr(kWorkerUrlFlag.size());
             continue;
         }
+        if (arg.rfind(kTrustedProxyFlag, 0) == 0) {
+            trusted_proxies = parse_trusted_proxies(arg.substr(kTrustedProxyFlag.size()));
+            continue;
+        }
         std::optional<int> parsed_port = parse_port(arg);
         if (!parsed_port.has_value()) {
             std::cerr << "Usage: kfc_server [port] [--http-port=8081] [--redis-host=host] "
                          "[--redis-port=6379] [--worker-url=ws://host:port] "
-                         "[--log-level=debug|info|warning|error]\n";
+                         "[--trusted-proxy=ip1,ip2] [--log-level=debug|info|warning|error]\n";
             return 1;
         }
         port = *parsed_port;
@@ -201,7 +222,8 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        kfc::server::HttpApiServer http_server(http_port, users, rooms, sessions, metrics, auth_limiter, logger);
+        kfc::server::HttpApiServer http_server(http_port, users, rooms, sessions, metrics, auth_limiter, logger,
+                                               trusted_proxies);
         if (!http_server.listen()) {
             std::cerr << "Failed to listen on HTTP port " << http_port << " (see kfc_server.log)\n";
             return 1;

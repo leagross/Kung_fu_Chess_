@@ -99,6 +99,36 @@ TEST(UserRepositoryTest, UsernameAndPasswordRulesDoNotApplyToAnExistingAccounts)
                                                    "not a rejected registration";
 }
 
+TEST(UserRepositoryTest, VerifyLoginWithTheRightPasswordSucceeds) {
+    UserRepository repo(fresh_db_path());
+    repo.authenticate("alice", "hunter2");
+
+    UserRepository::AuthOutcome outcome = repo.verify_login("alice", "hunter2");
+
+    EXPECT_TRUE(outcome.ok);
+    EXPECT_EQ(outcome.rating, kStartingRating);
+}
+
+TEST(UserRepositoryTest, VerifyLoginWithTheWrongPasswordFailsWithoutTouchingTheAccount) {
+    UserRepository repo(fresh_db_path());
+    repo.authenticate("alice", "hunter2");
+
+    UserRepository::AuthOutcome outcome = repo.verify_login("alice", "wrong");
+
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_EQ(outcome.reason, "wrong_password");
+}
+
+TEST(UserRepositoryTest, VerifyLoginForAnUnknownUsernameFailsAndNeverRegistersThem) {
+    UserRepository repo(fresh_db_path());
+
+    UserRepository::AuthOutcome outcome = repo.verify_login("ghost", "whatever");
+
+    EXPECT_FALSE(outcome.ok);
+    EXPECT_FALSE(outcome.newly_registered);
+    EXPECT_FALSE(repo.user_exists("ghost")) << "verify_login must never create an account, unlike authenticate()";
+}
+
 // http_api.cpp's handle_register used to be user_exists() followed by a
 // separate authenticate() call -- two locked operations with a window between
 // them where two concurrent registrations of the same brand-new username

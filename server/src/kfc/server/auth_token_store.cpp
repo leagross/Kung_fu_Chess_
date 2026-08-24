@@ -1,57 +1,19 @@
 #include "kfc/server/auth_token_store.hpp"
 
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/entropy.h>
+#include <iterator>
 
-#include <stdexcept>
+#include "kfc/server/csprng.hpp"
 
 namespace kfc::server {
 
 namespace {
 
-// CSPRNG for unguessable tokens -- not std::mt19937_64, whose state can be reconstructed from outputs.
-class TokenRandom {
-public:
-    TokenRandom() {
-        mbedtls_entropy_init(&entropy_);
-        mbedtls_ctr_drbg_init(&ctr_drbg_);
-        static constexpr char kPersonalization[] = "kfc_auth_token";
-        int rc = mbedtls_ctr_drbg_seed(&ctr_drbg_, mbedtls_entropy_func, &entropy_,
-                                       reinterpret_cast<const unsigned char*>(kPersonalization),
-                                       sizeof(kPersonalization) - 1);
-        if (rc != 0) {
-            throw std::runtime_error("mbedtls_ctr_drbg_seed failed");
-        }
-    }
-
-    ~TokenRandom() {
-        mbedtls_ctr_drbg_free(&ctr_drbg_);
-        mbedtls_entropy_free(&entropy_);
-    }
-
-    TokenRandom(const TokenRandom&) = delete;
-    TokenRandom& operator=(const TokenRandom&) = delete;
-
-    void fill(unsigned char* buffer, std::size_t size) {
-        std::lock_guard<std::mutex> guard(mutex_);
-        if (mbedtls_ctr_drbg_random(&ctr_drbg_, buffer, size) != 0) {
-            throw std::runtime_error("mbedtls_ctr_drbg_random failed");
-        }
-    }
-
-private:
-    std::mutex mutex_;
-    mbedtls_entropy_context entropy_;
-    mbedtls_ctr_drbg_context ctr_drbg_;
-};
-
 // 32 random bytes (256 bits) as 64 hex characters.
 std::string random_hex_token() {
     static constexpr char kHexDigits[] = "0123456789abcdef";
-    static TokenRandom random;
 
     unsigned char raw[32];
-    random.fill(raw, sizeof(raw));
+    Csprng::shared().fill(raw, sizeof(raw));
 
     std::string token(64, '0');
     for (std::size_t i = 0; i < sizeof(raw); ++i) {
@@ -68,7 +30,24 @@ std::string AuthTokenStore::issue(const std::string& username, std::chrono::stea
     Entry entry{username, now + kTokenLifetime};
     std::lock_guard<std::mutex> guard(mutex_);
     token_to_entry_[token] = std::move(entry);
+    if (++calls_since_sweep_ >= kSweepEveryNCalls) {
+        calls_since_sweep_ = 0;
+        evict_expired(now);
+    }
     return token;
+}
+
+// Caller already holds mutex_. Amortizes cleanup instead of a background thread, same pattern
+// RateLimiter uses -- an issued-but-never-checked-again token would otherwise sit forever.
+void AuthTokenStore::evict_expired(std::chrono::steady_clock::time_point now) {
+    for (auto it = token_to_entry_.begin(); it != token_to_entry_.end();) {
+        it = now >= it->second.expires_at ? token_to_entry_.erase(it) : std::next(it);
+    }
+}
+
+std::size_t AuthTokenStore::token_count() const {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return token_to_entry_.size();
 }
 
 std::optional<std::string> AuthTokenStore::username_for(const std::string& token,

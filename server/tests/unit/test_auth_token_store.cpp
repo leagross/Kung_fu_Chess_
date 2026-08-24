@@ -81,6 +81,21 @@ TEST(AuthTokenStoreTest, ATokenStopsWorkingOnceItsLifetimeHasPassed) {
         tokens.username_for(token, issued_at + AuthTokenStore::kTokenLifetime + std::chrono::seconds(1)).has_value());
 }
 
+TEST(AuthTokenStoreTest, IssuingEnoughNewTokensSweepsAwayEarlierExpiredOnes) {
+    AuthTokenStore tokens;
+    auto issued_at = std::chrono::steady_clock::now();
+    tokens.issue("alice", issued_at);
+
+    auto long_after_expiry = issued_at + AuthTokenStore::kTokenLifetime + std::chrono::seconds(1);
+    for (int i = 0; i < 500; ++i) {
+        tokens.issue("user" + std::to_string(i), long_after_expiry);
+    }
+
+    // The 500 fresh tokens are still live; "alice"'s should have been swept, not just
+    // hidden behind the lazy check -- token_count() reports the raw map size.
+    EXPECT_EQ(tokens.token_count(), 500u) << "the sweep triggered by the 500th issue() should have reclaimed alice's";
+}
+
 TEST(AuthTokenStoreTest, TwoTokensAreIndependentEitherOnesLifetimeDoesNotAffectTheOther) {
     AuthTokenStore tokens;
     auto issued_at = std::chrono::steady_clock::now();

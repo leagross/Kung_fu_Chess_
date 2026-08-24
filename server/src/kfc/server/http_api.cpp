@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
 
 #include <ixwebsocket/IXConnectionState.h>
 #include <ixwebsocket/IXHttpServer.h>
@@ -13,6 +15,7 @@
 #include "kfc/database/user_repository.hpp"
 #include "kfc/protocol/file_logger.hpp"
 #include "kfc/server/auth_token_store.hpp"
+#include "kfc/server/client_ip.hpp"
 #include "kfc/server/metrics.hpp"
 #include "kfc/server/rate_limiter.hpp"
 #include "kfc/server/room_manager.hpp"
@@ -101,10 +104,8 @@ ix::HttpResponsePtr handle_register(kfc::database::UserRepository& users, AuthTo
 ix::HttpResponsePtr handle_login(kfc::database::UserRepository& users, AuthTokenStore& tokens, const json& request) {
     std::string username = request.at("username").get<std::string>();
     std::string password = request.at("password").get<std::string>();
-    if (!users.user_exists(username)) {
-        return empty_response(401);
-    }
-    kfc::database::IUserStore::AuthOutcome auth = users.authenticate(username, password);
+    // verify_login() pays the same Argon2 cost whether or not username exists -- see its own comment.
+    kfc::database::IUserStore::AuthOutcome auth = users.verify_login(username, password);
     if (!auth.ok) {
         return empty_response(401);
     }
@@ -196,14 +197,15 @@ ix::HttpResponsePtr dispatch(kfc::database::UserRepository& users, RoomManager& 
 
 HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms,
                              SessionRegistry& sessions, Metrics& metrics, RateLimiter& auth_limiter,
-                             kfc::protocol::FileLogger& logger)
+                             kfc::protocol::FileLogger& logger, std::unordered_set<std::string> trusted_proxies)
     : port_(port),
       users_(users),
       rooms_(rooms),
       sessions_(sessions),
       metrics_(metrics),
       logger_(logger),
-      auth_limiter_(auth_limiter) {
+      auth_limiter_(auth_limiter),
+      trusted_proxies_(std::move(trusted_proxies)) {
     // ix's init/uninit are reference-counted; paired with uninitNetSystem() below.
     ix::initNetSystem();
     server_ = std::make_unique<ix::HttpServer>(port_, "0.0.0.0", kTcpBacklog, kMaxConnections);
@@ -211,8 +213,14 @@ HttpApiServer::HttpApiServer(int port, kfc::database::UserRepository& users, Roo
     server_->setOnConnectionCallback([this](ix::HttpRequestPtr request,
                                             const std::shared_ptr<ix::ConnectionState>& connection_state)
                                          -> ix::HttpResponsePtr {
-        return dispatch(users_, rooms_, sessions_, metrics_, tokens_, auth_limiter_, connection_state->getRemoteIp(),
-                        request);
+        std::optional<std::string> forwarded_for;
+        auto it = request->headers.find("X-Forwarded-For");
+        if (it != request->headers.end()) {
+            forwarded_for = it->second;
+        }
+        std::string client_ip =
+            resolve_client_ip(connection_state->getRemoteIp(), forwarded_for, trusted_proxies_);
+        return dispatch(users_, rooms_, sessions_, metrics_, tokens_, auth_limiter_, client_ip, request);
     });
 }
 

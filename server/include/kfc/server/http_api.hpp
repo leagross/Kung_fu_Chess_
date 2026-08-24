@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <unordered_set>
 
 #include "kfc/server/auth_token_store.hpp"
 #include "kfc/server/rate_limiter.hpp"
@@ -29,9 +31,12 @@ namespace kfc::server {
 /// sharing the auth RateLimiter budget with ClientSession's WebSocket Login path.
 class HttpApiServer {
 public:
-    /// Does not bind the port -- call listen() for that.
+    /// Does not bind the port -- call listen() for that. trusted_proxies is the set of TCP peer
+    /// addresses allowed to supply X-Forwarded-For (e.g. Caddy's address in the compose network);
+    /// empty by default, meaning every request's rate-limit/log identity is its literal TCP peer.
     HttpApiServer(int port, kfc::database::UserRepository& users, RoomManager& rooms, SessionRegistry& sessions,
-                 Metrics& metrics, RateLimiter& auth_limiter, kfc::protocol::FileLogger& logger);
+                 Metrics& metrics, RateLimiter& auth_limiter, kfc::protocol::FileLogger& logger,
+                 std::unordered_set<std::string> trusted_proxies = {});
     ~HttpApiServer();
 
     HttpApiServer(const HttpApiServer&) = delete;
@@ -55,6 +60,7 @@ private:
     AuthTokenStore tokens_;
     // Shared with ClientSession's Login path -- see class comment.
     RateLimiter& auth_limiter_;
+    std::unordered_set<std::string> trusted_proxies_;
     std::unique_ptr<ix::HttpServer> server_;
 };
 

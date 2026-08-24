@@ -40,6 +40,13 @@ bool is_valid_new_password(const std::string& password) {
     return password.size() >= kMinLength && password.size() <= kMaxLength;
 }
 
+// Computed once from an arbitrary fixed password; verify_login() checks against this for any
+// username that doesn't exist, so that branch pays the same Argon2 cost a real verify would.
+const std::string& dummy_hash_for_timing_parity() {
+    static const std::string hash = password_hash::hash_password("kfc-timing-parity-dummy");
+    return hash;
+}
+
 }  // namespace
 
 UserRepository::UserRepository(const std::string& db_path)
@@ -101,6 +108,24 @@ UserRepository::AuthOutcome UserRepository::authenticate(const std::string& user
     insert.bind(4, kStartingRating);
     insert.exec();
     return AuthOutcome{true, "", kStartingRating, true};
+}
+
+UserRepository::AuthOutcome UserRepository::verify_login(const std::string& username, const std::string& password) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    SQLite::Statement lookup(*db_, "SELECT password_hash, rating FROM users WHERE username = ?");
+    lookup.bind(1, username);
+
+    if (lookup.executeStep()) {
+        std::string stored = lookup.getColumn(0).getString();
+        int rating = lookup.getColumn(1).getInt();
+        if (!password_hash::verify_password(password, stored)) {
+            return AuthOutcome{false, "wrong_password", 0, false};
+        }
+        return AuthOutcome{true, "", rating, false};
+    }
+
+    password_hash::verify_password(password, dummy_hash_for_timing_parity());
+    return AuthOutcome{false, "no_such_user", 0, false};
 }
 
 std::optional<int> UserRepository::read_rating(const std::string& username) {

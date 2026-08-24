@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 #include <ixwebsocket/IXHttpClient.h>
 #include <ixwebsocket/IXNetSystem.h>
@@ -57,10 +58,22 @@ protected:
         port_ = next_port();
         users_ = std::make_unique<kfc::database::UserRepository>(fresh_db_path());
         server_ = std::make_unique<kfc::server::HttpApiServer>(port_, *users_, rooms_, sessions_, metrics_,
-                                                               auth_limiter_, logger_);
+                                                               auth_limiter_, logger_, trusted_proxies());
         ASSERT_TRUE(server_->listen());
         server_->start();
         base_url_ = "http://127.0.0.1:" + std::to_string(port_);
+    }
+
+    // Overridden by TrustedProxyHttpApiFixture below; empty here means every test client in this
+    // file talks to HttpApiServer as an untrusted, ordinary peer.
+    virtual std::unordered_set<std::string> trusted_proxies() { return {}; }
+
+    ix::HttpResponsePtr post_with_forwarded_for(const std::string& path, const std::string& body,
+                                                const std::string& forwarded_for) {
+        ix::HttpClient client;
+        ix::HttpRequestArgsPtr args = client.createRequest();
+        args->extraHeaders["X-Forwarded-For"] = forwarded_for;
+        return client.request(base_url_ + path, "POST", body, args);
     }
 
     void TearDown() override { server_->stop(); }
@@ -184,6 +197,56 @@ TEST_F(HttpApiFixture, TheEleventhAuthAttemptInAMinuteFromOneIpReturns429) {
 
     ix::HttpResponsePtr eleventh =
         post("/api/auth/login", json{{"username", "user0"}, {"password", "hunter2"}}.dump());
+
+    EXPECT_EQ(eleventh->statusCode, 429);
+}
+
+TEST_F(HttpApiFixture, AnUntrustedClientsForwardedForHeaderDoesNotEvadeTheRateLimit) {
+    // No trusted_proxies() here, so this test's own client (127.0.0.1) is not trusted -- an
+    // X-Forwarded-For it sends must be ignored, not used to spread requests across fake identities.
+    for (int i = 0; i < 10; ++i) {
+        post_with_forwarded_for("/api/auth/register",
+                                json{{"username", "user" + std::to_string(i)}, {"password", "hunter2"}}.dump(),
+                                "1.2.3." + std::to_string(i));
+    }
+
+    ix::HttpResponsePtr eleventh =
+        post_with_forwarded_for("/api/auth/login", json{{"username", "user0"}, {"password", "hunter2"}}.dump(),
+                                "1.2.3.99");
+
+    EXPECT_EQ(eleventh->statusCode, 429) << "every request above came from the same real peer (127.0.0.1), "
+                                            "which is not a trusted proxy";
+}
+
+// 127.0.0.1 is trusted here -- exactly what a kfc_server behind a same-host Caddy would configure.
+class TrustedProxyHttpApiFixture : public HttpApiFixture {
+protected:
+    std::unordered_set<std::string> trusted_proxies() override { return {"127.0.0.1"}; }
+};
+
+TEST_F(TrustedProxyHttpApiFixture, DistinctForwardedForValuesFromATrustedProxyGetSeparateBudgets) {
+    for (int i = 0; i < 10; ++i) {
+        ix::HttpResponsePtr response = post_with_forwarded_for(
+            "/api/auth/register", json{{"username", "user" + std::to_string(i)}, {"password", "hunter2"}}.dump(),
+            "9.9.9.9");
+        ASSERT_EQ(response->statusCode, 201) << "attempt " << i << " should still be within 9.9.9.9's own budget";
+    }
+    // 9.9.9.9's budget is exhausted, but a different forwarded client is unaffected.
+    ix::HttpResponsePtr other_client = post_with_forwarded_for(
+        "/api/auth/register", json{{"username", "someone_else"}, {"password", "hunter2"}}.dump(), "8.8.8.8");
+
+    EXPECT_EQ(other_client->statusCode, 201);
+}
+
+TEST_F(TrustedProxyHttpApiFixture, ATrustedProxysOwnForwardedClientCanStillBeRateLimited) {
+    for (int i = 0; i < 10; ++i) {
+        post_with_forwarded_for("/api/auth/register",
+                                json{{"username", "user" + std::to_string(i)}, {"password", "hunter2"}}.dump(),
+                                "9.9.9.9");
+    }
+
+    ix::HttpResponsePtr eleventh = post_with_forwarded_for(
+        "/api/auth/login", json{{"username", "user0"}, {"password", "hunter2"}}.dump(), "9.9.9.9");
 
     EXPECT_EQ(eleventh->statusCode, 429);
 }

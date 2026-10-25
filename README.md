@@ -1,5 +1,5 @@
 # Kung Fu Chess
-<img width="1237" height="747" alt="Screenshot 2026-10-22 125221" src="https://github.com/user-attachments/assets/969a3531-0636-4878-9419-24d6e6745bd8" />
+<img width="1253" height="793" alt="Screenshot 2026-10-22 125221" src="https://github.com/user-attachments/assets/88214ba0-5fdf-44b9-9c56-e3ed9a6e2700" />
 
 A real-time chess variant: **there are no turns.** Either player may move any of
 their own pieces at any moment, subject to a per-piece cooldown after each move.
